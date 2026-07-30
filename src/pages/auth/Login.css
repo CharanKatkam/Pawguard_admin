@@ -1,48 +1,212 @@
+/* =========================================
+   LOGIN CARD
+========================================= */
+
+.login-card {
+  width: 100%;
+  max-width: 390px;
+  background: #ffffff;
+  padding: 28px;
+  border-radius: 22px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+}
+
+/* =========================================
+   LOGO
+========================================= */
+
+.login-logo {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 14px;
+}
+
+/* =========================================
+   TITLE
+========================================= */
+
 .login-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1e293b;
-  margin-bottom: 8px;
+  margin: 0;
+  text-align: center;
+  font-size: 40px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -1px;
 }
 
 .login-subtitle {
+  margin: 8px 0 26px;
+  text-align: center;
   color: #64748b;
   font-size: 15px;
-  margin-bottom: 28px;
+  line-height: 1.5;
 }
-.login-card {
+
+/* =========================================
+   LABELS
+========================================= */
+
+.login-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+}
+
+/* =========================================
+   INPUTS
+========================================= */
+
+.login-card input[type="email"],
+.login-card input[type="password"],
+.login-card input[type="text"] {
   width: 100%;
-  max-width: 450px;
+  height: 52px;
+  padding: 0 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 15px;
+  transition: all 0.25s ease;
+  box-sizing: border-box;
+}
+
+.login-card input:focus {
+  outline: none;
   background: #ffffff;
-  padding: 48px;
-  border-radius: 20px;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
-  text-align: center;
+  border-color: #d4af37;
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15);
 }
-.login-logo {
-  width: 90px;
-  height: 90px;
-  margin-bottom: 16px;
+
+/* =========================================
+   PASSWORD
+========================================= */
+
+.password-wrapper {
+  position: relative;
 }
+
+.password-wrapper button {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #64748b;
+  transition: color 0.2s ease;
+}
+
+.password-wrapper button:hover {
+  color: #0f172a;
+}
+
+/* =========================================
+   BUTTON
+========================================= */
+
 .login-button {
   width: 100%;
-  padding: 14px;
-  margin-top: 24px;
-  background: #0f172a;
-  color: #ffffff;
+  height: 52px;
+  margin-top: 6px;
   border: none;
   border-radius: 10px;
-  font-size: 16px;
-  font-weight: 600;
+  background: linear-gradient(135deg, #111827, #1e293b);
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
   cursor: pointer;
-  transition: 0.3s;
+  transition: all 0.25s ease;
 }
 
 .login-button:hover {
-  background: #1e293b;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.18);
 }
-@media (max-width: 480px) {
+
+.login-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* =========================================
+   REMEMBER ME
+========================================= */
+
+.login-options {
+  margin-top: 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.login-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+}
+
+.login-options input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  margin-top: 1px;
+  accent-color: #d4af37;
+}
+
+.login-options a {
+  color: #d4af37;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.login-options a:hover {
+  color: #c59b19;
+  text-decoration: underline;
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 1024px) {
   .login-card {
-    padding: 32px 24px;
+    max-width: 400px;
+  }
+}
+
+@media (max-width: 768px) {
+  .login-card {
+    max-width: 95%;
+    padding: 24px;
+    border-radius: 18px;
+  }
+
+  .login-title {
+    font-size: 32px;
+  }
+
+  .login-subtitle {
+    font-size: 14px;
+  }
+
+  .login-options {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
   }
 }

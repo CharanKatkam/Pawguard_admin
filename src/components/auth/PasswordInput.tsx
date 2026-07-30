@@ -1,19 +1,30 @@
-const PasswordInput = () => {
+import { useState } from "react";
+import { FiEye, FiEyeOff } from "react-icons/fi";
+
+type PasswordInputProps = {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+};
+
+const PasswordInput = ({ value, onChange }: PasswordInputProps) => {
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
-    <input
-      type="password"
-      placeholder="Password"
-      style={{
-        width: "100%",
-        padding: "14px 16px",
-        marginTop: "0",
-        border: "1px solid #CBD5E1",
-        borderRadius: "10px",
-        fontSize: "15px",
-        boxSizing: "border-box",
-        outline: "none",
-      }}
-    />
+    <div className="password-wrapper">
+      <input
+        type={showPassword ? "text" : "password"}
+        placeholder="Enter your password"
+        value={value}
+        onChange={onChange}
+      />
+
+      <button
+        type="button"
+        onClick={() => setShowPassword(!showPassword)}
+      >
+        {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
+      </button>
+    </div>
   );
 };
 
