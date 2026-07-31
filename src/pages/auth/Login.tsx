@@ -1,18 +1,16 @@
-import logo from "../../assets/logo.png";
 import AuthLayout from "../../components/auth/AuthLayout";
 import LoginForm from "../../components/auth/LoginForm";
 import LoginCard from "../../components/auth/LoginCard";
+import PawGuardLogo from "../../components/common/PawGuardLogo";
 import "./Login.css";
 
 const Login = () => {
   return (
     <AuthLayout>
       <LoginCard>
-        <img
-          src={logo}
-          alt="PawGuard Logo"
-          className="login-logo"
-        />
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+          <PawGuardLogo size={48} badgeBg="#2563EB" iconColor="#FFFFFF" />
+        </div>
 
         <h1 className="login-title">PawGuard</h1>
 
@@ -21,20 +19,6 @@ const Login = () => {
         </p>
 
         <LoginForm />
-
-        <div className="login-options">
-          <label htmlFor="remember">
-            <input
-              id="remember"
-              type="checkbox"
-            />
-            Remember me
-          </label>
-
-          <a href="#">
-            Forgot Password?
-          </a>
-        </div>
       </LoginCard>
     </AuthLayout>
   );

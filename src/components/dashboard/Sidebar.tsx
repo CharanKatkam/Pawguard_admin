@@ -7,108 +7,210 @@ import {
   FaChartBar,
   FaCog,
   FaSignOutAlt,
+  FaAmbulance,
+  FaStethoscope,
+  FaBoxes,
+  FaCoins,
+  FaClipboardList,
+  FaShieldAlt,
+  FaCertificate,
 } from "react-icons/fa";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { getCurrentUserRole, getMenusForRole } from "../../utils/roleUtils";
+import type { RoleMenuItem } from "../../utils/roleUtils";
+import PawGuardLogo from "../common/PawGuardLogo";
 
-const Sidebar = () => {
-  const menus = [
-    { name: "Dashboard", path: "/dashboard", icon: <FaTachometerAlt /> },
-    { name: "Users", path: "/users", icon: <FaUsers /> },
-    { name: "Pets", path: "/pets", icon: <FaPaw /> },
-    { name: "Shelters", path: "/shelters", icon: <FaHome /> },
-    { name: "Adoptions", path: "/adoptions", icon: <FaHeart /> },
-    { name: "Reports", path: "/reports", icon: <FaChartBar /> },
-    { name: "Settings", path: "/settings", icon: <FaCog /> },
-  ];
+interface SidebarProps {
+  collapsed?: boolean;
+}
+
+const renderIcon = (iconType: RoleMenuItem["iconType"]) => {
+  switch (iconType) {
+    case "dashboard":
+      return <FaTachometerAlt />;
+    case "users":
+      return <FaUsers />;
+    case "pets":
+      return <FaPaw />;
+    case "shelters":
+      return <FaHome />;
+    case "adoptions":
+      return <FaHeart />;
+    case "reports":
+      return <FaChartBar />;
+    case "settings":
+      return <FaCog />;
+    case "ambulance":
+      return <FaAmbulance />;
+    case "medical":
+      return <FaStethoscope />;
+    case "inventory":
+      return <FaBoxes />;
+    case "finance":
+      return <FaCoins />;
+    case "heart":
+      return <FaHeart />;
+    case "tasks":
+      return <FaClipboardList />;
+    case "audit":
+      return <FaShieldAlt />;
+    case "certificates":
+      return <FaCertificate />;
+    default:
+      return <FaTachometerAlt />;
+  }
+};
+
+const Sidebar = ({ collapsed = false }: SidebarProps) => {
+  const navigate = useNavigate();
+  const currentRole = getCurrentUserRole();
+  const menus = getMenusForRole(currentRole);
+
+  const handleLogout = (e: React.MouseEvent) => {
+    e.preventDefault();
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    localStorage.removeItem("user");
+    navigate("/");
+  };
+
+  const sidebarWidth = collapsed ? "70px" : "260px";
 
   return (
     <aside
       style={{
-        width: "260px",
+        width: sidebarWidth,
         height: "100vh",
         background: "#0F172A",
-        color: "#fff",
+        color: "#FFFFFF",
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
-
-        /* Fixed Sidebar */
         position: "fixed",
         top: 0,
         left: 0,
         zIndex: 1000,
-
-        overflowY: "auto",
+        transition: "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+        boxShadow: "4px 0 25px rgba(15, 23, 42, 0.15)",
+        overflowX: "hidden",
       }}
     >
       <div>
-        {/* Logo */}
+        {/* Brand Header with Clean SVG Logo */}
         <div
           style={{
-            padding: "28px 30px",
-            fontSize: "34px",
-            fontWeight: "700",
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            height: "64px",
+            padding: collapsed ? "0 14px" : "0 22px",
+            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
             display: "flex",
             alignItems: "center",
-            gap: "10px",
+            justifyContent: collapsed ? "center" : "flex-start",
+            gap: "12px",
           }}
         >
-          🐾 PawGuard
+          <PawGuardLogo size={34} badgeBg="#2563EB" iconColor="#FFFFFF" />
+          {!collapsed && (
+            <span
+              style={{
+                fontSize: "20px",
+                fontWeight: 800,
+                color: "#FFFFFF",
+                letterSpacing: "-0.02em",
+                whiteSpace: "nowrap",
+              }}
+            >
+              PawGuard
+            </span>
+          )}
         </div>
 
-        {/* Menu */}
-        <div style={{ padding: "20px" }}>
+        {/* Role Permitted Navigation Items */}
+        <div
+          style={{
+            padding: collapsed ? "14px 8px" : "14px 14px",
+            overflowY: "auto",
+            maxHeight: "calc(100vh - 140px)",
+          }}
+        >
           {menus.map((menu) => (
             <NavLink
               key={menu.name}
               to={menu.path}
+              title={menu.name}
               style={({ isActive }) => ({
                 display: "flex",
                 alignItems: "center",
-                gap: "15px",
-                padding: "15px 18px",
-                marginBottom: "12px",
-                borderRadius: "12px",
+                gap: "12px",
+                padding: collapsed ? "12px" : "10px 14px",
+                justifyContent: collapsed ? "center" : "flex-start",
+                marginBottom: "4px",
+                borderRadius: "10px",
                 textDecoration: "none",
-                color: "#fff",
-                fontSize: "18px",
-                fontWeight: 500,
+                color: isActive ? "#FFFFFF" : "#94A3B8",
+                fontSize: "14px",
+                fontWeight: isActive ? 600 : 500,
                 background: isActive ? "#2563EB" : "transparent",
-                transition: "all .3s ease",
+                boxShadow: isActive ? "0 4px 12px rgba(37, 99, 235, 0.35)" : "none",
+                transition: "all 0.15s ease",
               })}
+              onMouseEnter={(e) => {
+                const target = e.currentTarget;
+                if (!target.classList.contains("active")) {
+                  target.style.background = "rgba(255, 255, 255, 0.06)";
+                  target.style.color = "#FFFFFF";
+                }
+              }}
+              onMouseLeave={(e) => {
+                const target = e.currentTarget;
+                if (!target.classList.contains("active")) {
+                  target.style.background = "transparent";
+                  target.style.color = "#94A3B8";
+                }
+              }}
             >
-              <span style={{ fontSize: "20px" }}>{menu.icon}</span>
-              {menu.name}
+              <span style={{ fontSize: "17px", display: "flex", alignItems: "center", flexShrink: 0 }}>
+                {renderIcon(menu.iconType)}
+              </span>
+              {!collapsed && (
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {menu.name}
+                </span>
+              )}
             </NavLink>
           ))}
         </div>
       </div>
 
-      {/* Logout */}
+      {/* Logout Footer */}
       <div
         style={{
-          padding: "20px",
-          borderTop: "1px solid rgba(255,255,255,0.08)",
+          padding: collapsed ? "14px 8px" : "14px",
+          borderTop: "1px solid rgba(255, 255, 255, 0.08)",
         }}
       >
-        <NavLink
-          to="/"
+        <a
+          href="/"
+          onClick={handleLogout}
+          title="Logout"
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "15px",
-            padding: "15px 18px",
-            borderRadius: "12px",
+            gap: "12px",
+            padding: collapsed ? "12px" : "10px 14px",
+            justifyContent: collapsed ? "center" : "flex-start",
+            borderRadius: "10px",
             textDecoration: "none",
             color: "#F87171",
-            fontSize: "18px",
-            fontWeight: 500,
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: "pointer",
+            background: "rgba(239, 68, 68, 0.08)",
+            transition: "all 0.15s ease",
           }}
         >
-          <FaSignOutAlt />
-          Logout
-        </NavLink>
+          <FaSignOutAlt size={16} style={{ flexShrink: 0 }} />
+          {!collapsed && <span>Logout</span>}
+        </a>
       </div>
     </aside>
   );

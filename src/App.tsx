@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Login from "./pages/auth/Login";
+import Unauthorized from "./pages/auth/Unauthorized";
 import Dashboard from "./pages/dashboard/Dashboard";
 import Users from "./pages/users/Users";
 import Pets from "./pages/pets/Pets";
@@ -8,25 +9,220 @@ import Shelters from "./pages/shelters/Shelters";
 import Adoptions from "./pages/adoptions/Adoptions";
 import Reports from "./pages/reports/Reports";
 import Settings from "./pages/settings/Settings";
+import MedicalRecords from "./pages/medical/MedicalRecords";
+import Inventory from "./pages/inventory/Inventory";
+import Finance from "./pages/finance/Finance";
+import AuditLogs from "./pages/audit/AuditLogs";
+import Certificates from "./pages/certificates/Certificates";
+import RolesPermissions from "./pages/permissions/RolesPermissions";
+
+import SuperAdminDashboard from "./pages/dashboard/roles/SuperAdminDashboard";
+import RescueCentreAdminDashboard from "./pages/dashboard/roles/RescueCentreAdminDashboard";
+import RescueCoordinatorDashboard from "./pages/dashboard/roles/RescueCoordinatorDashboard";
+import RescueAgentDashboard from "./pages/dashboard/roles/RescueAgentDashboard";
+import VeterinarianDashboard from "./pages/dashboard/roles/VeterinarianDashboard";
+import ShelterManagerDashboard from "./pages/dashboard/roles/ShelterManagerDashboard";
+import AdoptionCoordinatorDashboard from "./pages/dashboard/roles/AdoptionCoordinatorDashboard";
+import FosterCoordinatorDashboard from "./pages/dashboard/roles/FosterCoordinatorDashboard";
+import VolunteerCoordinatorDashboard from "./pages/dashboard/roles/VolunteerCoordinatorDashboard";
+import InventoryManagerDashboard from "./pages/dashboard/roles/InventoryManagerDashboard";
+import FinanceUserDashboard from "./pages/dashboard/roles/FinanceUserDashboard";
 
 import AdminLayout from "./layouts/AdminLayout";
+import ProtectedRoute from "./components/layout/ProtectedRoute/ProtectedRoute";
+import ScrollToTop from "./components/common/ScrollToTop";
 
 function App() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
-        {/* Login */}
+        {/* Public Login */}
         <Route path="/" element={<Login />} />
 
-        {/* Admin Routes */}
-        <Route element={<AdminLayout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/users" element={<Users />} />
-          <Route path="/pets" element={<Pets />} />
-          <Route path="/shelters" element={<Shelters />} />
-          <Route path="/adoptions" element={<Adoptions />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<Settings />} />
+        {/* 403 Unauthorized Error Page */}
+        <Route path="/403" element={<Unauthorized />} />
+
+        {/* Protected Admin Routes for Internal Staff Only */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AdminLayout />}>
+            {/* Dynamic Dashboard Entry */}
+            <Route path="/dashboard" element={<Dashboard />} />
+
+            {/* Role-Specific Protected Dashboards (Internal Staff Roles Only) */}
+            <Route element={<ProtectedRoute allowedRoles={["super_admin"]} />}>
+              <Route path="/dashboard/super-admin" element={<SuperAdminDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["rescue_centre_admin", "super_admin"]} />}>
+              <Route path="/dashboard/rescue-centre-admin" element={<RescueCentreAdminDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["rescue_coordinator", "super_admin"]} />}>
+              <Route path="/dashboard/rescue-coordinator" element={<RescueCoordinatorDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["rescue_agent", "super_admin"]} />}>
+              <Route path="/dashboard/rescue-agent" element={<RescueAgentDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["veterinarian", "super_admin"]} />}>
+              <Route path="/dashboard/veterinarian" element={<VeterinarianDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["shelter_manager", "super_admin"]} />}>
+              <Route path="/dashboard/shelter-manager" element={<ShelterManagerDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["adoption_coordinator", "super_admin"]} />}>
+              <Route path="/dashboard/adoption-coordinator" element={<AdoptionCoordinatorDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["foster_coordinator", "super_admin"]} />}>
+              <Route path="/dashboard/foster-coordinator" element={<FosterCoordinatorDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["volunteer_coordinator", "super_admin"]} />}>
+              <Route path="/dashboard/volunteer-coordinator" element={<VolunteerCoordinatorDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["inventory_manager", "super_admin"]} />}>
+              <Route path="/dashboard/inventory-manager" element={<InventoryManagerDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["finance_user", "super_admin"]} />}>
+              <Route path="/dashboard/finance" element={<FinanceUserDashboard />} />
+            </Route>
+
+            {/* Operational Module Routes with Strict Internal Staff RBAC Route Guards */}
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "shelter_manager",
+                    "foster_coordinator",
+                    "volunteer_coordinator",
+                  ]}
+                />
+              }
+            >
+              <Route path="/users" element={<Users />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "rescue_agent",
+                    "veterinarian",
+                    "shelter_manager",
+                    "adoption_coordinator",
+                    "foster_coordinator",
+                  ]}
+                />
+              }
+            >
+              <Route path="/pets" element={<Pets />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "shelter_manager",
+                    "inventory_manager",
+                  ]}
+                />
+              }
+            >
+              <Route path="/shelters" element={<Shelters />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute allowedRoles={["super_admin", "adoption_coordinator"]} />
+              }
+            >
+              <Route path="/adoptions" element={<Adoptions />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={["super_admin", "rescue_centre_admin", "veterinarian"]}
+                />
+              }
+            >
+              <Route path="/medical-records" element={<MedicalRecords />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "shelter_manager",
+                    "inventory_manager",
+                  ]}
+                />
+              }
+            >
+              <Route path="/inventory" element={<Inventory />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute allowedRoles={["super_admin", "finance_user"]} />
+              }
+            >
+              <Route path="/finance" element={<Finance />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "rescue_agent",
+                    "veterinarian",
+                    "shelter_manager",
+                    "adoption_coordinator",
+                    "foster_coordinator",
+                    "volunteer_coordinator",
+                    "finance_user",
+                  ]}
+                />
+              }
+            >
+              <Route path="/reports" element={<Reports />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["super_admin"]} />}>
+              <Route path="/roles-permissions" element={<RolesPermissions />} />
+              <Route path="/audit-logs" element={<AuditLogs />} />
+              <Route path="/settings" element={<Settings />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute allowedRoles={["super_admin", "veterinarian"]} />
+              }
+            >
+              <Route path="/certificates" element={<Certificates />} />
+            </Route>
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>
