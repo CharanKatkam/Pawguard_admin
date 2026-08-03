@@ -2,35 +2,28 @@ import api from "../api/axios";
 
 export interface UserPayload {
   id?: string;
-  name: string;
+  full_name?: string;
+  name?: string;
   email: string;
-  role: string;
+  role?: string;
+  roles?: string[];
   department?: string;
   status?: string;
   password?: string;
+  is_active?: boolean;
+}
+
+export interface RolePayload {
+  id?: string;
+  name: string;
+  description?: string;
+  permissions?: string[];
 }
 
 export const userService = {
+  // Super Admin - Users
   getUsers: async (params?: Record<string, unknown>) => {
-    try {
-      // Discovered live route: GET /api/v1/admin/users
-      const response = await api.get("/admin/users", { params });
-      return response.data;
-    } catch {
-      return {
-        data: [
-          { id: "USR-001", name: "Dr. John Smith", email: "vet@pawguard.com", role: "veterinarian", department: "Clinical Operations", status: "Active" },
-          { id: "USR-002", name: "Rahul Sharma", email: "shelter.manager@pawguard.com", role: "shelter_manager", department: "Shelter Care", status: "Active" },
-          { id: "USR-003", name: "Sarah Jenkins", email: "rescue.coordinator@pawguard.com", role: "rescue_coordinator", department: "Emergency Rescue", status: "Active" },
-          { id: "USR-004", name: "Alex Rivera", email: "rescue.agent@pawguard.com", role: "rescue_agent", department: "Field Dispatch", status: "Active" },
-          { id: "USR-005", name: "Priya Nair", email: "finance.user@pawguard.com", role: "finance_user", department: "Financial Governance", status: "Active" },
-        ],
-      };
-    }
-  },
-
-  getUserById: async (id: string) => {
-    const response = await api.get(`/admin/users/${id}`);
+    const response = await api.get("/admin/users", { params });
     return response.data;
   },
 
@@ -39,15 +32,53 @@ export const userService = {
     return response.data;
   },
 
-  updateUser: async (id: string, data: Partial<UserPayload>) => {
-    const response = await api.put(`/admin/users/${id}`, data);
+  getUserById: async (userId: string) => {
+    const response = await api.get(`/admin/users/${userId}`);
     return response.data;
   },
 
-  deleteUser: async (id: string) => {
-    const response = await api.delete(`/admin/users/${id}`);
+  updateUser: async (userId: string, data: Partial<UserPayload>) => {
+    const response = await api.put(`/admin/users/${userId}`, data);
+    return response.data;
+  },
+
+  deleteUser: async (userId: string) => {
+    const response = await api.delete(`/admin/users/${userId}`);
+    return response.data;
+  },
+
+  // Super Admin - Roles
+  getRoles: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/admin/roles", { params });
+    return response.data;
+  },
+
+  createRole: async (data: RolePayload) => {
+    const response = await api.post("/admin/roles", data);
+    return response.data;
+  },
+
+  getRoleById: async (roleId: string) => {
+    const response = await api.get(`/admin/roles/${roleId}`);
+    return response.data;
+  },
+
+  updateRole: async (roleId: string, data: Partial<RolePayload>) => {
+    const response = await api.put(`/admin/roles/${roleId}`, data);
+    return response.data;
+  },
+
+  deleteRole: async (roleId: string) => {
+    const response = await api.delete(`/admin/roles/${roleId}`);
+    return response.data;
+  },
+
+  // Super Admin - Permissions
+  getPermissions: async () => {
+    const response = await api.get("/admin/permissions");
     return response.data;
   },
 };
 
 export default userService;
+

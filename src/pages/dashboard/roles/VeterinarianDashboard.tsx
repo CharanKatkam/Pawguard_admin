@@ -3,34 +3,53 @@ import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaStethoscope, FaSyringe, FaFileMedical, FaExclamationCircle } from "react-icons/fa";
-import medicalService from "../../../services/medicalService";
+import dashboardService from "../../../services/dashboardService";
 
 const VeterinarianDashboard = () => {
   const [medicalRecords, setMedicalRecords] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchRecords = async () => {
-      try {
-        setLoading(true);
-        const res = await medicalService.getMedicalRecords();
-        if (res && Array.isArray(res.data)) {
-          setMedicalRecords(res.data);
-        }
-      } catch {
-        // Fallback handled by service
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchRecords();
   }, []);
 
+  const fetchRecords = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getVeterinarianDashboard();
+      console.log("Veterinarian Dashboard Response:", res);
+
+      const data = res?.data || res || {};
+      const recordsList = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.records)
+        ? data.records
+        : Array.isArray(data?.medicalRecords)
+        ? data.medicalRecords
+        : typeof data === "object" && Object.keys(data).length > 0
+        ? [data]
+        : [];
+
+      setMedicalRecords(recordsList);
+    } catch (err: any) {
+      console.error("Veterinarian Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load veterinarian medical records. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const stats = [
-    { title: "Critical ICU Patients", value: `${medicalRecords.filter((r) => r.status === "Critical ICU" || r.status === "Post-Op Recovery").length || 4} Patients`, trend: "High Priority", trendUp: false, color: "#EF4444", icon: <FaExclamationCircle /> },
-    { title: "Surgeries Today", value: "3 Scheduled", trend: "Operating Room A", color: "#2563EB", icon: <FaStethoscope /> },
-    { title: "Vaccinations Due", value: "14 Pets", trend: "Rabies & Parvo", color: "#F59E0B", icon: <FaSyringe /> },
-    { title: "Cleared Healthy", value: `${medicalRecords.filter((r) => r.status === "Completed" || r.status === "Discharged").length || 28} Pets`, trend: "Ready for Adoption", color: "#10B981", icon: <FaFileMedical /> },
+    { title: "Critical ICU Patients", value: loading ? "..." : `${medicalRecords.filter((r) => String(r.status).toLowerCase().includes("critical") || String(r.status).toLowerCase().includes("post-op")).length} Patients`, trend: "High Priority", color: "#EF4444", icon: <FaExclamationCircle /> },
+    { title: "Surgeries Today", value: loading ? "..." : `${medicalRecords.filter((r) => String(r.treatment || r.status).toLowerCase().includes("surgery")).length} Scheduled`, trend: "Operating Room", color: "#2563EB", icon: <FaStethoscope /> },
+    { title: "Vaccinations Due", value: loading ? "..." : `${medicalRecords.filter((r) => String(r.treatment || r.status).toLowerCase().includes("vaccin")).length} Pets`, trend: "Immunization", color: "#F59E0B", icon: <FaSyringe /> },
+    { title: "Cleared Healthy", value: loading ? "..." : `${medicalRecords.filter((r) => String(r.status).toLowerCase().includes("completed") || String(r.status).toLowerCase().includes("discharged") || String(r.status).toLowerCase().includes("healthy")).length} Pets`, trend: "Ready for Adoption", color: "#10B981", icon: <FaFileMedical /> },
   ];
 
   const medicalColumns = [
@@ -50,6 +69,24 @@ const VeterinarianDashboard = () => {
           Clinical healthcare suite: medical diagnoses, surgery logs, vaccination tracking, and intensive care management.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
+
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaStethoscope />} title="Record Medical Exam" subtitle="Log diagnosis & symptoms" color="#2563EB" onClick={() => alert("Medical Exam modal")} />

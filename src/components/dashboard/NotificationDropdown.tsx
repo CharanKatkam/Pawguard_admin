@@ -26,7 +26,7 @@ const SAMPLE_NOTIFICATIONS: Record<string, NotificationItem[]> = {
 
 const NotificationDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const role = getCurrentUserRole();
+  const role = getCurrentUserRole() || "super_admin";
   const initialList = SAMPLE_NOTIFICATIONS[role] || SAMPLE_NOTIFICATIONS.default;
   const [notifications, setNotifications] = useState<NotificationItem[]>(initialList);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -36,9 +36,15 @@ const NotificationDropdown = () => {
   useEffect(() => {
     const fetchLiveNotifications = async () => {
       try {
-        const res = await notificationService.getNotifications();
-        if (res && Array.isArray(res.data) && res.data.length > 0) {
-          setNotifications(res.data);
+        const response = await notificationService.getNotifications();
+        const list = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.data)
+          ? response.data
+          : [];
+
+        if (list.length > 0) {
+          setNotifications(list);
         }
       } catch {
         // Fallback to sample role notifications

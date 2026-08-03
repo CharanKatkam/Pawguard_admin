@@ -1,14 +1,52 @@
+import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaHome, FaPaw, FaUserPlus, FaCalendarCheck } from "react-icons/fa";
+import dashboardService from "../../../services/dashboardService";
 
 const FosterCoordinatorDashboard = () => {
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const fetchDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getFosterDashboard();
+      console.log("Foster Dashboard:", res);
+      const data = res?.data || res || {};
+      setDashboardData(data);
+    } catch (err: any) {
+      console.error("Foster Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load foster coordinator metrics. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const placementsList = Array.isArray(dashboardData?.placements)
+    ? dashboardData.placements
+    : Array.isArray(dashboardData?.fosters)
+    ? dashboardData.fosters
+    : Array.isArray(dashboardData)
+    ? dashboardData
+    : [];
+
   const stats = [
-    { title: "Active Foster Homes", value: "42 Families", trend: "+6 this month", color: "#2563EB", icon: <FaHome /> },
-    { title: "Pets in Foster Care", value: "28 Dogs", trend: "Temporary Care", color: "#10B981", icon: <FaPaw /> },
-    { title: "Foster Requests Queue", value: "14 Requests", trend: "Pending Match", color: "#F59E0B", icon: <FaUserPlus /> },
-    { title: "Follow-Up Inspections", value: "8 Scheduled", trend: "Active", color: "#6366F1", icon: <FaCalendarCheck /> },
+    { title: "Active Foster Homes", value: loading ? "..." : String(dashboardData?.active_homes ?? dashboardData?.activeHomes ?? "0"), trend: "Active Homes", color: "#2563EB", icon: <FaHome /> },
+    { title: "Pets in Foster Care", value: loading ? "..." : String(dashboardData?.pets_in_care ?? dashboardData?.petsInCare ?? placementsList.length), trend: "Temporary Care", color: "#10B981", icon: <FaPaw /> },
+    { title: "Foster Requests Queue", value: loading ? "..." : String(dashboardData?.pending_requests ?? dashboardData?.pendingRequests ?? "0"), trend: "Pending Match", color: "#F59E0B", icon: <FaUserPlus /> },
+    { title: "Follow-Up Inspections", value: loading ? "..." : String(dashboardData?.follow_ups ?? dashboardData?.followUps ?? "0"), trend: "Scheduled", color: "#6366F1", icon: <FaCalendarCheck /> },
   ];
 
   const columns = [
@@ -20,10 +58,14 @@ const FosterCoordinatorDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const data = [
-    { fosterId: "FST-101", family: "Mark & Sarah Stevens", pet: "Daisy (DOG-420)", duration: "2 Months", followUp: "2026-08-05", status: "Active" },
-    { fosterId: "FST-102", family: "Laura Palmer", pet: "Milo (DOG-435)", duration: "1 Month", followUp: "2026-08-02", status: "Active" },
-  ];
+  const formattedData = placementsList.map((item: any, idx: number) => ({
+    fosterId: item.fosterId || item.id || `FST-${101 + idx}`,
+    family: item.family || item.foster_name || item.user_name || "-",
+    pet: item.pet || item.dog_name || "-",
+    duration: item.duration || "-",
+    followUp: item.followUp || item.next_follow_up || "-",
+    status: item.status || "Active",
+  }));
 
   return (
     <div>
@@ -33,6 +75,23 @@ const FosterCoordinatorDashboard = () => {
           Foster care administration: onboard foster families, match animals with temporary homes, and schedule care follow-ups.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaUserPlus />} title="Onboard Foster Family" subtitle="Register new home" color="#2563EB" onClick={() => alert("Onboard Foster modal")} />
@@ -47,13 +106,17 @@ const FosterCoordinatorDashboard = () => {
       </div>
 
       <div className="soft-card" style={{ padding: "20px" }}>
-        <h3 style={{ margin: "0 0 16px", color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
-          Active Foster Placements & Follow-up Schedule
-        </h3>
-        <DataTable columns={columns} data={data} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+            Active Foster Placements & Follow-up Schedule
+          </h3>
+          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading foster data...</span>}
+        </div>
+        <DataTable columns={columns} data={formattedData} />
       </div>
     </div>
   );
 };
 
 export default FosterCoordinatorDashboard;
+

@@ -15,6 +15,106 @@ const LoginForm = () => {
 
   const navigate = useNavigate();
 
+  const resolveUserObject = (payload: unknown): any => {
+    if (!payload || typeof payload !== "object") return null;
+
+    const obj = payload as Record<string, unknown>;
+
+    if (obj.user && typeof obj.user === "object") {
+      return obj.user;
+    }
+
+    if (obj.data && typeof obj.data === "object" && (obj.data as Record<string, unknown>).user) {
+      return (obj.data as Record<string, unknown>).user;
+    }
+
+    return obj;
+  };
+
+  const unifyAuthPayload = (response: any) => {
+    if (!response) return {};
+    return response?.data?.data || response?.data || response;
+  };
+
+  const findAccessToken = (payload: any) => {
+    return (
+      payload?.access_token ||
+      payload?.token ||
+      payload?.auth_token ||
+      payload?.authToken ||
+      payload?.data?.access_token ||
+      payload?.data?.token
+    );
+  };
+
+  const findRefreshToken = (payload: any) => {
+    return payload?.refresh_token || payload?.refreshToken || payload?.data?.refresh_token || payload?.data?.refreshToken;
+  };
+
+  const authorizeUser = async (payload: any) => {
+    const userObj = resolveUserObject(payload);
+    if (!userObj || typeof userObj !== "object") {
+      return null;
+    }
+
+    return {
+      ...userObj,
+      email: userObj.email || userObj.email_address || userObj.username || undefined,
+    };
+  };
+
+  const completeLogin = async (authPayload: any) => {
+    const access_token = findAccessToken(authPayload);
+    const refresh_token = findRefreshToken(authPayload);
+
+    if (!access_token) {
+      throw new Error("Authentication response did not include an access token.");
+    }
+
+    localStorage.setItem("access_token", String(access_token));
+    if (refresh_token) {
+      localStorage.setItem("refresh_token", String(refresh_token));
+    }
+
+    let userObj = await authorizeUser(authPayload);
+
+    if (!userObj || (typeof userObj === "object" && !userObj.role && !userObj.roles && !userObj.role_name && !userObj.user_type && !userObj.type && !userObj.slug && !userObj.title && !userObj.name)) {
+      try {
+        const meResponse = await authService.getMe();
+        const meData = meResponse?.data || meResponse;
+        const resolvedMeUser = resolveUserObject(meData);
+        userObj = {
+          ...(typeof userObj === "object" ? userObj : {}),
+          ...(resolvedMeUser && typeof resolvedMeUser === "object" ? resolvedMeUser : meData),
+        };
+      } catch {
+        // fallback to existing values
+      }
+    }
+
+    if (!userObj || typeof userObj !== "object") {
+      userObj = { email: email.trim() };
+    } else if (!userObj.email) {
+      userObj.email = email.trim();
+    }
+
+    const userRole = normalizeRole(userObj);
+
+    if (!userRole) {
+      throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
+    }
+
+    localStorage.setItem("user", JSON.stringify(userObj));
+
+    if (rememberMe) {
+      localStorage.setItem("remember_email", email.trim());
+    } else {
+      localStorage.removeItem("remember_email");
+    }
+
+    navigate(getDashboardPathForRole(userRole), { replace: true });
+  };
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg(null);
@@ -32,71 +132,25 @@ const LoginForm = () => {
         password,
       });
 
-      // Handle backend structured response: { success: true, data: { access_token, user } }
-      const resData = response?.data?.data || response?.data || response;
-
-      // Extract access token
-      const access_token = resData?.access_token || response?.data?.access_token || `token_${Date.now()}`;
-      const refresh_token = resData?.refresh_token || response?.data?.refresh_token;
-
-      let userObj = resData?.user || response?.data?.user || (typeof resData === "object" && resData !== null ? resData : {});
-
-      // Ensure user object preserves email if not provided
-      if (typeof userObj === "object" && userObj !== null) {
-        if (!userObj.email && email) {
-          userObj = { ...userObj, email };
-        }
-      } else {
-        userObj = { email };
-      }
-
-      // Determine exact role and verify it is an internal operational staff role
-      const userRole = normalizeRole(
-        userObj?.role ||
-        userObj?.role_name ||
-        userObj?.user_type ||
-        userObj?.type ||
-        userObj?.email ||
-        email
-      );
-
-      if (!userRole) {
-        setErrorMsg("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
-        setLoading(false);
-        return;
-      }
-
-      localStorage.setItem("access_token", access_token);
-      if (refresh_token) {
-        localStorage.setItem("refresh_token", refresh_token);
-      }
-      localStorage.setItem("user", JSON.stringify(userObj));
-
-      if (rememberMe) {
-        localStorage.setItem("remember_email", email);
-      } else {
-        localStorage.removeItem("remember_email");
-      }
-
-      const targetPath = getDashboardPathForRole(userRole);
-      navigate(targetPath, { replace: true });
+      const payload = unifyAuthPayload(response);
+      await completeLogin(payload);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         if (!error.response) {
-          // Network Error / Origin Mismatch / CORS Preflight Error
           setErrorMsg(
-            `CORS / Origin Error: Please access the app via http://localhost:5173 to match backend CORS policy, or update backend CORSMiddleware origins.`
+            "CORS / Origin Error: Please access the app via http://localhost:5173 to match backend CORS policy, or update backend CORSMiddleware origins."
           );
         } else {
-          // Parse FastAPI error format: { success: false, error: { message: "Invalid email or password." } }
           const backendErr = error.response.data?.error;
           const msg =
             backendErr?.message ||
             error.response.data?.message ||
             error.response.data?.detail ||
             "Invalid email or password. Please check your credentials.";
-          setErrorMsg(msg);
+          setErrorMsg(String(msg));
         }
+      } else if (error instanceof Error) {
+        setErrorMsg(error.message);
       } else {
         setErrorMsg("Authentication failed. Please check your connection and try again.");
       }

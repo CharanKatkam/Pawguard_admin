@@ -3,34 +3,52 @@ import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaBoxes, FaPills, FaTruck, FaExclamationTriangle } from "react-icons/fa";
-import inventoryService from "../../../services/inventoryService";
+import dashboardService from "../../../services/dashboardService";
 
 const InventoryManagerDashboard = () => {
   const [inventoryData, setInventoryData] = useState<Record<string, unknown>[]>([]);
+  const [summaryData, setSummaryData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchInventory = async () => {
-      try {
-        setLoading(true);
-        const res = await inventoryService.getInventory();
-        if (res && Array.isArray(res.data)) {
-          setInventoryData(res.data);
-        }
-      } catch {
-        // Fallback handled by service
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchInventory();
   }, []);
 
+  const fetchInventory = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getInventoryDashboard();
+      console.log("Inventory Dashboard:", res);
+      const data = res?.data || res || {};
+      setSummaryData(data);
+
+      const itemsList = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+        ? data.items
+        : Array.isArray(data?.inventory)
+        ? data.inventory
+        : [];
+      setInventoryData(itemsList);
+    } catch (err: any) {
+      console.error("Inventory Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load inventory metrics. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const stats = [
-    { title: "Total Inventory Units", value: `${inventoryData.length || 1420} Items`, trend: "18 Categories", color: "#2563EB", icon: <FaBoxes /> },
-    { title: "Medicines & Vaccines", value: "680 Stock", trend: "Sufficient", color: "#10B981", icon: <FaPills /> },
-    { title: "Low Stock Alerts", value: "3 Items", trend: "Action Required", trendUp: false, color: "#EF4444", icon: <FaExclamationTriangle /> },
-    { title: "Active Vendors", value: "12 Suppliers", trend: "Verified", color: "#6366F1", icon: <FaTruck /> },
+    { title: "Total Inventory Units", value: loading ? "..." : String(summaryData?.total_items ?? summaryData?.totalItems ?? inventoryData.length), trend: "Categories", color: "#2563EB", icon: <FaBoxes /> },
+    { title: "Medicines & Vaccines", value: loading ? "..." : String(summaryData?.medicines_stock ?? summaryData?.medicinesStock ?? "0"), trend: "Medical Stock", color: "#10B981", icon: <FaPills /> },
+    { title: "Low Stock Alerts", value: loading ? "..." : String(summaryData?.low_stock_alerts ?? summaryData?.lowStockAlerts ?? "0"), trend: "Action Required", color: "#EF4444", icon: <FaExclamationTriangle /> },
+    { title: "Active Vendors", value: loading ? "..." : String(summaryData?.active_vendors ?? summaryData?.activeVendors ?? "0"), trend: "Suppliers", color: "#6366F1", icon: <FaTruck /> },
   ];
 
   const columns = [
@@ -42,6 +60,15 @@ const InventoryManagerDashboard = () => {
     { key: "supplier", title: "Supplier" },
   ];
 
+  const formattedInventory = inventoryData.map((item: any, idx: number) => ({
+    sku: item.sku || item.code || item.id || `SKU-${101 + idx}`,
+    itemName: item.itemName || item.name || item.item_name || "-",
+    category: item.category || "-",
+    stock: item.stock !== undefined ? item.stock : item.quantity !== undefined ? item.quantity : "-",
+    status: item.status || "In Stock",
+    supplier: item.supplier || item.vendor || "-",
+  }));
+
   return (
     <div>
       <div style={{ marginBottom: "20px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "20px 24px", borderRadius: "14px", color: "#fff" }}>
@@ -50,6 +77,24 @@ const InventoryManagerDashboard = () => {
           Inventory management: monitor pharmaceutical supplies, food kibble stock, medical equipment, and vendor purchase logs.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
+
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaBoxes />} title="Add Inventory Item" subtitle="Register new item" color="#2563EB" onClick={() => alert("Add Item modal")} />
@@ -70,7 +115,8 @@ const InventoryManagerDashboard = () => {
           </h3>
           {loading && <span style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600 }}>Syncing stock catalog...</span>}
         </div>
-        <DataTable columns={columns} data={inventoryData} />
+        <DataTable columns={columns} data={formattedInventory} />
+
       </div>
     </div>
   );

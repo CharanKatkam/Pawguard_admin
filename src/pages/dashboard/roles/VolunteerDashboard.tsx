@@ -1,13 +1,51 @@
+import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaClipboardList, FaClock, FaCalendarCheck, FaHeart } from "react-icons/fa";
+import dashboardService from "../../../services/dashboardService";
 
 const VolunteerDashboard = () => {
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const fetchDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getVolunteerDashboard();
+      console.log("Volunteer Personal Dashboard:", res);
+      const data = res?.data || res || {};
+      setDashboardData(data);
+    } catch (err: any) {
+      console.error("Volunteer Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load volunteer shift data. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const tasksList = Array.isArray(dashboardData?.tasks)
+    ? dashboardData.tasks
+    : Array.isArray(dashboardData?.shifts)
+    ? dashboardData.shifts
+    : Array.isArray(dashboardData)
+    ? dashboardData
+    : [];
+
   const stats = [
-    { title: "Assigned Tasks", value: "3 Tasks", trend: "This week", color: "#2563EB", icon: <FaClipboardList /> },
-    { title: "Volunteer Hours", value: "48 Hours", trend: "Total Contributed", color: "#10B981", icon: <FaClock /> },
-    { title: "Upcoming Events", value: "2 Events", trend: "Active", color: "#6366F1", icon: <FaCalendarCheck /> },
+    { title: "Assigned Tasks", value: loading ? "..." : String(dashboardData?.assigned_tasks ?? dashboardData?.assignedTasks ?? tasksList.length), trend: "Tasks", color: "#2563EB", icon: <FaClipboardList /> },
+    { title: "Volunteer Hours", value: loading ? "..." : `${dashboardData?.volunteer_hours ?? dashboardData?.volunteerHours ?? 0} Hours`, trend: "Contributed", color: "#10B981", icon: <FaClock /> },
+    { title: "Upcoming Events", value: loading ? "..." : String(dashboardData?.upcoming_events ?? dashboardData?.upcomingEvents ?? "0"), trend: "Events", color: "#6366F1", icon: <FaCalendarCheck /> },
   ];
 
   const columns = [
@@ -18,10 +56,13 @@ const VolunteerDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const data = [
-    { taskId: "TSK-101", title: "Shelter Dog Walking & Socialization", location: "North Haven Sanctuary", schedule: "Saturday 10:00 - 13:00", status: "Assigned" },
-    { taskId: "TSK-102", title: "Adoption Event Check-in Support", location: "Community Hall", schedule: "Sunday 11:00 - 15:00", status: "Confirmed" },
-  ];
+  const formattedData = tasksList.map((t: any, idx: number) => ({
+    taskId: t.taskId || t.id || `TSK-${101 + idx}`,
+    title: t.title || t.activity || "-",
+    location: t.location || t.facility || "-",
+    schedule: t.schedule || t.time || "-",
+    status: t.status || "Assigned",
+  }));
 
   return (
     <div>
@@ -31,6 +72,23 @@ const VolunteerDashboard = () => {
           Personal volunteer portal: view assigned shelter tasks, track shift hours, and sign up for community rescue events.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaClock />} title="Log Shift Hours" subtitle="Submit volunteer hours" color="#10B981" onClick={() => alert("Log Shift Hours modal")} />
@@ -44,13 +102,17 @@ const VolunteerDashboard = () => {
       </div>
 
       <div className="soft-card" style={{ padding: "20px" }}>
-        <h3 style={{ margin: "0 0 16px", color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
-          My Shift Schedule & Task Assignments
-        </h3>
-        <DataTable columns={columns} data={data} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+            My Shift Schedule & Task Assignments
+          </h3>
+          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading shift schedule...</span>}
+        </div>
+        <DataTable columns={columns} data={formattedData} />
       </div>
     </div>
   );
 };
 
 export default VolunteerDashboard;
+

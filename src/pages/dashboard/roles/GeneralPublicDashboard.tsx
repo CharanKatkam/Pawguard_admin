@@ -1,13 +1,51 @@
+import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaPaw, FaAmbulance, FaHeart, FaHome } from "react-icons/fa";
+import dashboardService from "../../../services/dashboardService";
 
 const GeneralPublicDashboard = () => {
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const fetchDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getStaffDashboard();
+      console.log("Public/Staff Dashboard:", res);
+      const data = res?.data || res || {};
+      setDashboardData(data);
+    } catch (err: any) {
+      console.error("Public Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load community portal data. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const dogsList = Array.isArray(dashboardData?.dogs)
+    ? dashboardData.dogs
+    : Array.isArray(dashboardData?.pets)
+    ? dashboardData.pets
+    : Array.isArray(dashboardData)
+    ? dashboardData
+    : [];
+
   const stats = [
-    { title: "Adoptable Dogs", value: "124 Ready", trend: "Browsing Open", color: "#2563EB", icon: <FaPaw /> },
-    { title: "Rescue Facilities", value: "24 Shelters", trend: "Open Visitors", color: "#10B981", icon: <FaHome /> },
-    { title: "Total Rescued", value: "342 Dogs", trend: "Saved this year", color: "#F59E0B", icon: <FaHeart /> },
+    { title: "Adoptable Dogs", value: loading ? "..." : String(dashboardData?.adoptable_dogs ?? dashboardData?.adoptableDogs ?? dogsList.length), trend: "Browsing Open", color: "#2563EB", icon: <FaPaw /> },
+    { title: "Rescue Facilities", value: loading ? "..." : String(dashboardData?.rescue_facilities ?? dashboardData?.rescueFacilities ?? "0"), trend: "Open Visitors", color: "#10B981", icon: <FaHome /> },
+    { title: "Total Rescued", value: loading ? "..." : String(dashboardData?.total_rescued ?? dashboardData?.totalRescued ?? "0"), trend: "Saved", color: "#F59E0B", icon: <FaHeart /> },
   ];
 
   const columns = [
@@ -19,10 +57,14 @@ const GeneralPublicDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const data = [
-    { petId: "DOG-415", name: "Bella", breed: "Golden Retriever Mix", age: "1 Year", shelter: "North Haven Shelter", status: "Adoptable" },
-    { petId: "DOG-420", name: "Daisy", breed: "Indie Dog", age: "6 Months", shelter: "Westside Care Centre", status: "Adoptable" },
-  ];
+  const formattedDogs = dogsList.map((dog: any, idx: number) => ({
+    petId: dog.petId || dog.registration_number || dog.id || `DOG-${415 + idx}`,
+    name: dog.name || "-",
+    breed: dog.breed || "-",
+    age: dog.age || dog.estimated_age || "-",
+    shelter: dog.shelter || dog.location || "-",
+    status: dog.status || "Adoptable",
+  }));
 
   return (
     <div>
@@ -32,6 +74,23 @@ const GeneralPublicDashboard = () => {
           Community portal: report stray animals in distress, browse adoptable dogs, and locate rescue shelters.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaAmbulance />} title="Report Stray in Distress" subtitle="Submit emergency location" color="#EF4444" onClick={() => alert("Report Distress modal")} />
@@ -45,13 +104,17 @@ const GeneralPublicDashboard = () => {
       </div>
 
       <div className="soft-card" style={{ padding: "20px" }}>
-        <h3 style={{ margin: "0 0 16px", color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
-          Featured Adoptable Dogs Looking for a Home
-        </h3>
-        <DataTable columns={columns} data={data} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+            Featured Adoptable Dogs Looking for a Home
+          </h3>
+          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading featured dogs...</span>}
+        </div>
+        <DataTable columns={columns} data={formattedDogs} />
       </div>
     </div>
   );
 };
 
 export default GeneralPublicDashboard;
+

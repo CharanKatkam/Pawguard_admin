@@ -28,27 +28,37 @@ export const extractRoleString = (input: unknown): string => {
 
   if (typeof input === "object" && input !== null) {
     const obj = input as Record<string, unknown>;
-    if (typeof obj.role === "string") return obj.role;
-    if (typeof obj.role_name === "string") return obj.role_name;
-    if (typeof obj.name === "string") return obj.name;
-    if (typeof obj.slug === "string") return obj.slug;
-    if (typeof obj.title === "string") return obj.title;
-    if (typeof obj.type === "string") return obj.type;
-    if (typeof obj.user_type === "string") return obj.user_type;
+
+    const candidateFields = [
+      "roles",
+      "role",
+      "role_name",
+      "user_type",
+      "type",
+      "slug",
+      "title",
+      "name",
+    ];
+
+    for (const field of candidateFields) {
+      if (obj[field] !== undefined) {
+        return extractRoleString(obj[field]);
+      }
+    }
   }
 
-  return String(input);
+  return "";
 };
 
 /**
   Normalizes any role input into an internal operational UserRole.
   Returns null for public-facing/unauthorized roles (Donor, General Public, Volunteer, Foster Family).
- */
+*/
 export const normalizeRole = (rawInput?: unknown): UserRole | null => {
   const str = extractRoleString(rawInput);
-  if (!str) return "super_admin";
+  if (!str) return null;
 
-  const lower = str.toLowerCase().trim();
+  const lower = String(str).toLowerCase().trim();
 
   // Explicitly reject public-facing roles
   if (
@@ -60,17 +70,6 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
     lower.includes("fosterfamily")
   ) {
     return null;
-  }
-
-  // 1. Super Admin
-  if (
-    lower.includes("super.admin") ||
-    lower.includes("super_admin") ||
-    lower.includes("superadmin") ||
-    lower.includes("super_administrator") ||
-    lower === "super"
-  ) {
-    return "super_admin";
   }
 
   // 2. Rescue Centre Admin
@@ -174,7 +173,7 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
     return "super_admin";
   }
 
-  return "super_admin";
+  return null;
 };
 
 export const isInternalRole = (rawInput?: unknown): boolean => {
@@ -192,22 +191,15 @@ export const getCurrentUser = (): User | null => {
   }
 };
 
-export const getCurrentUserRole = (): UserRole => {
+export const getCurrentUserRole = (): UserRole | null => {
   const user = getCurrentUser();
-  if (!user) return "super_admin";
+  if (!user) return null;
 
-  const role = normalizeRole(
-    user.role ||
-    user.role_name ||
-    user.user_type ||
-    user.type ||
-    user.email
-  );
-
-  return role || "super_admin";
+  return normalizeRole(user);
 };
 
-export const getDashboardPathForRole = (role?: string | UserRole): string => {
+
+export const getDashboardPathForRole = (role?: string | UserRole | null): string => {
   const normalized = normalizeRole(role) || "super_admin";
   switch (normalized) {
     case "super_admin":
@@ -237,8 +229,16 @@ export const getDashboardPathForRole = (role?: string | UserRole): string => {
   }
 };
 
-export const getRoleTitle = (role?: string | UserRole): string => {
-  const normalized = normalizeRole(role) || "super_admin";
+export const getRoleTitle = (role?: string | UserRole | null): string => {
+  if (!role) {
+    return "Unknown Role";
+  }
+
+  const normalized = normalizeRole(role);
+  if (!normalized) {
+    return "Unknown Role";
+  }
+
   switch (normalized) {
     case "super_admin":
       return "Super Administrator";
@@ -286,7 +286,7 @@ export interface RoleMenuItem {
     | "certificates";
 }
 
-export const getMenusForRole = (role?: string | UserRole): RoleMenuItem[] => {
+export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[] => {
   const normalized = normalizeRole(role) || "super_admin";
   const dashboardPath = getDashboardPathForRole(normalized);
 

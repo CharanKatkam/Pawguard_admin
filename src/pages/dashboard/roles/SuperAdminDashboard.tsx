@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import AdoptionChart from "../../../components/dashboard/AdoptionChart";
 import RecentActivities from "../../../components/dashboard/RecentActivities";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import dashboardService from "../../../services/dashboardService";
 import {
   FaUserPlus,
   FaDatabase,
@@ -25,17 +26,105 @@ import {
 
 const SuperAdminDashboard = () => {
   const [activeTab, setActiveTab] = useState<"users" | "rescues" | "animals" | "finance" | "audit">("users");
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // 8 Master Stat Cards
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await dashboardService.getDashboardStats("super_admin");
+      console.log("Dashboard Summary API Response:", response);
+      const data = response?.data || response || {};
+      setDashboardStats(data);
+    } catch (err: any) {
+      console.error("Dashboard Summary API Error:", err);
+      setError(err?.response?.data?.message || err?.message || "Failed to load summary metrics");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper function to format numbers or currency values cleanly
+  const formatStatValue = (val: any, fallback: string, isCurrency = false) => {
+    if (val === undefined || val === null) return fallback;
+    if (typeof val === "number") {
+      return isCurrency ? `$${val.toLocaleString()}` : val.toLocaleString();
+    }
+    return String(val);
+  };
+
+  // 8 Master Stat Cards dynamically populated from backend summary API response
   const stats = [
-    { title: "Total Users", value: "1,248", trend: "+12% this mo", color: "#2563EB", icon: <FaUsers />, description: "15 Active System Roles" },
-    { title: "Total Animals", value: "342", trend: "+24 cases", color: "#EF4444", icon: <FaPaw />, description: "Registered in system" },
-    { title: "Active Rescue Centres", value: "24", trend: "Full Coverage", color: "#10B981", icon: <FaBuilding />, description: "Regional operational hubs" },
-    { title: "Active Shelters", value: "18", trend: "78% Occupancy", color: "#6366F1", icon: <FaHome />, description: "Facility sanctuaries" },
-    { title: "Total Volunteers", value: "850", trend: "+28 new", color: "#F59E0B", icon: <FaUserPlus />, description: "Registered & verified" },
-    { title: "Pending Adoptions", value: "32", trend: "5 Priority", color: "#EC4899", icon: <FaHeart />, description: "Awaiting approval" },
-    { title: "Medical Cases", value: "48", trend: "18 Surgeries", color: "#8B5CF6", icon: <FaStethoscope />, description: "Clinical active watch" },
-    { title: "Total Donations", value: "$124,500", trend: "+18.4% YoY", color: "#14B8A6", icon: <FaCoins />, description: "Verified ledger" },
+    {
+      title: "Total Users",
+      value: loading ? "..." : formatStatValue(dashboardStats?.totalUsers ?? dashboardStats?.total_users, "1,248"),
+      trend: "+12% this mo",
+      color: "#2563EB",
+      icon: <FaUsers />,
+      description: "15 Active System Roles",
+    },
+    {
+      title: "Total Animals",
+      value: loading ? "..." : formatStatValue(dashboardStats?.totalAnimals ?? dashboardStats?.totalPets ?? dashboardStats?.total_pets ?? dashboardStats?.total_animals, "342"),
+      trend: "+24 cases",
+      color: "#EF4444",
+      icon: <FaPaw />,
+      description: "Registered in system",
+    },
+    {
+      title: "Active Rescue Centres",
+      value: loading ? "..." : formatStatValue(dashboardStats?.activeRescues ?? dashboardStats?.active_rescues ?? dashboardStats?.activeRescueCentres, "24"),
+      trend: "Full Coverage",
+      color: "#10B981",
+      icon: <FaBuilding />,
+      description: "Regional operational hubs",
+    },
+    {
+      title: "Active Shelters",
+      value: loading ? "..." : formatStatValue(dashboardStats?.activeShelters ?? dashboardStats?.active_shelters, "18"),
+      trend: dashboardStats?.shelterOccupancy ? `${dashboardStats.shelterOccupancy} Occupancy` : "78% Occupancy",
+      color: "#6366F1",
+      icon: <FaHome />,
+      description: "Facility sanctuaries",
+    },
+    {
+      title: "Total Volunteers",
+      value: loading ? "..." : formatStatValue(dashboardStats?.totalVolunteers ?? dashboardStats?.total_volunteers, "850"),
+      trend: "+28 new",
+      color: "#F59E0B",
+      icon: <FaUserPlus />,
+      description: "Registered & verified",
+    },
+    {
+      title: "Pending Adoptions",
+      value: loading ? "..." : formatStatValue(dashboardStats?.pendingAdoptions ?? dashboardStats?.pending_adoptions, "32"),
+      trend: "5 Priority",
+      color: "#EC4899",
+      icon: <FaHeart />,
+      description: "Awaiting approval",
+    },
+    {
+      title: "Medical Cases",
+      value: loading ? "..." : formatStatValue(dashboardStats?.medicalCases ?? dashboardStats?.medical_cases, "48"),
+      trend: "18 Surgeries",
+      color: "#8B5CF6",
+      icon: <FaStethoscope />,
+      description: "Clinical active watch",
+    },
+    {
+      title: "Total Donations",
+      value: loading ? "..." : formatStatValue(dashboardStats?.totalDonations ?? dashboardStats?.total_donations, "$124,500", true),
+      trend: "+18.4% YoY",
+      color: "#14B8A6",
+      icon: <FaCoins />,
+      description: "Verified ledger",
+    },
   ];
 
   // User Management Table Data
@@ -74,6 +163,43 @@ const SuperAdminDashboard = () => {
 
   return (
     <div>
+      {/* Error Banner if Summary API sync fails */}
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "12px 16px",
+            background: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            borderRadius: "10px",
+            color: "#991B1B",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "13px",
+            fontWeight: 500,
+          }}
+        >
+          <span>
+            <strong>Summary API Sync Warning:</strong> {error}
+          </span>
+          <button
+            onClick={loadDashboard}
+            style={{
+              background: "#EF4444",
+              color: "#FFFFFF",
+              border: "none",
+              padding: "6px 14px",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: 700,
+              fontSize: "12px",
+            }}
+          >
+            Retry Sync
+          </button>
+        </div>
+      )}
       {/* Comprehensive Hero Section */}
       <div
         style={{

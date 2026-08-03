@@ -63,7 +63,7 @@ const renderIcon = (iconType: RoleMenuItem["iconType"]) => {
 
 const Sidebar = ({ collapsed = false }: SidebarProps) => {
   const navigate = useNavigate();
-  const currentRole = getCurrentUserRole();
+  const currentRole = getCurrentUserRole() || "super_admin";
   const menus = getMenusForRole(currentRole);
 
   const handleLogout = (e: React.MouseEvent) => {

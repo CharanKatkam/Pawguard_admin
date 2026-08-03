@@ -3,34 +3,58 @@ import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaCoins, FaFileInvoiceDollar, FaHandHoldingHeart, FaChartLine } from "react-icons/fa";
-import financeService from "../../../services/financeService";
+import dashboardService from "../../../services/dashboardService";
 
 const FinanceUserDashboard = () => {
   const [financeData, setFinanceData] = useState<Record<string, unknown>[]>([]);
+  const [summaryData, setSummaryData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchFinance = async () => {
-      try {
-        setLoading(true);
-        const res = await financeService.getFinanceRecords();
-        if (res && Array.isArray(res.data)) {
-          setFinanceData(res.data);
-        }
-      } catch {
-        // Fallback handled by service
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchFinance();
   }, []);
 
+  const fetchFinance = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getFinanceDashboard();
+      console.log("Finance Dashboard:", res);
+      const data = res?.data || res || {};
+      setSummaryData(data);
+
+      const txList = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.transactions)
+        ? data.transactions
+        : Array.isArray(data?.records)
+        ? data.records
+        : [];
+      setFinanceData(txList);
+    } catch (err: any) {
+      console.error("Finance Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load finance metrics. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatCurrency = (val: any, fallback: string) => {
+    if (val === undefined || val === null) return fallback;
+    if (typeof val === "number") return `$${val.toLocaleString()}`;
+    return String(val);
+  };
+
   const stats = [
-    { title: "Total Revenue / Donations", value: "$124,500", trend: "+18.4% YoY", color: "#10B981", icon: <FaCoins /> },
-    { title: "Operational Expenses", value: "$48,200", trend: "Within budget", color: "#2563EB", icon: <FaFileInvoiceDollar /> },
-    { title: "Donor Contributions", value: "340 Donors", trend: "+14 this month", color: "#6366F1", icon: <FaHandHoldingHeart /> },
-    { title: "Net Reserve Balance", value: "$76,300", trend: "Healthy", color: "#F59E0B", icon: <FaChartLine /> },
+    { title: "Total Revenue / Donations", value: loading ? "..." : formatCurrency(summaryData?.total_donations ?? summaryData?.totalRevenue, "$0"), trend: "Donations", color: "#10B981", icon: <FaCoins /> },
+    { title: "Operational Expenses", value: loading ? "..." : formatCurrency(summaryData?.expenses ?? summaryData?.operationalExpenses, "$0"), trend: "Expenses", color: "#2563EB", icon: <FaFileInvoiceDollar /> },
+    { title: "Donor Contributions", value: loading ? "..." : String(summaryData?.donor_count ?? summaryData?.totalDonors ?? "0 Donors"), trend: "Donors", color: "#6366F1", icon: <FaHandHoldingHeart /> },
+    { title: "Net Reserve Balance", value: loading ? "..." : formatCurrency(summaryData?.net_balance ?? summaryData?.netBalance, "$0"), trend: "Balance", color: "#F59E0B", icon: <FaChartLine /> },
   ];
 
   const columns = [
@@ -42,6 +66,15 @@ const FinanceUserDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
+  const formattedTransactions = financeData.map((tx: any, idx: number) => ({
+    txId: tx.txId || tx.id || `TX-${901 + idx}`,
+    entity: tx.entity || tx.donor || tx.name || "-",
+    type: tx.type || tx.category || "Donation",
+    amount: tx.amount !== undefined ? `$${tx.amount}` : "-",
+    date: tx.date || tx.created_at || "-",
+    status: tx.status || "Completed",
+  }));
+
   return (
     <div>
       <div style={{ marginBottom: "20px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "20px 24px", borderRadius: "14px", color: "#fff" }}>
@@ -50,6 +83,24 @@ const FinanceUserDashboard = () => {
           Financial ledger control: track incoming public donations, audit shelter medical expenses, log bills, and generate balance sheets.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
+
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaHandHoldingHeart />} title="Record Donation" subtitle="Log sponsor contribution" color="#10B981" onClick={() => alert("Record Donation modal")} />
@@ -70,7 +121,8 @@ const FinanceUserDashboard = () => {
           </h3>
           {loading && <span style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600 }}>Syncing transactions...</span>}
         </div>
-        <DataTable columns={columns} data={financeData} />
+        <DataTable columns={columns} data={formattedTransactions} />
+
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { FaShieldAlt, FaArrowLeft, FaSignOutAlt } from "react-icons/fa";
 
 const Unauthorized = () => {
   const navigate = useNavigate();
-  const role = getCurrentUserRole();
+  const role = getCurrentUserRole() || "super_admin";
   const dashboardPath = getDashboardPathForRole(role);
   const roleTitle = getRoleTitle(role);
 

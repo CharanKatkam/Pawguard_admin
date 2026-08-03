@@ -15,7 +15,15 @@ const login = async (payload: LoginPayload) => {
     },
   };
 
-  const response = await axios.post("/auth/login", requestBody);
+  const response = await axios.post(
+    "/auth/login",
+    requestBody,
+    {
+      headers: {
+        "X-Client-Type": "web",
+      },
+    }
+  );
   return response;
 };
 

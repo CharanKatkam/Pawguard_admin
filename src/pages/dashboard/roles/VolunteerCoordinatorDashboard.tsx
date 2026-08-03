@@ -1,13 +1,51 @@
+import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaUsers, FaCalendarAlt, FaClipboardList, FaUserCheck } from "react-icons/fa";
+import dashboardService from "../../../services/dashboardService";
 
 const VolunteerCoordinatorDashboard = () => {
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const fetchDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await dashboardService.getVolunteerDashboard();
+      console.log("Volunteer Dashboard:", res);
+      const data = res?.data || res || {};
+      setDashboardData(data);
+    } catch (err: any) {
+      console.error("Volunteer Coordinator Dashboard Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load volunteer coordinator metrics. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const shiftsList = Array.isArray(dashboardData?.shifts)
+    ? dashboardData.shifts
+    : Array.isArray(dashboardData?.volunteers)
+    ? dashboardData.volunteers
+    : Array.isArray(dashboardData)
+    ? dashboardData
+    : [];
+
   const stats = [
-    { title: "Registered Volunteers", value: "850 Users", trend: "+28 this week", color: "#2563EB", icon: <FaUsers /> },
-    { title: "Active Shift Coverage", value: "92%", trend: "Optimal", color: "#10B981", icon: <FaUserCheck /> },
-    { title: "Community Events", value: "4 Upcoming", trend: "This month", color: "#F59E0B", icon: <FaCalendarAlt /> },
+    { title: "Registered Volunteers", value: loading ? "..." : String(dashboardData?.registered_volunteers ?? dashboardData?.totalVolunteers ?? shiftsList.length), trend: "Volunteers", color: "#2563EB", icon: <FaUsers /> },
+    { title: "Active Shift Coverage", value: loading ? "..." : `${dashboardData?.shift_coverage ?? dashboardData?.shiftCoverage ?? 100}%`, trend: "Coverage", color: "#10B981", icon: <FaUserCheck /> },
+    { title: "Community Events", value: loading ? "..." : String(dashboardData?.upcoming_events ?? dashboardData?.upcomingEvents ?? "0"), trend: "Upcoming", color: "#F59E0B", icon: <FaCalendarAlt /> },
   ];
 
   const columns = [
@@ -18,10 +56,13 @@ const VolunteerCoordinatorDashboard = () => {
     { key: "attendance", title: "Attendance" },
   ];
 
-  const data = [
-    { volunteerId: "VOL-501", name: "Emily Watson", assignedTask: "Adoption Drive Support", shiftTime: "Sat 09:00 - 13:00", attendance: "Confirmed" },
-    { volunteerId: "VOL-502", name: "Chris Hemsworth", assignedTask: "Shelter Dog Walking", shiftTime: "Sun 10:00 - 14:00", attendance: "Confirmed" },
-  ];
+  const formattedData = shiftsList.map((item: any, idx: number) => ({
+    volunteerId: item.volunteerId || item.id || `VOL-${501 + idx}`,
+    name: item.name || item.volunteer_name || "-",
+    assignedTask: item.assignedTask || item.task || item.title || "-",
+    shiftTime: item.shiftTime || item.schedule || item.time || "-",
+    attendance: item.attendance || item.status || "Confirmed",
+  }));
 
   return (
     <div>
@@ -31,6 +72,23 @@ const VolunteerCoordinatorDashboard = () => {
           Volunteer coordination suite: schedule shift rosters, track event attendance, assign shelter duties, and manage volunteers.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaUsers />} title="Onboard Volunteer" subtitle="Register new volunteer" color="#2563EB" onClick={() => alert("Onboard Volunteer modal")} />
@@ -45,13 +103,17 @@ const VolunteerCoordinatorDashboard = () => {
       </div>
 
       <div className="soft-card" style={{ padding: "20px" }}>
-        <h3 style={{ margin: "0 0 16px", color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
-          Volunteer Shift Schedule & Attendance Stream
-        </h3>
-        <DataTable columns={columns} data={data} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+            Volunteer Shift Schedule & Attendance Stream
+          </h3>
+          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading volunteer data...</span>}
+        </div>
+        <DataTable columns={columns} data={formattedData} />
       </div>
     </div>
   );
 };
 
 export default VolunteerCoordinatorDashboard;
+

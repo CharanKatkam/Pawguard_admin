@@ -17,6 +17,10 @@ const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
 
   const currentRole = getCurrentUserRole();
 
+  if (!currentRole) {
+    return <Navigate to="/" replace />;
+  }
+
   // If allowedRoles is specified, ensure user has authorization
   if (allowedRoles && allowedRoles.length > 0) {
     if (!allowedRoles.includes(currentRole)) {

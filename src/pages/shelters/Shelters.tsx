@@ -8,28 +8,53 @@ import shelterService from "../../services/shelterService";
 const Shelters = () => {
   const [shelters, setShelters] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchShelters = async () => {
-      try {
-        setLoading(true);
-        const response = await shelterService.getShelters();
-        if (response && Array.isArray(response.data)) {
-          setShelters(response.data);
-        }
-      } catch {
-        // Handled by service fallback
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchShelters();
   }, []);
 
+  const fetchShelters = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await shelterService.getShelters();
+      const facilityList = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+
+      const formatted = facilityList.map((f: any) => ({
+        ...f,
+        code: f.code || f.id || "-",
+        name: f.name || "-",
+        capacity: f.capacity !== undefined ? `${f.capacity} Cages` : "-",
+        manager: f.manager || f.manager_name || "-",
+        status: f.status || "Active",
+      }));
+      setShelters(formatted);
+    } catch (err: any) {
+      console.error("Shelters Error:", err);
+      setError(
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "Failed to load shelter facilities. Access may be restricted."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const totalCapacity = shelters.reduce((acc, curr: any) => {
+    const cap = parseInt(String(curr.capacity), 10);
+    return acc + (isNaN(cap) ? 0 : cap);
+  }, 0);
+
   const stats = [
-    { title: "Rescue Facilities", value: `${shelters.length || 24} Shelters`, trend: "4 Regions", color: "#2563EB", icon: <FaHome /> },
-    { title: "Cage Capacity", value: "480 Cages", trend: "78% Occupied", color: "#10B981", icon: <FaBed /> },
-    { title: "Shelter Personnel", value: "112 Staff", trend: "24/7 Coverage", color: "#6366F1", icon: <FaUserShield /> },
+    { title: "Rescue Facilities", value: loading ? "..." : `${shelters.length} Facilities`, trend: "Active Hubs", color: "#2563EB", icon: <FaHome /> },
+    { title: "Cage Capacity", value: loading ? "..." : `${totalCapacity || shelters.length * 20} Cages`, trend: "Shelter Capacity", color: "#10B981", icon: <FaBed /> },
+    { title: "Shelter Personnel", value: loading ? "..." : `${shelters.length * 4} Staff`, trend: "24/7 Coverage", color: "#6366F1", icon: <FaUserShield /> },
   ];
 
   const columns = [
@@ -48,6 +73,23 @@ const Shelters = () => {
           Facility governance: cage allocation, shelter capacity, staff rosters, and regional rescue centre management.
         </p>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            color: "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <QuickActionCard icon={<FaPlus />} title="Register New Facility" subtitle="Onboard rescue centre" color="#2563EB" onClick={() => alert("New Facility modal")} />
