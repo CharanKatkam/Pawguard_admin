@@ -5,7 +5,11 @@ type LoginCardProps = {
 };
 
 const LoginCard = ({ children }: LoginCardProps) => {
-  return <div className="login-card">{children}</div>;
+  return (
+    <div className="login-card">
+      {children}
+    </div>
+  );
 };
 
 export default LoginCard;

@@ -1,48 +1,226 @@
+/* =========================================
+   LOGIN CARD
+========================================= */
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: #ffffff;
+  padding: 32px;
+  border-radius: 24px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.16);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* =========================================
+   LOGO
+========================================= */
+
+.login-logo {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 14px;
+}
+
+/* =========================================
+   TITLE
+========================================= */
+
 .login-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1e293b;
-  margin-bottom: 8px;
+  margin: 0;
+  text-align: center;
+  font-size: 34px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
 }
 
 .login-subtitle {
-  color: #64748b;
-  font-size: 15px;
-  margin-bottom: 28px;
-}
-.login-card {
-  width: 100%;
-  max-width: 450px;
-  background: #ffffff;
-  padding: 48px;
-  border-radius: 20px;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+  margin: 6px 0 24px;
   text-align: center;
+  color: #64748b;
+  font-size: 14.5px;
+  line-height: 1.5;
 }
-.login-logo {
-  width: 90px;
-  height: 90px;
-  margin-bottom: 16px;
+
+/* =========================================
+   LABELS
+========================================= */
+
+.login-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #334155;
 }
+
+/* =========================================
+   INPUTS
+========================================= */
+
+.login-card input[type="email"],
+.login-card input[type="password"],
+.login-card input[type="text"] {
+  width: 100%;
+  height: 50px;
+  padding: 0 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+  font-size: 14.5px;
+  transition: all 0.25s ease;
+  box-sizing: border-box;
+}
+
+.login-card input:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+/* =========================================
+   PASSWORD
+========================================= */
+
+.password-wrapper {
+  position: relative;
+}
+
+.password-wrapper button {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #64748b;
+  transition: color 0.2s ease;
+}
+
+.password-wrapper button:hover {
+  color: #0f172a;
+}
+
+/* =========================================
+   BUTTON
+========================================= */
+
 .login-button {
   width: 100%;
-  padding: 14px;
-  margin-top: 24px;
-  background: #0f172a;
-  color: #ffffff;
+  height: 50px;
+  margin-top: 6px;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0f172a, #1e293b);
+  color: #ffffff;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.2px;
   cursor: pointer;
-  transition: 0.3s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .login-button:hover {
-  background: #1e293b;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.22);
 }
-@media (max-width: 480px) {
+
+.login-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* =========================================
+   REMEMBER ME
+========================================= */
+
+.login-options {
+  margin-top: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.login-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+}
+
+.login-options input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #f59e0b;
+}
+
+.login-options a {
+  color: #f59e0b;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.login-options a:hover {
+  color: #d97706;
+  text-decoration: underline;
+}
+
+/* =========================================
+   AUTH LEFT PANEL STAT CARDS
+========================================= */
+
+.auth-stat-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
+  box-shadow: 0 16px 32px -8px rgba(15, 23, 42, 0.45);
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 1024px) {
+  .auth-layout-container {
+    grid-template-columns: 1fr !important;
+  }
   .login-card {
-    padding: 32px 24px;
+    max-width: 420px;
+  }
+}
+
+@media (max-width: 768px) {
+  .login-card {
+    max-width: 95%;
+    padding: 24px;
+    border-radius: 20px;
+  }
+
+  .login-title {
+    font-size: 30px;
+  }
+
+  .login-subtitle {
+    font-size: 14px;
+  }
+
+  .login-options {
+    flex-direction: column;
+    gap: 14px;
+    align-items: flex-start;
   }
 }
