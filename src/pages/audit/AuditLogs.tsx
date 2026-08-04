@@ -1,13 +1,58 @@
+import { useState, useEffect } from "react";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
-import { FaShieldAlt, FaTerminal, FaUserLock, FaHistory } from "react-icons/fa";
+import { useToast } from "../../context/ToastContext";
+import { FaTerminal, FaCheckCircle, FaExclamationTriangle, FaUserLock } from "react-icons/fa";
+import auditService from "../../services/auditService";
 
 const AuditLogs = () => {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { addToast } = useToast();
+
+  const fetchLogs = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await auditService.getAuditLogs();
+      const list = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+      const formatted = list.map((item: any) => ({
+        id: item.id ?? item.log_id ?? item._id ?? "",
+        timestamp: item.timestamp ?? item.created_at ?? item.time ?? "",
+        user: item.user ?? item.username ?? item.admin ?? item.email ?? "",
+        role: item.role ?? item.role_name ?? "",
+        action: item.action ?? item.event ?? item.description ?? item.message ?? "",
+        ip: item.ip ?? item.ip_address ?? "",
+        status: item.status ?? item.result ?? "",
+      }));
+      setLogs(formatted);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to load audit logs.");
+      addToast("Failed to load audit logs", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const successful = logs.filter((l) => (l.status || "").toLowerCase() === "success").length;
+  const flagged = logs.length - successful;
+  const uniqueUsers = new Set(logs.map((l) => l.user).filter(Boolean)).size;
+
   const stats = [
-    { title: "Total System Events", value: "8,940", trend: "+320 today", color: "#2563EB", icon: <FaTerminal /> },
-    { title: "Security Audits", value: "100% Passed", trend: "0 Breaches", color: "#10B981", icon: <FaShieldAlt /> },
-    { title: "Admin Interventions", value: "42 Actions", trend: "Role Governance", color: "#6366F1", icon: <FaUserLock /> },
-    { title: "Retention Window", value: "365 Days", trend: "Compliant", color: "#F59E0B", icon: <FaHistory /> },
+    { title: "Total System Events", value: String(logs.length), trend: "Live audit stream", color: "#2563EB", icon: <FaTerminal /> },
+    { title: "Successful Events", value: String(successful), trend: "No failures logged", color: "#10B981", icon: <FaCheckCircle /> },
+    { title: "Flagged / Failed", value: String(flagged), trend: "Requires attention", color: "#F59E0B", icon: <FaExclamationTriangle /> },
+    { title: "Active Users Tracked", value: String(uniqueUsers), trend: "Unique accounts", color: "#6366F1", icon: <FaUserLock /> },
   ];
 
   const columns = [
@@ -17,13 +62,6 @@ const AuditLogs = () => {
     { key: "action", title: "System Event / Action" },
     { key: "ip", title: "IP Address" },
     { key: "status", title: "Status" },
-  ];
-
-  const data = [
-    { timestamp: "2026-07-30 17:40:12", user: "super.admin@pawguard.com", role: "Super Administrator", action: "Updated Role Permissions Matrix", ip: "192.168.1.45", status: "Success" },
-    { timestamp: "2026-07-30 16:15:00", user: "system_cron", role: "System Automation", action: "Automated Database Backup Run", ip: "127.0.0.1", status: "Success" },
-    { timestamp: "2026-07-30 14:02:44", user: "vet@pawguard.com", role: "Veterinarian", action: "Exported Clinical Medical Logs", ip: "192.168.1.88", status: "Success" },
-    { timestamp: "2026-07-30 11:30:19", user: "rescue.admin@pawguard.com", role: "Rescue Centre Admin", action: "Onboarded Rescue Facility #12", ip: "10.0.4.12", status: "Success" },
   ];
 
   return (
@@ -45,7 +83,18 @@ const AuditLogs = () => {
         <h3 style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
           Real-Time Audit Event Stream
         </h3>
-        <DataTable columns={columns} data={data} onView={(r) => alert(`Audit Detail: ${r.action}`)} />
+        {loading ? (
+          <p style={{ color: "#64748B" }}>Loading audit logs…</p>
+        ) : error ? (
+          <p style={{ color: "#EF4444" }}>{error}</p>
+        ) : logs.length === 0 ? (
+          <p style={{ color: "#64748B" }}>No audit events found.</p>
+        ) : (
+          <DataTable
+            columns={columns}
+            data={logs}
+          />
+        )}
       </div>
     </div>
   );

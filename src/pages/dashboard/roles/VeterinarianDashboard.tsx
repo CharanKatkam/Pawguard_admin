@@ -1,25 +1,23 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaStethoscope, FaSyringe, FaFileMedical, FaExclamationCircle } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const VeterinarianDashboard = () => {
+  const navigate = useNavigate();
   const [medicalRecords, setMedicalRecords] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchRecords();
-  }, []);
 
   const fetchRecords = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getVeterinarianDashboard();
-      console.log("Veterinarian Dashboard Response:", res);
 
       const data = res?.data || res || {};
       const recordsList = Array.isArray(data)
@@ -44,6 +42,12 @@ const VeterinarianDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchRecords();
+  }, []);
+
+  useDataSync(fetchRecords);
 
   const stats = [
     { title: "Critical ICU Patients", value: loading ? "..." : `${medicalRecords.filter((r) => String(r.status).toLowerCase().includes("critical") || String(r.status).toLowerCase().includes("post-op")).length} Patients`, trend: "High Priority", color: "#EF4444", icon: <FaExclamationCircle /> },
@@ -89,9 +93,9 @@ const VeterinarianDashboard = () => {
 
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaStethoscope />} title="Record Medical Exam" subtitle="Log diagnosis & symptoms" color="#2563EB" onClick={() => alert("Medical Exam modal")} />
-        <QuickActionCard icon={<FaSyringe />} title="Log Vaccination" subtitle="Administer vaccine booster" color="#10B981" onClick={() => alert("Log Vaccination modal")} />
-        <QuickActionCard icon={<FaFileMedical />} title="Issue Certificate" subtitle="Medical health clearance" color="#6366F1" onClick={() => alert("Medical Certificate modal")} />
+        <QuickActionCard icon={<FaStethoscope />} title="Record Medical Exam" subtitle="Log diagnosis & symptoms" color="#2563EB" onClick={() => navigate("/medical-records")} />
+        <QuickActionCard icon={<FaSyringe />} title="Log Vaccination" subtitle="Administer vaccine booster" color="#10B981" onClick={() => navigate("/medical-records")} />
+        <QuickActionCard icon={<FaFileMedical />} title="Issue Certificate" subtitle="Medical health clearance" color="#6366F1" onClick={() => navigate("/certificates")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

@@ -37,7 +37,12 @@ export interface NotificationItem {
   id: string;
   title: string;
   message: string;
-  time: string;
-  type: "emergency" | "medical" | "adoption" | "system" | "volunteer";
+  time?: string;
+  created_at?: string;
+  type: "emergency" | "medical" | "adoption" | "system" | "volunteer" | "user_created" | "user_updated" | "user_deleted" | "shelter_added" | "animal_registered" | "animal_updated" | "adoption_submitted" | "adoption_approved" | "adoption_rejected" | "inventory_changed" | "medical_updated" | "certificate_generated" | "finance_action" | "role_permission_changed";
   read: boolean;
+  user_id?: string;
+  role_required?: string[];
+  event_type?: string;
+  data?: Record<string, unknown>;
 }

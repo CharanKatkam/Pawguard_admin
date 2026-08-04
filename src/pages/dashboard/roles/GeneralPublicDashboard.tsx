@@ -1,29 +1,26 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaPaw, FaAmbulance, FaHeart, FaHome } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const GeneralPublicDashboard = () => {
+  const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getStaffDashboard();
-      console.log("Public/Staff Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Public Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +30,12 @@ const GeneralPublicDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const dogsList = Array.isArray(dashboardData?.dogs)
     ? dashboardData.dogs
@@ -57,13 +60,13 @@ const GeneralPublicDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const formattedDogs = dogsList.map((dog: any, idx: number) => ({
-    petId: dog.petId || dog.registration_number || dog.id || `DOG-${415 + idx}`,
-    name: dog.name || "-",
-    breed: dog.breed || "-",
-    age: dog.age || dog.estimated_age || "-",
-    shelter: dog.shelter || dog.location || "-",
-    status: dog.status || "Adoptable",
+  const formattedDogs = dogsList.map((dog: any) => ({
+    petId: dog.id ?? dog.pet_id ?? "",
+    name: dog.name ?? "",
+    breed: dog.breed ?? "",
+    age: dog.estimated_age ?? dog.age ?? "",
+    shelter: dog.shelter ?? dog.location ?? "",
+    status: dog.status ?? "",
   }));
 
   return (
@@ -93,8 +96,8 @@ const GeneralPublicDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaAmbulance />} title="Report Stray in Distress" subtitle="Submit emergency location" color="#EF4444" onClick={() => alert("Report Distress modal")} />
-        <QuickActionCard icon={<FaHeart />} title="Submit Adoption Application" subtitle="Apply to adopt a pet" color="#2563EB" onClick={() => alert("Apply to Adopt modal")} />
+        <QuickActionCard icon={<FaAmbulance />} title="Report Stray in Distress" subtitle="Submit emergency location" color="#EF4444" onClick={() => navigate("/requests")} />
+        <QuickActionCard icon={<FaHeart />} title="Submit Adoption Application" subtitle="Apply to adopt a pet" color="#2563EB" onClick={() => navigate("/adoptions")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

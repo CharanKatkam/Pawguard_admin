@@ -2,13 +2,36 @@ import { useState, useEffect } from "react";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
+import Modal from "../../components/common/Modal";
+import { useToast } from "../../context/ToastContext";
 import { FaHome, FaBed, FaUserShield, FaPlus } from "react-icons/fa";
 import shelterService from "../../services/shelterService";
+import { notifyDataChanged } from "../../utils/dataSync";
 
 const Shelters = () => {
   const [shelters, setShelters] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const { addToast } = useToast();
+
+  // Modals state
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [isCageModalOpen, setIsCageModalOpen] = useState(false);
+
+
+  // Form states
+  const [registerForm, setRegisterForm] = useState({
+    name: "",
+    location: "Main District Hub",
+    capacity: 25,
+  });
+
+  const [cageForm, setCageForm] = useState({
+    kennelId: "KENNEL-101",
+    dogId: "DOG-101",
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     fetchShelters();
@@ -27,15 +50,14 @@ const Shelters = () => {
 
       const formatted = facilityList.map((f: any) => ({
         ...f,
-        code: f.code || f.id || "-",
-        name: f.name || "-",
-        capacity: f.capacity !== undefined ? `${f.capacity} Cages` : "-",
-        manager: f.manager || f.manager_name || "-",
-        status: f.status || "Active",
+        code: f.code || f.id || "",
+        name: f.name || "",
+        capacity: f.capacity !== undefined ? `${f.capacity} Cages` : "",
+        manager: f.manager || f.manager_name || "",
+        status: f.status || "",
       }));
       setShelters(formatted);
     } catch (err: any) {
-      console.error("Shelters Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -43,6 +65,48 @@ const Shelters = () => {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRegisterFacility = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!registerForm.name) {
+      addToast("Facility name is required", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await shelterService.createShelter({
+        name: registerForm.name,
+        location: registerForm.location,
+        capacity: Number(registerForm.capacity),
+      });
+      addToast(`Facility "${registerForm.name}" registered successfully!`, "success");
+      setIsRegisterModalOpen(false);
+      setRegisterForm({ name: "", location: "Main District Hub", capacity: 25 });
+      fetchShelters();
+      notifyDataChanged();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to register facility.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAssignCage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsSubmitting(true);
+      await shelterService.assignDogToKennel(cageForm.kennelId, cageForm.dogId);
+      addToast(`Assigned dog ${cageForm.dogId} to Kennel ${cageForm.kennelId}!`, "success");
+      setIsCageModalOpen(false);
+      notifyDataChanged();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Cage allocation failed.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -92,8 +156,20 @@ const Shelters = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="Register New Facility" subtitle="Onboard rescue centre" color="#2563EB" onClick={() => alert("New Facility modal")} />
-        <QuickActionCard icon={<FaBed />} title="Manage Cage Allocation" subtitle="Assign cages & kennels" color="#10B981" onClick={() => alert("Cage Allocation modal")} />
+        <QuickActionCard
+          icon={<FaPlus />}
+          title="Register New Facility"
+          subtitle="Onboard rescue centre"
+          color="#2563EB"
+          onClick={() => setIsRegisterModalOpen(true)}
+        />
+        <QuickActionCard
+          icon={<FaBed />}
+          title="Manage Cage Allocation"
+          subtitle="Assign cages & kennels"
+          color="#10B981"
+          onClick={() => setIsCageModalOpen(true)}
+        />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -109,8 +185,131 @@ const Shelters = () => {
           </h3>
           {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading facilities...</span>}
         </div>
-        <DataTable columns={columns} data={shelters} onView={(r) => alert(`Shelter: ${r.name}`)} />
+        <DataTable
+          columns={columns}
+          data={shelters}
+          onEdit={async (r) => {
+            await shelterService.createShelter(r);
+            fetchShelters();
+          }}
+          onDelete={async (r) => {
+            await shelterService.createShelter({ ...r, status: "Inactive" });
+            fetchShelters();
+          }}
+        />
       </div>
+
+      {/* Register New Facility Modal */}
+      <Modal
+        isOpen={isRegisterModalOpen}
+        onClose={() => setIsRegisterModalOpen(false)}
+        title="Register New Rescue Facility"
+      >
+        <form onSubmit={handleRegisterFacility} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Facility Name *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. North Haven Rescue Centre"
+              value={registerForm.name}
+              onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Location / Address</label>
+            <input
+              type="text"
+              placeholder="e.g. Sector 4, North Campus"
+              value={registerForm.location}
+              onChange={(e) => setRegisterForm({ ...registerForm, location: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Total Cage Capacity</label>
+            <input
+              type="number"
+              min="1"
+              value={registerForm.capacity}
+              onChange={(e) => setRegisterForm({ ...registerForm, capacity: Number(e.target.value) })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button
+              type="button"
+              onClick={() => setIsRegisterModalOpen(false)}
+              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+            >
+              {isSubmitting ? "Registering..." : "Register Facility"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Cage Allocation Modal */}
+      <Modal
+        isOpen={isCageModalOpen}
+        onClose={() => setIsCageModalOpen(false)}
+        title="Manage Cage & Kennel Allocation"
+      >
+        <form onSubmit={handleAssignCage} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Kennel ID *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. KENNEL-104"
+              value={cageForm.kennelId}
+              onChange={(e) => setCageForm({ ...cageForm, kennelId: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Animal ID to Assign *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. DOG-402"
+              value={cageForm.dogId}
+              onChange={(e) => setCageForm({ ...cageForm, dogId: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button
+              type="button"
+              onClick={() => setIsCageModalOpen(false)}
+              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+            >
+              {isSubmitting ? "Assigning..." : "Assign Cage"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+
     </div>
   );
 };

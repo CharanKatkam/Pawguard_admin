@@ -1,4 +1,5 @@
 import api from "../api/axios";
+import { publishActionEvent } from "../utils/eventSystem";
 
 export interface ShelterFacilityPayload {
   id?: string;
@@ -29,13 +30,25 @@ export interface KennelPayload {
 export const shelterService = {
   // GET /shelter/facilities
   getShelters: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/shelter/facilities", { params });
-    return response.data;
+    try {
+      const response = await api.get("/shelter/facilities", { params });
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return { data: [], total: 0 };
+      throw err;
+    }
   },
 
   // POST /shelter/facilities
   createShelter: async (data: ShelterFacilityPayload) => {
     const response = await api.post("/shelter/facilities", data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "create",
+      title: "New Shelter Facility Added",
+      message: `Facility ${data.name} created with capacity ${data.capacity || 50}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager"],
+    });
     return response.data;
   },
 
@@ -53,8 +66,13 @@ export const shelterService = {
 
   // GET /shelter/facilities/{facility_id}/sections
   getFacilitySections: async (facilityId: string) => {
-    const response = await api.get(`/shelter/facilities/${facilityId}/sections`);
-    return response.data;
+    try {
+      const response = await api.get(`/shelter/facilities/${facilityId}/sections`);
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return { data: [], total: 0 };
+      throw err;
+    }
   },
 
   // POST /shelter/sections/{section_id}/kennels
@@ -65,8 +83,13 @@ export const shelterService = {
 
   // GET /shelter/sections/{section_id}/kennels
   getSectionKennels: async (sectionId: string) => {
-    const response = await api.get(`/shelter/sections/${sectionId}/kennels`);
-    return response.data;
+    try {
+      const response = await api.get(`/shelter/sections/${sectionId}/kennels`);
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return { data: [], total: 0 };
+      throw err;
+    }
   },
 
   // POST /shelter/kennels/{kennel_id}/assign/{dog_id}

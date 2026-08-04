@@ -7,17 +7,19 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
+import type { AdoptionChartPoint } from "../../utils/adoptionStats";
 
-const data = [
-  { month: "Jan", adoptions: 12 },
-  { month: "Feb", adoptions: 18 },
-  { month: "Mar", adoptions: 24 },
-  { month: "Apr", adoptions: 20 },
-  { month: "May", adoptions: 30 },
-  { month: "Jun", adoptions: 36 },
-];
+interface AdoptionChartProps {
+  data?: AdoptionChartPoint[];
+}
 
-const AdoptionChart = () => {
+const AdoptionChart = ({ data = [] }: AdoptionChartProps) => {
+  const total = data.reduce((sum, p) => sum + p.adoptions, 0);
+  const thisMonth = data.length ? data[data.length - 1].adoptions : 0;
+  const lastMonth = data.length > 1 ? data[data.length - 2].adoptions : 0;
+  const growthPct =
+    lastMonth > 0 ? Math.round(((thisMonth - lastMonth) / lastMonth) * 100) : thisMonth > 0 ? 100 : 0;
+
   return (
     <div
       style={{
@@ -39,40 +41,14 @@ const AdoptionChart = () => {
         }}
       >
         <div>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "24px",
-              color: "#0F172A",
-            }}
-          >
+          <h2 style={{ margin: 0, fontSize: "24px", color: "#0F172A" }}>
             Monthly Adoption Analytics
           </h2>
 
-          <p
-            style={{
-              marginTop: "6px",
-              color: "#64748B",
-              fontSize: "15px",
-            }}
-          >
-            Adoption trends over the last six months
+          <p style={{ marginTop: "6px", color: "#64748B", fontSize: "15px" }}>
+            Live adoption trends over the last {data.length || 6} months
           </p>
         </div>
-
-        <select
-          style={{
-            padding: "10px 16px",
-            borderRadius: "10px",
-            border: "1px solid #CBD5E1",
-            outline: "none",
-            cursor: "pointer",
-          }}
-        >
-          <option>Monthly</option>
-          <option>Weekly</option>
-          <option>Yearly</option>
-        </select>
       </div>
 
       {/* Summary */}
@@ -85,116 +61,89 @@ const AdoptionChart = () => {
         }}
       >
         <div>
-          <p
-            style={{
-              margin: 0,
-              color: "#64748B",
-              fontSize: "14px",
-            }}
-          >
+          <p style={{ margin: 0, color: "#64748B", fontSize: "14px" }}>
             This Month
           </p>
-
-          <h3
-            style={{
-              margin: "6px 0 0",
-              color: "#16A34A",
-              fontSize: "30px",
-            }}
-          >
-            36
+          <h3 style={{ margin: "6px 0 0", color: "#16A34A", fontSize: "30px" }}>
+            {thisMonth}
           </h3>
         </div>
 
         <div>
-          <p
-            style={{
-              margin: 0,
-              color: "#64748B",
-              fontSize: "14px",
-            }}
-          >
+          <p style={{ margin: 0, color: "#64748B", fontSize: "14px" }}>
             Last Month
           </p>
-
-          <h3
-            style={{
-              margin: "6px 0 0",
-              color: "#2563EB",
-              fontSize: "30px",
-            }}
-          >
-            30
+          <h3 style={{ margin: "6px 0 0", color: "#2563EB", fontSize: "30px" }}>
+            {lastMonth}
           </h3>
         </div>
 
         <div>
-          <p
-            style={{
-              margin: 0,
-              color: "#64748B",
-              fontSize: "14px",
-            }}
-          >
+          <p style={{ margin: 0, color: "#64748B", fontSize: "14px" }}>
             Growth
           </p>
+          <h3 style={{ margin: "6px 0 0", color: "#F59E0B", fontSize: "30px" }}>
+            {thisMonth === 0 && lastMonth === 0 ? "0%" : `${growthPct >= 0 ? "+" : ""}${growthPct}%`}
+          </h3>
+        </div>
 
-          <h3
-            style={{
-              margin: "6px 0 0",
-              color: "#F59E0B",
-              fontSize: "30px",
-            }}
-          >
-            +20%
+        <div>
+          <p style={{ margin: 0, color: "#64748B", fontSize: "14px" }}>
+            Total (Period)
+          </p>
+          <h3 style={{ margin: "6px 0 0", color: "#0F172A", fontSize: "30px" }}>
+            {total}
           </h3>
         </div>
       </div>
 
       {/* Chart */}
-      <div
-        style={{
-          width: "100%",
-          height: 330,
-        }}
-      >
-        <ResponsiveContainer>
-          <LineChart data={data}>
-            <CartesianGrid
-              stroke="#E2E8F0"
-              strokeDasharray="5 5"
-            />
+      <div style={{ width: "100%", height: 330 }}>
+        {data.length === 0 ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "#94A3B8",
+              fontSize: "15px",
+            }}
+          >
+            No adoption records yet. New adoptions will appear here.
+          </div>
+        ) : (
+          <ResponsiveContainer>
+            <LineChart data={data}>
+              <CartesianGrid stroke="#E2E8F0" strokeDasharray="5 5" />
 
-            <XAxis
-              dataKey="month"
-              tick={{ fill: "#64748B" }}
-              axisLine={false}
-              tickLine={false}
-            />
+              <XAxis
+                dataKey="month"
+                tick={{ fill: "#64748B" }}
+                axisLine={false}
+                tickLine={false}
+              />
 
-            <YAxis
-              tick={{ fill: "#64748B" }}
-              axisLine={false}
-              tickLine={false}
-            />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fill: "#64748B" }}
+                axisLine={false}
+                tickLine={false}
+              />
 
-            <Tooltip />
+              <Tooltip />
 
-            <Line
-              type="monotone"
-              dataKey="adoptions"
-              stroke="#2563EB"
-              strokeWidth={4}
-              dot={{
-                r: 6,
-                fill: "#2563EB",
-              }}
-              activeDot={{
-                r: 8,
-              }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+              <Line
+                type="monotone"
+                dataKey="adoptions"
+                stroke="#2563EB"
+                strokeWidth={4}
+                dot={{ r: 6, fill: "#2563EB" }}
+                activeDot={{ r: 8 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
@@ -11,6 +12,7 @@ import {
   FaBoxes,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 interface RescueCall {
   id: string;
@@ -30,6 +32,7 @@ interface RescueDashboardData {
 }
 
 const RescueCentreAdminDashboard = () => {
+  const navigate = useNavigate();
   const [statsData, setStatsData] = useState<RescueDashboardData>({
     total_calls: 0,
     pending: 0,
@@ -41,17 +44,12 @@ const RescueCentreAdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
 
       const response = await dashboardService.getRescueCentreDashboard();
-      console.log("Rescue Centre Dashboard:", response);
 
       const data = response?.data || response || {};
       setStatsData({
@@ -73,6 +71,11 @@ const RescueCentreAdminDashboard = () => {
     }
   };
 
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  useDataSync(fetchDashboardData);
 
   const stats = [
     {
@@ -97,7 +100,7 @@ const RescueCentreAdminDashboard = () => {
       icon: <FaUsers />,
     },
     {
-      title: "Rescued Animals",
+      title: "Rescued Dogs",
       value: loading ? "..." : statsData.rescued,
       trend: "Successfully Rescued",
       color: "#6366F1",
@@ -186,7 +189,7 @@ const RescueCentreAdminDashboard = () => {
           title="Dispatch Rescue"
           subtitle="Assign Rescue Agent"
           color="#2563EB"
-          onClick={() => alert("Dispatch Rescue")}
+          onClick={() => navigate("/pets")}
         />
 
         <QuickActionCard
@@ -194,7 +197,7 @@ const RescueCentreAdminDashboard = () => {
           title="Medical Intake"
           subtitle="Register Animal"
           color="#10B981"
-          onClick={() => alert("Medical Intake")}
+          onClick={() => navigate("/medical-records")}
         />
 
         <QuickActionCard
@@ -202,7 +205,7 @@ const RescueCentreAdminDashboard = () => {
           title="Inventory"
           subtitle="Shelter Supplies"
           color="#F59E0B"
-          onClick={() => alert("Inventory")}
+          onClick={() => navigate("/inventory")}
         />
 
         <QuickActionCard
@@ -210,7 +213,7 @@ const RescueCentreAdminDashboard = () => {
           title="Generate Report"
           subtitle="Operational Reports"
           color="#6366F1"
-          onClick={() => alert("Reports")}
+          onClick={() => navigate("/reports")}
         />
       </div>
 

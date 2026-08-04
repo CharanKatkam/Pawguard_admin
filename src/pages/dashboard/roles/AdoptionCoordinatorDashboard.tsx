@@ -1,29 +1,26 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaHeart, FaClipboardCheck, FaUserCheck, FaFileContract } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const AdoptionCoordinatorDashboard = () => {
+  const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getAdoptionDashboard();
-      console.log("Adoption Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Adoption Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +30,12 @@ const AdoptionCoordinatorDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const applicationsList = Array.isArray(dashboardData?.applications)
     ? dashboardData.applications
@@ -58,13 +61,13 @@ const AdoptionCoordinatorDashboard = () => {
     { key: "status", title: "Decision Status" },
   ];
 
-  const formattedData = applicationsList.map((app: any, idx: number) => ({
-    appId: app.appId || app.id || `ADP-${301 + idx}`,
-    applicant: app.applicant || app.applicant_name || app.user || "-",
-    pet: app.pet || app.dog_name || app.dog || "-",
-    homeVisit: app.homeVisit || app.home_visit_status || "Scheduled",
-    date: app.date || app.created_at || "-",
-    status: app.status || "Pending",
+  const formattedData = applicationsList.map((app: any) => ({
+    appId: app.id ?? app.application_id ?? "",
+    applicant: app.applicant_name ?? app.applicant ?? app.user ?? "",
+    pet: app.dog_name ?? app.dog ?? app.pet ?? "",
+    homeVisit: app.home_visit_status ?? app.homeVisit ?? "",
+    date: app.created_at ?? app.date ?? "",
+    status: app.status ?? "",
   }));
 
   return (
@@ -94,9 +97,9 @@ const AdoptionCoordinatorDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Finalize legal paperwork" color="#10B981" onClick={() => alert("Approve modal")} />
-        <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#2563EB" onClick={() => alert("Schedule Visit modal")} />
-        <QuickActionCard icon={<FaClipboardCheck />} title="Review Applicants" subtitle="Inspect questionnaire" color="#F59E0B" onClick={() => alert("Review Applicants modal")} />
+        <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Finalize legal paperwork" color="#10B981" onClick={() => navigate("/adoptions")} />
+        <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#2563EB" onClick={() => navigate("/adoptions")} />
+        <QuickActionCard icon={<FaClipboardCheck />} title="Review Applicants" subtitle="Inspect questionnaire" color="#F59E0B" onClick={() => navigate("/adoptions")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

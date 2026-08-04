@@ -1,9 +1,10 @@
 import React from "react";
 
 interface QuickActionCardProps {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   title: string;
   subtitle?: string;
+  description?: string;
   color?: string;
   onClick?: () => void;
 }
@@ -12,6 +13,7 @@ const QuickActionCard = ({
   icon,
   title,
   subtitle,
+  description,
   color = "#2563EB",
   onClick,
 }: QuickActionCardProps) => {
@@ -74,7 +76,7 @@ const QuickActionCard = ({
         >
           {title}
         </h4>
-        {subtitle && (
+        {(subtitle || description) && (
           <p
             style={{
               margin: "2px 0 0",
@@ -85,7 +87,7 @@ const QuickActionCard = ({
               textOverflow: "ellipsis",
             }}
           >
-            {subtitle}
+            {subtitle || description}
           </p>
         )}
       </div>

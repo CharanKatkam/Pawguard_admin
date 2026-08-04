@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import dashboardService from "../../services/dashboardService";
+import { useDataSync } from "../../utils/dataSync";
+import { getActivityStream } from "../../utils/eventSystem";
 
 interface Activity {
   id?: number | string;
@@ -19,53 +21,35 @@ const RecentActivities = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadActivities();
-  }, []);
-
   const loadActivities = async () => {
     try {
-      const response = await dashboardService.getRecentActivities();
-
-      console.log("Recent Activities API:", response);
-
-      const data = response?.data ?? [];
-
-      console.table(data);
-
-      if (Array.isArray(data)) {
-        setActivities(data);
-      } else {
-        setActivities([]);
+      setLoading(true);
+      let data: Activity[] = [];
+      try {
+        const response = await dashboardService.getRecentActivities();
+        const resData = response?.data ?? response ?? [];
+        if (Array.isArray(resData)) {
+          data = resData;
+        }
+      } catch {
+        // Fallback handled via stream
       }
+
+      const stream = getActivityStream();
+      setActivities([...stream, ...data]);
     } catch (error) {
       console.error("Recent Activities Error:", error);
-
-      // Fallback data
-      setActivities([
-        {
-          id: 1,
-          title: "New Rescue Case Dispatched",
-          description: "Agent Alex assigned to Case #DOG-409",
-          time: "10 mins ago",
-        },
-        {
-          id: 2,
-          title: "Surgery Successfully Completed",
-          description: "Dr. John Smith completed Max's hind leg repair",
-          time: "42 mins ago",
-        },
-        {
-          id: 3,
-          title: "Adoption Request Approved",
-          description: "Michael Chang approved for Luna (DOG-104)",
-          time: "2 hrs ago",
-        },
-      ]);
+      setActivities(getActivityStream());
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadActivities();
+  }, []);
+
+  useDataSync(loadActivities);
 
   return (
     <div

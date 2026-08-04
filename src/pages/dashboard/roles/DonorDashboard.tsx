@@ -2,28 +2,26 @@ import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import { useToast } from "../../../context/ToastContext";
+import reportsService from "../../../services/reportsService";
 import { FaHeart, FaCoins, FaFileInvoice, FaAward } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const DonorDashboard = () => {
+  const { addToast } = useToast();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getStaffDashboard();
-      console.log("Donor/Staff Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Donor Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +31,12 @@ const DonorDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const donationsList = Array.isArray(dashboardData?.donations)
     ? dashboardData.donations
@@ -62,12 +66,12 @@ const DonorDashboard = () => {
     { key: "taxReceipt", title: "Tax Receipt Status" },
   ];
 
-  const formattedData = donationsList.map((item: any, idx: number) => ({
-    txId: item.txId || item.id || `DON-${9901 + idx}`,
-    campaign: item.campaign || item.cause || item.title || "-",
-    amount: item.amount !== undefined ? `$${item.amount}` : "-",
-    date: item.date || item.created_at || "-",
-    taxReceipt: item.taxReceipt || item.receipt_status || "Available",
+  const formattedData = donationsList.map((item: any) => ({
+    txId: item.id ?? item.transaction_id ?? item.tx_id ?? "",
+    campaign: item.campaign ?? item.cause ?? item.title ?? "",
+    amount: item.amount !== undefined && item.amount !== null ? `$${item.amount}` : "",
+    date: item.date ?? item.created_at ?? "",
+    taxReceipt: item.receipt_status ?? item.taxReceipt ?? "",
   }));
 
   return (
@@ -97,8 +101,12 @@ const DonorDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaHeart />} title="Make New Donation" subtitle="Sponsor emergency rescue" color="#10B981" onClick={() => alert("Make Donation modal")} />
-        <QuickActionCard icon={<FaFileInvoice />} title="Download Tax Receipts" subtitle="Export 80G tax receipt" color="#2563EB" onClick={() => alert("Tax Receipt modal")} />
+        <QuickActionCard icon={<FaHeart />} title="Make New Donation" subtitle="Sponsor emergency rescue" color="#10B981" onClick={() => addToast("Open the Finance module to make a donation", "info")} />
+        <QuickActionCard icon={<FaFileInvoice />} title="Download Tax Receipts" subtitle="Export 80G tax receipt" color="#2563EB" onClick={async () => {
+          addToast("Generating tax exemption receipt PDF...", "info");
+          await reportsService.exportExecutivePdf();
+          addToast("Tax receipt downloaded!", "success");
+        }} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

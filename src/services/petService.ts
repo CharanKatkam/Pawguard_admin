@@ -1,4 +1,5 @@
 import api from "../api/axios";
+import { publishActionEvent } from "../utils/eventSystem";
 
 export interface PetPayload {
   id?: string;
@@ -9,48 +10,82 @@ export interface PetPayload {
   location?: string;
   status?: string;
   medical_history?: string;
+  [key: string]: unknown;
 }
 
 export const petService = {
+  // GET /dogs (Exact OpenAPI endpoint)
   getPets: async (params?: Record<string, unknown>) => {
     try {
-      // Discovered live route: GET /api/v1/dogs
       const response = await api.get("/dogs", { params });
       return response.data;
-    } catch {
-      return {
-        data: [
-          { id: "DOG-402", petId: "DOG-402", name: "Max", breed: "German Shepherd Mix", age: "3 Years", location: "Central Vet Clinic", status: "In Treatment" },
-          { id: "DOG-415", petId: "DOG-415", name: "Bella", breed: "Golden Retriever Mix", age: "1 Year", location: "North Haven Shelter", status: "Adoptable" },
-          { id: "DOG-399", petId: "DOG-399", name: "Charlie", breed: "Beagle Mix", age: "5 Years", location: "ICU Ward #2", status: "Critical Care" },
-          { id: "DOG-420", petId: "DOG-420", name: "Daisy", breed: "Indie Rescue", age: "6 Months", location: "Foster Family Care", status: "Fostered" },
-        ],
-      };
+    } catch (err: any) {
+      if (err?.response?.status === 404) return { data: [], total: 0 };
+      throw err;
     }
   },
 
-  getPetById: async (id: string) => {
-    const response = await api.get(`/dogs/${id}`);
+  getPetById: async (dogId: string) => {
+    const response = await api.get(`/dogs/${dogId}`);
     return response.data;
   },
 
   createPet: async (data: PetPayload) => {
     const response = await api.post("/dogs", data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "create",
+      title: "New Animal Intake Registered",
+      message: `Animal ${data.name} (${data.breed || "Dog"}) registered in facility database.`,
+      targetRoles: [
+        "super_admin",
+        "rescue_centre_admin",
+        "shelter_manager",
+        "veterinarian",
+        "adoption_coordinator",
+      ],
+    });
     return response.data;
   },
 
-  updatePet: async (id: string, data: Partial<PetPayload>) => {
-    const response = await api.put(`/dogs/${id}`, data);
+  updatePet: async (dogId: string, data: Partial<PetPayload>) => {
+    const response = await api.put(`/dogs/${dogId}`, data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "update",
+      title: "Animal Record Updated",
+      message: `Profile details for animal ${data.name || dogId} updated.`,
+      targetRoles: ["super_admin", "shelter_manager", "veterinarian"],
+    });
     return response.data;
   },
 
-  updatePetStatus: async (id: string, status: string) => {
-    const response = await api.patch(`/dogs/${id}/status`, { status });
+  updatePetStatus: async (dogId: string, status: string) => {
+    const response = await api.patch(`/dogs/${dogId}/status`, { status });
+    await publishActionEvent({
+      module: "shelter",
+      action: "update",
+      title: "Animal Status Changed",
+      message: `Status for animal ${dogId} changed to ${status}.`,
+      targetRoles: [
+        "super_admin",
+        "shelter_manager",
+        "veterinarian",
+        "adoption_coordinator",
+      ],
+    });
     return response.data;
   },
 
-  deletePet: async (id: string) => {
-    const response = await api.delete(`/dogs/${id}`);
+  deletePet: async (dogId: string) => {
+    const response = await api.delete(`/dogs/${dogId}`);
+    await publishActionEvent({
+      module: "shelter",
+      action: "delete",
+      title: "Animal Record Archived",
+      message: `Animal record ${dogId} archived from active shelter count.`,
+      targetRoles: ["super_admin", "shelter_manager"],
+    });
     return response.data;
   },
 };
