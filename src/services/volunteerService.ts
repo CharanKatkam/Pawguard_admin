@@ -45,6 +45,16 @@ export const volunteerService = {
     return response.data;
   },
 
+  getVolunteers: async (params?: Record<string, unknown>) => {
+    try {
+      const response = await api.get("/volunteers", { params });
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return { data: [], total: 0 };
+      throw err;
+    }
+  },
+
   // POST /volunteers/shifts
   createShift: async (data: ShiftPayload) => {
     const response = await api.post("/volunteers/shifts", data);
@@ -53,8 +63,13 @@ export const volunteerService = {
 
   // GET /volunteers/shifts
   getShifts: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/volunteers/shifts", { params });
-    return response.data;
+    try {
+      const response = await api.get("/volunteers/shifts", { params });
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return { data: [], total: 0 };
+      throw err;
+    }
   },
 
   // POST /volunteers/shifts/{shift_id}/join

@@ -14,6 +14,12 @@ import {
   FaClipboardList,
   FaShieldAlt,
   FaCertificate,
+  FaLifeRing,
+  FaHandHoldingHeart,
+  FaUserFriends,
+  FaSearchLocation,
+  FaTruck,
+  FaBell,
 } from "react-icons/fa";
 import { NavLink, useNavigate } from "react-router-dom";
 import { getCurrentUserRole, getMenusForRole } from "../../utils/roleUtils";
@@ -56,6 +62,18 @@ const renderIcon = (iconType: RoleMenuItem["iconType"]) => {
       return <FaShieldAlt />;
     case "certificates":
       return <FaCertificate />;
+    case "rescues":
+      return <FaLifeRing />;
+    case "fosters":
+      return <FaHandHoldingHeart />;
+    case "volunteers":
+      return <FaUserFriends />;
+    case "lostfound":
+      return <FaSearchLocation />;
+    case "vehicles":
+      return <FaTruck />;
+    case "notifications":
+      return <FaBell />;
     default:
       return <FaTachometerAlt />;
   }

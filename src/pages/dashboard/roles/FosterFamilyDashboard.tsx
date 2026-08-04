@@ -2,28 +2,27 @@ import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import { useToast } from "../../../context/ToastContext";
+import { useNavigate } from "react-router-dom";
 import { FaPaw, FaStethoscope, FaCalendarCheck, FaCamera } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const FosterFamilyDashboard = () => {
+  const { addToast } = useToast();
+  const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getFosterDashboard();
-      console.log("Foster Family Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Foster Family Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +32,12 @@ const FosterFamilyDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const petsList = Array.isArray(dashboardData?.fostered_pets)
     ? dashboardData.fostered_pets
@@ -56,12 +61,12 @@ const FosterFamilyDashboard = () => {
     { key: "status", title: "Care Status" },
   ];
 
-  const formattedPets = petsList.map((p: any, idx: number) => ({
-    petId: p.petId || p.registration_number || p.id || `DOG-${420 + idx}`,
-    name: p.name || "-",
-    breed: p.breed || "-",
-    diet: p.diet || p.dietary_guidance || "-",
-    status: p.status || "Active Foster Care",
+  const formattedPets = petsList.map((p: any) => ({
+    petId: p.id ?? p.pet_id ?? "",
+    name: p.name ?? "",
+    breed: p.breed ?? "",
+    diet: p.dietary_guidance ?? p.diet ?? "",
+    status: p.status ?? "",
   }));
 
   return (
@@ -91,8 +96,8 @@ const FosterFamilyDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaCamera />} title="Upload Pet Photo" subtitle="Share health update photo" color="#2563EB" onClick={() => alert("Upload Photo modal")} />
-        <QuickActionCard icon={<FaStethoscope />} title="Request Vet Appointment" subtitle="Book routine checkup" color="#10B981" onClick={() => alert("Request Vet modal")} />
+        <QuickActionCard icon={<FaCamera />} title="Upload Pet Photo" subtitle="Share health update photo" color="#2563EB" onClick={() => addToast("Select pet photo from your device to upload", "info")} />
+        <QuickActionCard icon={<FaStethoscope />} title="Request Vet Appointment" subtitle="Book routine checkup" color="#10B981" onClick={() => navigate("/medical")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

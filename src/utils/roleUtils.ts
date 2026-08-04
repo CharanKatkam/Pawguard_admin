@@ -23,26 +23,31 @@ export const extractRoleString = (input: unknown): string => {
   if (typeof input === "string") return input;
 
   if (Array.isArray(input) && input.length > 0) {
-    return extractRoleString(input[0]);
+    for (const item of input) {
+      const extracted = extractRoleString(item);
+      if (extracted) return extracted;
+    }
+    return "";
   }
 
   if (typeof input === "object" && input !== null) {
     const obj = input as Record<string, unknown>;
 
+    // Priority candidate fields for role
     const candidateFields = [
-      "roles",
       "role",
+      "roles",
       "role_name",
       "user_type",
       "type",
       "slug",
       "title",
-      "name",
     ];
 
     for (const field of candidateFields) {
-      if (obj[field] !== undefined) {
-        return extractRoleString(obj[field]);
+      if (obj[field] !== undefined && obj[field] !== null) {
+        const extracted = extractRoleString(obj[field]);
+        if (extracted) return extracted;
       }
     }
   }
@@ -59,6 +64,26 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
   if (!str) return null;
 
   const lower = String(str).toLowerCase().trim();
+
+  // 1. Super Admin (Checked first to cover all variations)
+  if (
+    lower === "super_admin" ||
+    lower === "super-admin" ||
+    lower === "superadmin" ||
+    lower === "super admin" ||
+    lower.includes("super_admin") ||
+    lower.includes("super-admin") ||
+    lower.includes("superadmin") ||
+    lower.includes("super_administrator") ||
+    lower.includes("super.admin") ||
+    lower.includes("super") ||
+    lower === "admin" ||
+    lower.includes("administrator") ||
+    lower === "sysadmin" ||
+    lower === "system_admin"
+  ) {
+    return "super_admin";
+  }
 
   // Explicitly reject public-facing roles
   if (
@@ -166,11 +191,6 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
     lower.includes("finance")
   ) {
     return "finance_user";
-  }
-
-  // Fallback for general admin keyword
-  if (lower === "admin" || lower.includes("administrator")) {
-    return "super_admin";
   }
 
   return null;
@@ -283,7 +303,13 @@ export interface RoleMenuItem {
     | "heart"
     | "tasks"
     | "audit"
-    | "certificates";
+    | "certificates"
+    | "rescues"
+    | "fosters"
+    | "volunteers"
+    | "lostfound"
+    | "vehicles"
+    | "notifications";
 }
 
 export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[] => {
@@ -295,12 +321,19 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "User Management", path: "/users", iconType: "users" },
-        { name: "Animals & Pets", path: "/pets", iconType: "pets" },
-        { name: "Rescue Centres", path: "/shelters", iconType: "shelters" },
-        { name: "Medical Records", path: "/medical-records", iconType: "medical" },
-        { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
-        { name: "Inventory", path: "/inventory", iconType: "inventory" },
-        { name: "Finance", path: "/finance", iconType: "finance" },
+        { name: "Rescue Management", path: "/rescues", iconType: "rescues" },
+        { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
+        { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
+        { name: "Dog Management", path: "/pets", iconType: "pets" },
+        { name: "Medical Management", path: "/medical-records", iconType: "medical" },
+        { name: "Shelter Management", path: "/shelters", iconType: "shelters" },
+        { name: "Adoption Management", path: "/adoptions", iconType: "adoptions" },
+        { name: "Foster Management", path: "/fosters", iconType: "fosters" },
+        { name: "Volunteer Management", path: "/volunteers", iconType: "volunteers" },
+        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
+        { name: "Inventory Mgmt", path: "/inventory", iconType: "inventory" },
+        { name: "Donations & Finance", path: "/finance", iconType: "finance" },
+        { name: "Vehicle Management", path: "/vehicles", iconType: "vehicles" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
         { name: "Roles & Permissions", path: "/roles-permissions", iconType: "users" },
         { name: "Audit Logs", path: "/audit-logs", iconType: "audit" },
@@ -311,82 +344,90 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
     case "rescue_centre_admin":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Rescue Centre Mgmt", path: "/shelters", iconType: "shelters" },
-        { name: "Animals", path: "/pets", iconType: "pets" },
-        { name: "Rescue Agents", path: "/users", iconType: "users" },
+        { name: "Rescue Management", path: "/rescues", iconType: "rescues" },
+        { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
+        { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
+        { name: "Dog Management", path: "/pets", iconType: "pets" },
+        { name: "Shelter Management", path: "/shelters", iconType: "shelters" },
+        { name: "Staff & Users", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
-        { name: "Operational Reports", path: "/reports", iconType: "reports" },
+        { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
       ];
 
     case "rescue_coordinator":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Rescue Cases", path: "/pets", iconType: "ambulance" },
+        { name: "Rescue Management", path: "/rescues", iconType: "rescues" },
+        { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
+        { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
+        { name: "Vehicle Fleet", path: "/vehicles", iconType: "vehicles" },
         { name: "Assign Agents", path: "/users", iconType: "users" },
-        { name: "Animal Tracking", path: "/shelters", iconType: "shelters" },
-        { name: "Rescue Reports", path: "/reports", iconType: "reports" },
+        { name: "Reports", path: "/reports", iconType: "reports" },
       ];
 
     case "rescue_agent":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Assigned Cases", path: "/pets", iconType: "ambulance" },
-        { name: "Rescue Status & Logs", path: "/reports", iconType: "reports" },
+        { name: "Assigned Rescues", path: "/rescues", iconType: "rescues" },
+        { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
+        { name: "Dog Records", path: "/pets", iconType: "pets" },
+        { name: "Reports & Logs", path: "/reports", iconType: "reports" },
       ];
 
     case "veterinarian":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
+        { name: "Medical Suite", path: "/medical-records", iconType: "medical" },
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
-        { name: "Medical & Veterinary Suite", path: "/medical-records", iconType: "medical" },
-        { name: "Vaccinations & Certs", path: "/certificates", iconType: "certificates" },
-        { name: "Health Reports", path: "/reports", iconType: "reports" },
+        { name: "Vaccines & Certs", path: "/certificates", iconType: "certificates" },
+        { name: "Medical Reports", path: "/reports", iconType: "reports" },
       ];
 
     case "shelter_manager":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Shelter Animals", path: "/pets", iconType: "pets" },
-        { name: "Facility & Cages", path: "/shelters", iconType: "shelters" },
-        { name: "Staff & Volunteers", path: "/users", iconType: "users" },
+        { name: "Shelter Facilities", path: "/shelters", iconType: "shelters" },
+        { name: "Dog Profiles", path: "/pets", iconType: "pets" },
+        { name: "Shelter Staff", path: "/users", iconType: "users" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
       ];
 
     case "adoption_coordinator":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Adoption Requests", path: "/adoptions", iconType: "adoptions" },
-        { name: "Adoptable Animals", path: "/pets", iconType: "pets" },
+        { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
+        { name: "Adoptable Dogs", path: "/pets", iconType: "pets" },
         { name: "Adoption Reports", path: "/reports", iconType: "reports" },
       ];
 
     case "foster_coordinator":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Foster Families", path: "/users", iconType: "users" },
-        { name: "Foster Animals", path: "/pets", iconType: "pets" },
-        { name: "Foster Reports", path: "/reports", iconType: "reports" },
+        { name: "Foster Management", path: "/fosters", iconType: "fosters" },
+        { name: "Foster Dogs", path: "/pets", iconType: "pets" },
+        { name: "Reports", path: "/reports", iconType: "reports" },
       ];
 
     case "volunteer_coordinator":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Volunteers Directory", path: "/users", iconType: "users" },
-        { name: "Schedules & Tasks", path: "/reports", iconType: "tasks" },
+        { name: "Volunteers Directory", path: "/volunteers", iconType: "volunteers" },
+        { name: "User Directory", path: "/users", iconType: "users" },
+        { name: "Schedules & Reports", path: "/reports", iconType: "tasks" },
       ];
 
     case "inventory_manager":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Inventory & Medicines", path: "/inventory", iconType: "inventory" },
-        { name: "Suppliers & Stock", path: "/shelters", iconType: "shelters" },
+        { name: "Inventory & Stock", path: "/inventory", iconType: "inventory" },
+        { name: "Shelters & Storage", path: "/shelters", iconType: "shelters" },
       ];
 
     case "finance_user":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Finance & Donations", path: "/finance", iconType: "finance" },
+        { name: "Donations & Finance", path: "/finance", iconType: "finance" },
         { name: "Financial Reports", path: "/reports", iconType: "reports" },
       ];
 

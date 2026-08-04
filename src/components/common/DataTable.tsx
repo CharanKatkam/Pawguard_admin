@@ -1,35 +1,54 @@
-import { useState, useMemo } from "react";
-import { FaSort, FaSortUp, FaSortDown, FaSearch, FaEllipsisV, FaChevronLeft, FaChevronRight, FaEye, FaEdit, FaTrash } from "react-icons/fa";
+import React, { useState, useMemo } from "react";
+import { FaSearch, FaChevronLeft, FaChevronRight, FaEdit, FaTrash, FaSave, FaExclamationTriangle } from "react-icons/fa";
+import Modal from "./Modal";
+import { useToast } from "../../context/ToastContext";
+import { notifyDataChanged } from "../../utils/dataSync";
 
 export interface Column {
   key: string;
-  title: string;
+  title?: string;
+  header?: string;
   sortable?: boolean;
-  render?: (value: unknown, row: Record<string, unknown>) => React.ReactNode;
+  render?: (value: any, row: any) => React.ReactNode;
 }
 
 interface DataTableProps {
   columns: Column[];
   data: Record<string, unknown>[];
   pageSize?: number;
-  onView?: (row: Record<string, unknown>) => void;
-  onEdit?: (row: Record<string, unknown>) => void;
-  onDelete?: (row: Record<string, unknown>) => void;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+  emptyMessage?: string;
+  onView?: (row: any) => void;
+  onEdit?: (row: any) => void;
+  onDelete?: (row: any) => void;
+  onRowClick?: (row: any) => void;
+  renderRowActions?: (row: any) => React.ReactNode;
 }
 
-const DataTable = ({
+const DataTable: React.FC<DataTableProps> = ({
   columns,
   data,
   pageSize = 5,
-  onView,
+  loading = false,
+  error = null,
+  onRetry,
+  emptyMessage = "No matching records found.",
+  onView: _onView,
   onEdit,
   onDelete,
-}: DataTableProps) => {
+  onRowClick,
+}) => {
+  const { addToast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [currentPage, setCurrentPage] = useState(1);
-  const [activeMenuRowIndex, setActiveMenuRowIndex] = useState<number | null>(null);
+
+  // Modal State
+  const [selectedRow, setSelectedRow] = useState<Record<string, any> | null>(null);
+  const [modalMode, setModalMode] = useState<"view" | "edit" | null>(null);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [editFormData, setEditFormData] = useState<Record<string, any>>({});
 
   // Filter
   const filteredData = useMemo(() => {
@@ -43,54 +62,46 @@ const DataTable = ({
     );
   }, [data, searchTerm, columns]);
 
-  // Sort
-  const sortedData = useMemo(() => {
-    if (!sortKey) return filteredData;
-    return [...filteredData].sort((a, b) => {
-      const valA = a[sortKey];
-      const valB = b[sortKey];
-      if (valA === valB) return 0;
-      if (valA === undefined || valA === null) return 1;
-      if (valB === undefined || valB === null) return -1;
-      const compare = String(valA).localeCompare(String(valB), undefined, { numeric: true });
-      return sortDirection === "asc" ? compare : -compare;
-    });
-  }, [filteredData, sortKey, sortDirection]);
-
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(sortedData.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
   const pageData = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return sortedData.slice(start, start + pageSize);
-  }, [sortedData, currentPage, pageSize]);
-
-  const handleSort = (key: string) => {
-    if (sortKey === key) {
-      if (sortDirection === "asc") {
-        setSortDirection("desc");
-      } else {
-        setSortKey(null);
-        setSortDirection("asc");
-      }
-    } else {
-      setSortKey(key);
-      setSortDirection("asc");
-    }
-  };
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, currentPage, pageSize]);
 
   const renderStatusBadge = (val: string) => {
     const lower = val.toLowerCase();
     let bg = "#F1F5F9";
     let color = "#475569";
 
-    if (lower.includes("success") || lower.includes("completed") || lower.includes("approved") || lower.includes("healthy") || lower.includes("discharged")) {
-      bg = "#ECFDF5"; color = "#10B981";
-    } else if (lower.includes("pending") || lower.includes("treatment") || lower.includes("warning") || lower.includes("assigned")) {
-      bg = "#FFFBEB"; color = "#F59E0B";
-    } else if (lower.includes("critical") || lower.includes("failed") || lower.includes("urgent") || lower.includes("rejected")) {
-      bg = "#FEF2F2"; color = "#EF4444";
+    if (
+      lower.includes("success") ||
+      lower.includes("completed") ||
+      lower.includes("approved") ||
+      lower.includes("healthy") ||
+      lower.includes("discharged")
+    ) {
+      bg = "#ECFDF5";
+      color = "#10B981";
+    } else if (
+      lower.includes("pending") ||
+      lower.includes("treatment") ||
+      lower.includes("warning") ||
+      lower.includes("assigned")
+    ) {
+      bg = "#FFFBEB";
+      color = "#F59E0B";
+    } else if (
+      lower.includes("critical") ||
+      lower.includes("failed") ||
+      lower.includes("urgent") ||
+      lower.includes("rejected")
+    ) {
+      bg = "#FEF2F2";
+      color = "#EF4444";
     } else if (lower.includes("active") || lower.includes("in progress")) {
-      bg = "#EFF6FF"; color = "#2563EB";
+      bg = "#EFF6FF";
+      color = "#2563EB";
     }
 
     return (
@@ -111,12 +122,83 @@ const DataTable = ({
     );
   };
 
+  const handleRowClick = (row: Record<string, any>) => {
+    if (onRowClick) {
+      onRowClick(row);
+    }
+    setSelectedRow(row);
+    setEditFormData({ ...row });
+    setModalMode("view");
+  };
+
+  const handleStartEdit = () => {
+    if (selectedRow) {
+      setEditFormData({ ...selectedRow });
+      setModalMode("edit");
+    }
+  };
+
+  const handleSaveChanges = async () => {
+    if (!selectedRow) return;
+    try {
+      if (onEdit) {
+        await onEdit(editFormData);
+      }
+      addToast("Record updated successfully!", "success");
+      notifyDataChanged();
+      setModalMode(null);
+      setSelectedRow(null);
+    } catch (err: any) {
+      addToast(err?.message || "Failed to update record.", "error");
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedRow) return;
+    try {
+      if (onDelete) {
+        await onDelete(selectedRow);
+      }
+      addToast("Record deleted successfully!", "success");
+      notifyDataChanged();
+      setIsDeleteConfirmOpen(false);
+      setModalMode(null);
+      setSelectedRow(null);
+    } catch (err: any) {
+      addToast(err?.message || "Failed to delete record.", "error");
+    }
+  };
+
+  const formatLabel = (key: string) => {
+    const col = columns.find((c) => c.key === key);
+    if (col) return col.title || col.header || key;
+    return key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
   return (
     <div style={{ width: "100%", overflow: "hidden" }}>
       {/* Search Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", gap: "16px", flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "16px",
+          gap: "16px",
+          flexWrap: "wrap",
+        }}
+      >
         <div style={{ position: "relative", minWidth: "260px" }}>
-          <FaSearch size={14} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
+          <FaSearch
+            size={14}
+            style={{
+              position: "absolute",
+              left: "12px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "#94A3B8",
+            }}
+          />
           <input
             type="text"
             placeholder="Search records..."
@@ -139,60 +221,119 @@ const DataTable = ({
         </div>
 
         <div style={{ fontSize: "13px", color: "#64748B" }}>
-          Showing <strong>{pageData.length}</strong> of <strong>{sortedData.length}</strong> entries
+          Showing <strong>{pageData.length}</strong> of <strong>{filteredData.length}</strong> entries
         </div>
       </div>
 
       {/* Responsive Table Wrapper */}
       <div style={{ overflowX: "auto", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", background: "#FFFFFF", fontSize: "13px", textAlign: "left" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            background: "#FFFFFF",
+            fontSize: "13px",
+            textAlign: "left",
+          }}
+        >
           <thead>
             <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  onClick={() => col.sortable !== false && handleSort(col.key)}
                   style={{
                     padding: "14px 16px",
                     fontWeight: 700,
                     color: "#475569",
-                    cursor: col.sortable !== false ? "pointer" : "default",
+                    cursor: "default",
                     userSelect: "none",
                     whiteSpace: "nowrap",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    {col.title}
-                    {col.sortable !== false && (
-                      <span style={{ color: sortKey === col.key ? "#2563EB" : "#CBD5E1" }}>
-                        {sortKey === col.key ? (sortDirection === "asc" ? <FaSortUp /> : <FaSortDown />) : <FaSort />}
-                      </span>
-                    )}
-                  </div>
+                  {col.title || col.header || col.key}
                 </th>
               ))}
-              {(onView || onEdit || onDelete) && (
-                <th style={{ padding: "14px 16px", textAlign: "right", fontWeight: 700, color: "#475569" }}>
-                  Actions
-                </th>
-              )}
             </tr>
           </thead>
 
           <tbody>
-            {pageData.length === 0 ? (
+            {loading ? (
               <tr>
-                <td colSpan={columns.length + (onView || onEdit || onDelete ? 1 : 0)} style={{ padding: "32px", textAlign: "center", color: "#94A3B8" }}>
-                  No matching records found.
+                <td
+                  colSpan={columns.length}
+                  style={{ padding: "40px", textAlign: "center", color: "#2563EB" }}
+                >
+                  <div
+                    style={{
+                      display: "inline-block",
+                      width: "24px",
+                      height: "24px",
+                      border: "3px solid #EFF6FF",
+                      borderTopColor: "#2563EB",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <div style={{ marginTop: "8px", fontSize: "13px", color: "#64748B", fontWeight: 500 }}>
+                    Loading data from server...
+                  </div>
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={columns.length} style={{ padding: "24px", textAlign: "center" }}>
+                  <div
+                    style={{
+                      background: "#FEF2F2",
+                      color: "#991B1B",
+                      padding: "16px",
+                      borderRadius: "10px",
+                      display: "inline-flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: "8px",
+                      maxWidth: "480px",
+                    }}
+                  >
+                    <div style={{ fontSize: "14px", fontWeight: 600 }}>{error}</div>
+                    {onRetry && (
+                      <button
+                        onClick={onRetry}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: "6px",
+                          background: "#EF4444",
+                          color: "#FFFFFF",
+                          border: "none",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Retry Loading
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ) : pageData.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={columns.length}
+                  style={{ padding: "32px", textAlign: "center", color: "#94A3B8" }}
+                >
+                  {emptyMessage}
                 </td>
               </tr>
             ) : (
               pageData.map((row, idx) => (
                 <tr
                   key={idx}
+                  onClick={() => handleRowClick(row)}
                   style={{
                     borderBottom: "1px solid #F1F5F9",
                     transition: "background 0.15s ease",
+                    cursor: "pointer",
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#F8FAFC")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "#FFFFFF")}
@@ -213,66 +354,6 @@ const DataTable = ({
                       </td>
                     );
                   })}
-
-                  {(onView || onEdit || onDelete) && (
-                    <td style={{ padding: "14px 16px", textAlign: "right", position: "relative", verticalAlign: "middle" }}>
-                      <button
-                        onClick={() => setActiveMenuRowIndex(activeMenuRowIndex === idx ? null : idx)}
-                        style={{
-                          background: "transparent",
-                          border: "none",
-                          color: "#64748B",
-                          padding: "6px",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <FaEllipsisV />
-                      </button>
-
-                      {activeMenuRowIndex === idx && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            right: "16px",
-                            top: "40px",
-                            background: "#FFFFFF",
-                            border: "1px solid #E2E8F0",
-                            borderRadius: "10px",
-                            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
-                            zIndex: 50,
-                            minWidth: "120px",
-                            overflow: "hidden",
-                          }}
-                        >
-                          {onView && (
-                            <button
-                              onClick={() => { onView(row); setActiveMenuRowIndex(null); }}
-                              style={{ width: "100%", padding: "10px 14px", display: "flex", alignItems: "center", gap: "8px", background: "transparent", border: "none", color: "#0F172A", fontSize: "13px", cursor: "pointer", textAlign: "left" }}
-                            >
-                              <FaEye style={{ color: "#2563EB" }} /> View
-                            </button>
-                          )}
-                          {onEdit && (
-                            <button
-                              onClick={() => { onEdit(row); setActiveMenuRowIndex(null); }}
-                              style={{ width: "100%", padding: "10px 14px", display: "flex", alignItems: "center", gap: "8px", background: "transparent", border: "none", color: "#0F172A", fontSize: "13px", cursor: "pointer", textAlign: "left" }}
-                            >
-                              <FaEdit style={{ color: "#F59E0B" }} /> Edit
-                            </button>
-                          )}
-                          {onDelete && (
-                            <button
-                              onClick={() => { onDelete(row); setActiveMenuRowIndex(null); }}
-                              style={{ width: "100%", padding: "10px 14px", display: "flex", alignItems: "center", gap: "8px", background: "transparent", border: "none", color: "#EF4444", fontSize: "13px", cursor: "pointer", textAlign: "left" }}
-                            >
-                              <FaTrash /> Delete
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  )}
                 </tr>
               ))
             )}
@@ -281,7 +362,16 @@ const DataTable = ({
       </div>
 
       {/* Pagination Footer */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", flexWrap: "wrap", gap: "12px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginTop: "16px",
+          flexWrap: "wrap",
+          gap: "12px",
+        }}
+      >
         <span style={{ fontSize: "13px", color: "#64748B" }}>
           Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
         </span>
@@ -328,6 +418,210 @@ const DataTable = ({
           </button>
         </div>
       </div>
+
+      {/* View / Edit Modal */}
+      {selectedRow && modalMode && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setModalMode(null);
+            setSelectedRow(null);
+          }}
+          title={modalMode === "view" ? `View Details - ${selectedRow.name || selectedRow.id || "Record"}` : `Edit Record - ${selectedRow.name || selectedRow.id || "Record"}`}
+          maxWidth="600px"
+          footer={
+            modalMode === "view" ? (
+              <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
+                <button
+                  onClick={handleStartEdit}
+                  style={{
+                    background: "#2563EB",
+                    color: "#FFFFFF",
+                    border: "none",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaEdit /> Edit
+                </button>
+                <button
+                  onClick={() => setIsDeleteConfirmOpen(true)}
+                  style={{
+                    background: "#EF4444",
+                    color: "#FFFFFF",
+                    border: "none",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaTrash /> Delete
+                </button>
+                <button
+                  onClick={() => {
+                    setModalMode(null);
+                    setSelectedRow(null);
+                  }}
+                  style={{
+                    background: "#F1F5F9",
+                    color: "#475569",
+                    border: "1px solid #CBD5E1",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
+                <button
+                  onClick={handleSaveChanges}
+                  style={{
+                    background: "#10B981",
+                    color: "#FFFFFF",
+                    border: "none",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaSave /> Save Changes
+                </button>
+                <button
+                  onClick={() => setModalMode("view")}
+                  style={{
+                    background: "#F1F5F9",
+                    color: "#475569",
+                    border: "1px solid #CBD5E1",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )
+          }
+        >
+          {modalMode === "view" ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              {Object.entries(selectedRow).map(([key, val]) => (
+                <div key={key} style={{ background: "#F8FAFC", padding: "12px 14px", borderRadius: "10px", border: "1px solid #F1F5F9" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>
+                    {formatLabel(key)}
+                  </div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", wordBreak: "break-word" }}>
+                    {key === "status" || key === "state" || key === "condition"
+                      ? renderStatusBadge(String(val ?? ""))
+                      : String(val ?? "-")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {columns.map((col) => (
+                <div key={col.key}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>
+                    {col.title || col.header || col.key}
+                  </label>
+                  <input
+                    type="text"
+                    value={String(editFormData[col.key] ?? "")}
+                    onChange={(e) => setEditFormData({ ...editFormData, [col.key]: e.target.value })}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #CBD5E1",
+                      fontSize: "13px",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteConfirmOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsDeleteConfirmOpen(false)}
+          title="Delete Record"
+          maxWidth="450px"
+          footer={
+            <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
+              <button
+                onClick={handleConfirmDelete}
+                style={{
+                  background: "#EF4444",
+                  color: "#FFFFFF",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Delete
+              </button>
+              <button
+                onClick={() => setIsDeleteConfirmOpen(false)}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          }
+        >
+          <div style={{ textAlign: "center", padding: "12px 0" }}>
+            <FaExclamationTriangle size={36} style={{ color: "#EF4444", marginBottom: "12px" }} />
+            <h4 style={{ margin: "0 0 8px", fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
+              Delete Record
+            </h4>
+            <p style={{ margin: 0, fontSize: "14px", color: "#64748B", lineHeight: 1.5 }}>
+              Are you sure you want to delete this record? This action cannot be undone.
+            </p>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

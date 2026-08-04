@@ -1,29 +1,26 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaHome, FaPaw, FaUserPlus, FaCalendarCheck } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const FosterCoordinatorDashboard = () => {
+  const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getFosterDashboard();
-      console.log("Foster Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Foster Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +30,12 @@ const FosterCoordinatorDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const placementsList = Array.isArray(dashboardData?.placements)
     ? dashboardData.placements
@@ -58,13 +61,13 @@ const FosterCoordinatorDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const formattedData = placementsList.map((item: any, idx: number) => ({
-    fosterId: item.fosterId || item.id || `FST-${101 + idx}`,
-    family: item.family || item.foster_name || item.user_name || "-",
-    pet: item.pet || item.dog_name || "-",
-    duration: item.duration || "-",
-    followUp: item.followUp || item.next_follow_up || "-",
-    status: item.status || "Active",
+  const formattedData = placementsList.map((item: any) => ({
+    fosterId: item.id ?? item.foster_id ?? "",
+    family: item.foster_name ?? item.family ?? item.user_name ?? "",
+    pet: item.dog_name ?? item.pet ?? "",
+    duration: item.duration ?? "",
+    followUp: item.next_follow_up ?? item.followUp ?? "",
+    status: item.status ?? "",
   }));
 
   return (
@@ -94,9 +97,9 @@ const FosterCoordinatorDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaUserPlus />} title="Onboard Foster Family" subtitle="Register new home" color="#2563EB" onClick={() => alert("Onboard Foster modal")} />
-        <QuickActionCard icon={<FaPaw />} title="Assign Pet to Foster" subtitle="Match dog with family" color="#10B981" onClick={() => alert("Assign Foster modal")} />
-        <QuickActionCard icon={<FaCalendarCheck />} title="Schedule Follow-up" subtitle="Book home inspection" color="#6366F1" onClick={() => alert("Schedule Inspection modal")} />
+        <QuickActionCard icon={<FaUserPlus />} title="Onboard Foster Family" subtitle="Register new home" color="#2563EB" onClick={() => navigate("/users")} />
+        <QuickActionCard icon={<FaPaw />} title="Assign Pet to Foster" subtitle="Match dog with family" color="#10B981" onClick={() => navigate("/pets")} />
+        <QuickActionCard icon={<FaCalendarCheck />} title="Schedule Follow-up" subtitle="Book home inspection" color="#6366F1" onClick={() => navigate("/fosters")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

@@ -1,25 +1,15 @@
-const pets = [
-  {
-    id: 1,
-    name: "Buddy",
-    breed: "Golden Retriever",
-    status: "Available",
-  },
-  {
-    id: 2,
-    name: "Lucy",
-    breed: "Labrador",
-    status: "Adopted",
-  },
-  {
-    id: 3,
-    name: "Rocky",
-    breed: "German Shepherd",
-    status: "Available",
-  },
-];
+interface Pet {
+  id?: number | string;
+  name?: string;
+  breed?: string;
+  status?: string;
+}
 
-const LatestPets = () => {
+interface LatestPetsProps {
+  pets?: Pet[];
+}
+
+const LatestPets = ({ pets = [] }: LatestPetsProps) => {
   return (
     <div
       style={{
@@ -33,36 +23,42 @@ const LatestPets = () => {
         Latest Pets
       </h2>
 
-      {pets.map((pet) => (
-        <div
-          key={pet.id}
-          style={{
-            borderBottom: "1px solid #E5E7EB",
-            padding: "15px 0",
-          }}
-        >
-          <h4 style={{ margin: 0 }}>
-            {pet.name}
-          </h4>
-
-          <p
+      {pets.length === 0 ? (
+        <p style={{ color: "#94A3B8", fontSize: "14px" }}>
+          No pets on record yet.
+        </p>
+      ) : (
+        pets.map((pet, index) => (
+          <div
+            key={String(pet.id ?? index)}
             style={{
-              margin: "6px 0",
-              color: "#6B7280",
+              borderBottom: "1px solid #E5E7EB",
+              padding: "15px 0",
             }}
           >
-            {pet.breed}
-          </p>
+            <h4 style={{ margin: 0 }}>
+              {pet.name}
+            </h4>
 
-          <small
-            style={{
-              color: "#2563EB",
-            }}
-          >
-            {pet.status}
-          </small>
-        </div>
-      ))}
+            <p
+              style={{
+                margin: "6px 0",
+                color: "#6B7280",
+              }}
+            >
+              {pet.breed}
+            </p>
+
+            <small
+              style={{
+                color: "#2563EB",
+              }}
+            >
+              {pet.status}
+            </small>
+          </div>
+        ))
+      )}
     </div>
   );
 };

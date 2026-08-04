@@ -16,6 +16,14 @@ import AuditLogs from "./pages/audit/AuditLogs";
 import Certificates from "./pages/certificates/Certificates";
 import RolesPermissions from "./pages/permissions/RolesPermissions";
 
+import RescueManagement from "./pages/rescues/RescueManagement";
+import RescueRequests from "./pages/rescues/RescueRequests";
+import RescueDispatch from "./pages/rescues/RescueDispatch";
+import FosterManagement from "./pages/fosters/FosterManagement";
+import VolunteerManagement from "./pages/volunteers/VolunteerManagement";
+import LostAndFound from "./pages/lostfound/LostAndFound";
+import VehicleManagement from "./pages/vehicles/VehicleManagement";
+
 import SuperAdminDashboard from "./pages/dashboard/roles/SuperAdminDashboard";
 import RescueCentreAdminDashboard from "./pages/dashboard/roles/RescueCentreAdminDashboard";
 import RescueCoordinatorDashboard from "./pages/dashboard/roles/RescueCoordinatorDashboard";
@@ -94,7 +102,7 @@ function App() {
               <Route path="/dashboard/finance" element={<FinanceUserDashboard />} />
             </Route>
 
-            {/* Operational Module Routes with Strict Internal Staff RBAC Route Guards */}
+            {/* Operational Module Routes with Proper RBAC Route Guards */}
             <Route
               element={
                 <ProtectedRoute
@@ -110,6 +118,23 @@ function App() {
               }
             >
               <Route path="/users" element={<Users />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "rescue_agent",
+                  ]}
+                />
+              }
+            >
+              <Route path="/rescues" element={<RescueManagement />} />
+              <Route path="/rescue-requests" element={<RescueRequests />} />
+              <Route path="/rescue-dispatch" element={<RescueDispatch />} />
             </Route>
 
             <Route
@@ -149,10 +174,42 @@ function App() {
 
             <Route
               element={
-                <ProtectedRoute allowedRoles={["super_admin", "adoption_coordinator"]} />
+                <ProtectedRoute allowedRoles={["super_admin", "adoption_coordinator", "rescue_centre_admin"]} />
               }
             >
               <Route path="/adoptions" element={<Adoptions />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute allowedRoles={["super_admin", "foster_coordinator", "rescue_centre_admin"]} />
+              }
+            >
+              <Route path="/fosters" element={<FosterManagement />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute allowedRoles={["super_admin", "volunteer_coordinator", "shelter_manager"]} />
+              }
+            >
+              <Route path="/volunteers" element={<VolunteerManagement />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "shelter_manager",
+                    "adoption_coordinator",
+                  ]}
+                />
+              }
+            >
+              <Route path="/lost-and-found" element={<LostAndFound />} />
             </Route>
 
             <Route
@@ -186,6 +243,20 @@ function App() {
               }
             >
               <Route path="/finance" element={<Finance />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                  ]}
+                />
+              }
+            >
+              <Route path="/vehicles" element={<VehicleManagement />} />
             </Route>
 
             <Route

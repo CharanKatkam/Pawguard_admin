@@ -2,28 +2,25 @@ import { useState, useEffect } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import { useToast } from "../../../context/ToastContext";
 import { FaClipboardList, FaClock, FaCalendarCheck, FaHeart } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const VolunteerDashboard = () => {
+  const { addToast } = useToast();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getVolunteerDashboard();
-      console.log("Volunteer Personal Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Volunteer Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +30,12 @@ const VolunteerDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const tasksList = Array.isArray(dashboardData?.tasks)
     ? dashboardData.tasks
@@ -56,12 +59,12 @@ const VolunteerDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const formattedData = tasksList.map((t: any, idx: number) => ({
-    taskId: t.taskId || t.id || `TSK-${101 + idx}`,
-    title: t.title || t.activity || "-",
-    location: t.location || t.facility || "-",
-    schedule: t.schedule || t.time || "-",
-    status: t.status || "Assigned",
+  const formattedData = tasksList.map((t: any) => ({
+    taskId: t.id ?? t.task_id ?? "",
+    title: t.title ?? t.activity ?? "",
+    location: t.location ?? t.facility ?? "",
+    schedule: t.schedule ?? t.time ?? "",
+    status: t.status ?? "",
   }));
 
   return (
@@ -91,8 +94,8 @@ const VolunteerDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaClock />} title="Log Shift Hours" subtitle="Submit volunteer hours" color="#10B981" onClick={() => alert("Log Shift Hours modal")} />
-        <QuickActionCard icon={<FaHeart />} title="View Community Events" subtitle="Browse upcoming events" color="#2563EB" onClick={() => alert("Events modal")} />
+        <QuickActionCard icon={<FaClock />} title="Log Shift Hours" subtitle="Submit volunteer hours" color="#10B981" onClick={() => addToast("Open the Volunteers module to log shift hours", "info")} />
+        <QuickActionCard icon={<FaHeart />} title="View Community Events" subtitle="Browse upcoming events" color="#2563EB" onClick={() => addToast("Open the Volunteers module to view community events", "info")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

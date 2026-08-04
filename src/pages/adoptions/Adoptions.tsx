@@ -2,34 +2,149 @@ import { useState, useEffect } from "react";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
-import { FaHeart, FaUserCheck, FaClipboardCheck, FaPlus } from "react-icons/fa";
+import Modal from "../../components/common/Modal";
+import { useToast } from "../../context/ToastContext";
+import { FaHeart, FaUserCheck, FaClipboardCheck, FaPlus, FaTrash } from "react-icons/fa";
 import adoptionService from "../../services/adoptionService";
+import { notifyDataChanged } from "../../utils/dataSync";
 
 const Adoptions = () => {
   const [adoptions, setAdoptions] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const { addToast } = useToast();
+
+  // Modals state
+  const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [selectedApp, _setSelectedApp] = useState<any | null>(null);
+
+  // Form states
+  const [newForm, setNewForm] = useState({ applicantName: "", petName: "", notes: "" });
+  const [scheduleForm, setScheduleForm] = useState({ appId: "", date: "", coordinator: "" });
+  const [approveForm, setApproveForm] = useState({ appId: "" });
+  const [editStatus, setEditStatus] = useState("Approved");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const fetchAdoptions = async () => {
-      try {
-        setLoading(true);
-        const response = await adoptionService.getAdoptions();
-        if (response && Array.isArray(response.data)) {
-          setAdoptions(response.data);
-        }
-      } catch {
-        // Handled by service fallback
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchAdoptions();
   }, []);
 
+  const fetchAdoptions = async () => {
+    try {
+      setLoading(true);
+      const response = await adoptionService.getAdoptions();
+      if (response && Array.isArray(response.data)) {
+        setAdoptions(response.data);
+      }
+    } catch {
+      // Handled by service fallback
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateNewAdoption = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newForm.applicantName) {
+      addToast("Applicant Name is required", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await adoptionService.createAdoption({
+        applicant_name: newForm.applicantName,
+        pet_name: newForm.petName,
+        notes: newForm.notes,
+      });
+      addToast(`New adoption application logged for ${newForm.applicantName}!`, "success");
+      setIsNewModalOpen(false);
+      setNewForm({ applicantName: "", petName: "", notes: "" });
+      fetchAdoptions();
+      notifyDataChanged();
+      notifyDataChanged();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to log adoption application.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleScheduleVerification = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scheduleForm.appId) {
+      addToast("Please select an application to schedule a visit for.", "error");
+      return;
+    }
+    addToast("Home verification visits are coordinated from the adoption field workflow", "info");
+    setIsScheduleModalOpen(false);
+  };
+
+  const handleApproveAdoption = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = approveForm.appId;
+    if (!id) {
+      addToast("Please select an application to approve.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await adoptionService.updateAdoptionStatus(id, "Approved");
+      addToast(`Adoption application ${id} Approved!`, "success");
+      setIsApproveModalOpen(false);
+      setApproveForm({ appId: "" });
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to approve application.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdateStatusSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedApp) return;
+    try {
+      setIsSubmitting(true);
+      await adoptionService.updateAdoptionStatus(selectedApp.applicationId, editStatus);
+      addToast(`Application ${selectedApp.applicationId} status updated to ${editStatus}!`, "success");
+      setIsEditModalOpen(false);
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update application status.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteApplication = async () => {
+    if (!selectedApp) return;
+    try {
+      setIsSubmitting(true);
+      await adoptionService.deleteAdoption(selectedApp.applicationId);
+      addToast(`Deleted application ${selectedApp.applicationId}`, "success");
+      setIsDeleteModalOpen(false);
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to delete application.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const stats = [
-    { title: "Adoptions Completed", value: `${adoptions.length || 186} Pets`, trend: "+14 this month", color: "#10B981", icon: <FaHeart /> },
-    { title: "Pending Applications", value: "32 Reviews", trend: "5 Priority", color: "#F59E0B", icon: <FaClipboardCheck /> },
-    { title: "Home Verifications", value: "12 Scheduled", trend: "Active", color: "#2563EB", icon: <FaUserCheck /> },
+    { title: "Adoptions Completed", value: `${adoptions.filter(a => a.status === "Approved").length} Pets`, trend: "Approved", color: "#10B981", icon: <FaHeart /> },
+    { title: "Pending Applications", value: `${adoptions.filter(a => a.status !== "Approved").length} Reviews`, trend: "In Review", color: "#F59E0B", icon: <FaClipboardCheck /> },
+    { title: "Home Verifications", value: "Track In Modal", trend: "Active Visits", color: "#2563EB", icon: <FaUserCheck /> },
   ];
 
   const columns = [
@@ -50,9 +165,9 @@ const Adoptions = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="New Adoption Request" subtitle="Log walk-in applicant" color="#2563EB" onClick={() => alert("New Application modal")} />
-        <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#10B981" onClick={() => alert("Schedule Visit modal")} />
-        <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Issue certificate & finalize" color="#6366F1" onClick={() => alert("Approve modal")} />
+        <QuickActionCard icon={<FaPlus />} title="New Adoption Request" subtitle="Log walk-in applicant" color="#2563EB" onClick={() => setIsNewModalOpen(true)} />
+        <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#10B981" onClick={() => setIsScheduleModalOpen(true)} />
+        <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Issue certificate & finalize" color="#6366F1" onClick={() => setIsApproveModalOpen(true)} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -68,8 +183,111 @@ const Adoptions = () => {
           </h3>
           {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading applications...</span>}
         </div>
-        <DataTable columns={columns} data={adoptions} onView={(r) => alert(`Application: ${r.applicationId}`)} onEdit={(r) => alert(`Review Application: ${r.applicationId}`)} />
+        <DataTable
+          columns={columns}
+          data={adoptions}
+          onEdit={async (r) => {
+            await adoptionService.updateAdoptionStatus(r.id || "1", r.status || "Approved");
+            fetchAdoptions();
+          }}
+          onDelete={async (r) => {
+            await adoptionService.deleteAdoption(r.id || "1");
+            fetchAdoptions();
+          }}
+        />
       </div>
+
+      {/* New Adoption Request Modal */}
+      <Modal isOpen={isNewModalOpen} onClose={() => setIsNewModalOpen(false)} title="Log New Adoption Application">
+        <form onSubmit={handleCreateNewAdoption} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Applicant Full Name *</label>
+            <input type="text" required placeholder="e.g. Emily Clark" value={newForm.applicantName} onChange={(e) => setNewForm({ ...newForm, applicantName: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Pet Requested</label>
+            <input type="text" value={newForm.petName} onChange={(e) => setNewForm({ ...newForm, petName: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsNewModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600 }}>Log Application</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Schedule Home Verification Modal */}
+      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Inspection Visit">
+        <form onSubmit={handleScheduleVerification} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Select Application</label>
+            <select value={scheduleForm.appId} onChange={(e) => setScheduleForm({ ...scheduleForm, appId: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+              {adoptions.map((a: any) => (
+                <option key={a.applicationId} value={a.applicationId}>{a.applicantName} ({a.petName})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspection Date</label>
+            <input type="date" value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>Book Inspection Visit</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Approve Adoption Modal */}
+      <Modal isOpen={isApproveModalOpen} onClose={() => setIsApproveModalOpen(false)} title="Finalize & Approve Adoption">
+        <form onSubmit={handleApproveAdoption} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Select Application to Approve</label>
+            <select value={approveForm.appId} onChange={(e) => setApproveForm({ ...approveForm, appId: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+              {adoptions.map((a: any) => (
+                <option key={a.applicationId} value={a.applicationId}>{a.applicationId} - {a.applicantName} ({a.petName})</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsApproveModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Approving..." : "Approve Adoption"}</button>
+          </div>
+        </form>
+      </Modal>
+
+
+
+      {/* Edit Application Modal */}
+      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Update Application Decision">
+        <form onSubmit={handleUpdateStatusSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Decision Status</label>
+            <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+              <option value="Approved">Approved</option>
+              <option value="In Review">In Review</option>
+              <option value="Pending">Pending</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsEditModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Saving..." : "Save Status"}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Application Modal */}
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Application Record">
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ color: "#334155", margin: 0 }}>
+            Are you sure you want to remove application <strong>{selectedApp?.applicationId}</strong> for {selectedApp?.applicantName}?
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleDeleteApplication} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}><FaTrash /> Delete</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

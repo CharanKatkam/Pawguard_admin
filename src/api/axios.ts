@@ -25,7 +25,7 @@ api.interceptors.request.use(
   }
 );
 
-// Response Interceptor: Global 401 & 403 authorization handler
+// Response Interceptor: Global 401 authorization handler
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -37,8 +37,6 @@ api.interceptors.response.use(
         localStorage.removeItem("refresh_token");
         localStorage.removeItem("user");
         window.location.href = "/";
-      } else if (status === 403 && window.location.pathname !== "/403") {
-        window.location.href = "/403";
       }
     }
 

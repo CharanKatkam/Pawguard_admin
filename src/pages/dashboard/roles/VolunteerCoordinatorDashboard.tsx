@@ -1,29 +1,26 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaUsers, FaCalendarAlt, FaClipboardList, FaUserCheck } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const VolunteerCoordinatorDashboard = () => {
+  const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getVolunteerDashboard();
-      console.log("Volunteer Dashboard:", res);
       const data = res?.data || res || {};
       setDashboardData(data);
     } catch (err: any) {
-      console.error("Volunteer Coordinator Dashboard Error:", err);
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
@@ -33,6 +30,12 @@ const VolunteerCoordinatorDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const shiftsList = Array.isArray(dashboardData?.shifts)
     ? dashboardData.shifts
@@ -56,12 +59,12 @@ const VolunteerCoordinatorDashboard = () => {
     { key: "attendance", title: "Attendance" },
   ];
 
-  const formattedData = shiftsList.map((item: any, idx: number) => ({
-    volunteerId: item.volunteerId || item.id || `VOL-${501 + idx}`,
-    name: item.name || item.volunteer_name || "-",
-    assignedTask: item.assignedTask || item.task || item.title || "-",
-    shiftTime: item.shiftTime || item.schedule || item.time || "-",
-    attendance: item.attendance || item.status || "Confirmed",
+  const formattedData = shiftsList.map((item: any) => ({
+    volunteerId: item.id ?? item.volunteer_id ?? "",
+    name: item.volunteer_name ?? item.name ?? "",
+    assignedTask: item.task ?? item.title ?? item.assignedTask ?? "",
+    shiftTime: item.schedule ?? item.time ?? item.shiftTime ?? "",
+    attendance: item.attendance ?? item.status ?? "",
   }));
 
   return (
@@ -91,9 +94,9 @@ const VolunteerCoordinatorDashboard = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaUsers />} title="Onboard Volunteer" subtitle="Register new volunteer" color="#2563EB" onClick={() => alert("Onboard Volunteer modal")} />
-        <QuickActionCard icon={<FaCalendarAlt />} title="Schedule Shift Roster" subtitle="Assign shelter tasks" color="#10B981" onClick={() => alert("Schedule Roster modal")} />
-        <QuickActionCard icon={<FaClipboardList />} title="Log Attendance" subtitle="Verify volunteer hours" color="#6366F1" onClick={() => alert("Log Attendance modal")} />
+        <QuickActionCard icon={<FaUsers />} title="Onboard Volunteer" subtitle="Register new volunteer" color="#2563EB" onClick={() => navigate("/users")} />
+        <QuickActionCard icon={<FaCalendarAlt />} title="Schedule Shift Roster" subtitle="Assign shelter tasks" color="#10B981" onClick={() => navigate("/volunteers")} />
+        <QuickActionCard icon={<FaClipboardList />} title="Log Attendance" subtitle="Verify volunteer hours" color="#6366F1" onClick={() => navigate("/volunteers")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

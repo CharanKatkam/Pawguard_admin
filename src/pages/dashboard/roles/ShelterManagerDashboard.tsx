@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
@@ -11,10 +12,14 @@ import {
   FaClipboardList,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import shelterService from "../../../services/shelterService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const ShelterManagerDashboard = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [kennelRows, setKennelRows] = useState<any[]>([]);
 
   const [dashboardData, setDashboardData] = useState({
     total_facilities: 0,
@@ -24,9 +29,8 @@ const ShelterManagerDashboard = () => {
     occupancy_rate: 0,
   });
 
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
+  const unwrapList = (v: any) =>
+    Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
   const fetchDashboard = async () => {
     try {
@@ -34,7 +38,6 @@ const ShelterManagerDashboard = () => {
       setError(null);
 
       const response = await dashboardService.getShelterDashboard();
-      console.log("Shelter Dashboard:", response);
 
       const data = response?.data || response || {};
       setDashboardData({
@@ -44,6 +47,37 @@ const ShelterManagerDashboard = () => {
         total_kennels: data.total_kennels ?? data.totalKennels ?? 0,
         occupancy_rate: data.occupancy_rate ?? data.occupancyRate ?? 0,
       });
+
+      // Prefer kennel data included in the dashboard payload, otherwise load
+      // it live from the shelter facility hierarchy.
+      const payloadKennels =
+        Array.isArray(data.kennels) ? data.kennels : Array.isArray(data.kennel_list) ? data.kennel_list : null;
+
+      if (payloadKennels) {
+        setKennelRows(payloadKennels.map((k: any) => mapKennel(k)));
+      } else {
+        const shelterRes = await shelterService.getShelters();
+        const shelters = unwrapList(shelterRes);
+
+        const sectionResults = await Promise.allSettled(
+          shelters.map((s: any) =>
+            shelterService.getFacilitySections(s.facility_id ?? s.id)
+          )
+        );
+        const sections = sectionResults.flatMap((r) =>
+          r.status === "fulfilled" ? unwrapList(r.value) : []
+        );
+
+        const kennelResults = await Promise.allSettled(
+          sections.map((sec: any) =>
+            shelterService.getSectionKennels(sec.section_id ?? sec.id)
+          )
+        );
+        const kennels = kennelResults.flatMap((r) =>
+          r.status === "fulfilled" ? unwrapList(r.value) : []
+        );
+        setKennelRows(kennels.map((k: any) => mapKennel(k)));
+      }
     } catch (err: any) {
       console.error("Shelter Dashboard Error:", err);
       setError(
@@ -55,6 +89,21 @@ const ShelterManagerDashboard = () => {
       setLoading(false);
     }
   };
+
+  const mapKennel = (k: any) => ({
+    cageNo: k.kennel_id ?? k.id ?? k.kennel_name ?? k.name ?? "",
+    petName:
+      k.dog_name ?? k.pet_name ?? (k.dog ? `${k.dog.name ?? ""} (${k.dog.dog_id ?? k.dog.id ?? ""})` : ""),
+    feeding: k.feeding_plan ?? k.diet ?? k.feeding ?? "",
+    careLog: k.care_notes ?? k.care_requirements ?? k.care_log ?? k.notes ?? "",
+    status: k.status ?? (k.is_occupied ? "Occupied" : "Available"),
+  });
+
+  useDataSync(fetchDashboard);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
 
 
   const stats = [
@@ -94,30 +143,6 @@ const ShelterManagerDashboard = () => {
     { key: "feeding", title: "Diet & Feeding Plan" },
     { key: "careLog", title: "Special Care Requirements" },
     { key: "status", title: "Status" },
-  ];
-
-  const data = [
-    {
-      cageNo: "Cage A-01",
-      petName: "Bella (DOG-415)",
-      feeding: "Adult Kibble - 400g (Twice)",
-      careLog: "Daily Grooming & Medicated Bath",
-      status: "Healthy",
-    },
-    {
-      cageNo: "Cage A-02",
-      petName: "Rocky (DOG-388)",
-      feeding: "High-Calorie Recovery Diet",
-      careLog: "Post-Op Wound Dressing (10 AM)",
-      status: "In Recovery",
-    },
-    {
-      cageNo: "Cage B-05",
-      petName: "Bruno (DOG-430)",
-      feeding: "Puppy Formula - 200g",
-      careLog: "Deworming scheduled for Friday",
-      status: "Healthy",
-    },
   ];
 
   return (
@@ -187,7 +212,7 @@ const ShelterManagerDashboard = () => {
           title="Allocate Cage"
           subtitle="Assign dog to kennel"
           color="#2563EB"
-          onClick={() => alert("Allocate Cage")}
+          onClick={() => navigate("/shelters")}
         />
 
         <QuickActionCard
@@ -195,7 +220,7 @@ const ShelterManagerDashboard = () => {
           title="Log Feeding"
           subtitle="Update nutrition plan"
           color="#10B981"
-          onClick={() => alert("Log Feeding")}
+          onClick={() => navigate("/pets")}
         />
 
         <QuickActionCard
@@ -203,7 +228,7 @@ const ShelterManagerDashboard = () => {
           title="Request Supplies"
           subtitle="Food & Medicine"
           color="#F59E0B"
-          onClick={() => alert("Request Supplies")}
+          onClick={() => navigate("/inventory")}
         />
 
         <QuickActionCard
@@ -211,7 +236,7 @@ const ShelterManagerDashboard = () => {
           title="Shift Roster"
           subtitle="Manage Staff"
           color="#6366F1"
-          onClick={() => alert("Shift Roster")}
+          onClick={() => navigate("/users")}
         />
       </div>
 
@@ -262,7 +287,12 @@ const ShelterManagerDashboard = () => {
           )}
         </div>
 
-        <DataTable columns={columns} data={data} />
+        <DataTable
+          columns={columns}
+          data={kennelRows}
+          loading={loading}
+          emptyMessage="No kennel allocations found. Allocate a cage from the Shelters module."
+        />
       </div>
     </div>
   );

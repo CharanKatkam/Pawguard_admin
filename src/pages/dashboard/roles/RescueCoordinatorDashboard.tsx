@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import { useToast } from "../../../context/ToastContext";
+import reportsService from "../../../services/reportsService";
 import {
   FaAmbulance,
   FaUserPlus,
@@ -11,6 +14,7 @@ import {
   FaExclamationTriangle,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 interface RescueDashboardData {
   total_calls: number;
@@ -21,6 +25,8 @@ interface RescueDashboardData {
 }
 
 const RescueCoordinatorDashboard = () => {
+  const navigate = useNavigate();
+  const { addToast } = useToast();
   const [dashboardData, setDashboardData] =
     useState<RescueDashboardData>({
       total_calls: 0,
@@ -33,17 +39,12 @@ const RescueCoordinatorDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
-
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
 
       const response = await dashboardService.getRescueDashboard();
-      console.log("Coordinator Dashboard:", response);
 
       const data = response?.data || response || {};
       setDashboardData({
@@ -65,6 +66,11 @@ const RescueCoordinatorDashboard = () => {
     }
   };
 
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const stats = [
     {
@@ -170,7 +176,7 @@ const RescueCoordinatorDashboard = () => {
           title="New Emergency"
           subtitle="Log Distress Call"
           color="#EF4444"
-          onClick={() => alert("New Emergency")}
+          onClick={() => navigate("/pets")}
         />
 
         <QuickActionCard
@@ -178,7 +184,7 @@ const RescueCoordinatorDashboard = () => {
           title="Assign Agent"
           subtitle="Dispatch Field Agent"
           color="#2563EB"
-          onClick={() => alert("Assign Agent")}
+          onClick={() => navigate("/users")}
         />
 
         <QuickActionCard
@@ -186,7 +192,7 @@ const RescueCoordinatorDashboard = () => {
           title="Track Agents"
           subtitle="Live Tracking"
           color="#10B981"
-          onClick={() => alert("Tracking")}
+          onClick={() => navigate("/dispatch")}
         />
 
         <QuickActionCard
@@ -194,7 +200,11 @@ const RescueCoordinatorDashboard = () => {
           title="Export Logs"
           subtitle="Download Reports"
           color="#6366F1"
-          onClick={() => alert("Reports")}
+          onClick={async () => {
+            addToast("Exporting rescue logs...", "info");
+            await reportsService.exportCsvDump();
+            addToast("Rescue logs exported successfully!", "success");
+          }}
         />
       </div>
 

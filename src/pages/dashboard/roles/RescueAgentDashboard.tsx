@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import { useToast } from "../../../context/ToastContext";
 import {
   FaAmbulance,
   FaCamera,
@@ -9,6 +11,7 @@ import {
   FaClipboardCheck,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 interface RescueDashboardData {
   total_calls: number;
@@ -19,6 +22,8 @@ interface RescueDashboardData {
 }
 
 const RescueAgentDashboard = () => {
+  const navigate = useNavigate();
+  const { addToast } = useToast();
   const [dashboardData, setDashboardData] =
     useState<RescueDashboardData>({
       total_calls: 0,
@@ -31,17 +36,12 @@ const RescueAgentDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
-
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
 
       const response = await dashboardService.getRescueDashboard();
-      console.log("Rescue Agent Dashboard:", response);
 
       const data = response?.data || response || {};
       setDashboardData({
@@ -63,6 +63,11 @@ const RescueAgentDashboard = () => {
     }
   };
 
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  useDataSync(fetchDashboard);
 
   const stats = [
     {
@@ -171,7 +176,7 @@ const RescueAgentDashboard = () => {
           title="Upload Photos"
           subtitle="Attach Rescue Images"
           color="#2563EB"
-          onClick={() => alert("Upload Photos")}
+          onClick={() => addToast("Select rescue photos from device to attach", "info")}
         />
 
         <QuickActionCard
@@ -179,7 +184,7 @@ const RescueAgentDashboard = () => {
           title="Update Status"
           subtitle="Complete Rescue"
           color="#10B981"
-          onClick={() => alert("Update Status")}
+          onClick={() => navigate("/pets")}
         />
 
         <QuickActionCard
@@ -187,7 +192,7 @@ const RescueAgentDashboard = () => {
           title="Confirm Delivery"
           subtitle="Send to Shelter"
           color="#6366F1"
-          onClick={() => alert("Confirm Delivery")}
+          onClick={() => navigate("/shelters")}
         />
       </div>
 

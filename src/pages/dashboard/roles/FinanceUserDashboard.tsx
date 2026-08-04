@@ -1,26 +1,24 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaCoins, FaFileInvoiceDollar, FaHandHoldingHeart, FaChartLine } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const FinanceUserDashboard = () => {
+  const navigate = useNavigate();
   const [financeData, setFinanceData] = useState<Record<string, unknown>[]>([]);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchFinance();
-  }, []);
 
   const fetchFinance = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getFinanceDashboard();
-      console.log("Finance Dashboard:", res);
       const data = res?.data || res || {};
       setSummaryData(data);
 
@@ -44,6 +42,12 @@ const FinanceUserDashboard = () => {
     }
   };
 
+  useEffect(() => {
+    fetchFinance();
+  }, []);
+
+  useDataSync(fetchFinance);
+
   const formatCurrency = (val: any, fallback: string) => {
     if (val === undefined || val === null) return fallback;
     if (typeof val === "number") return `$${val.toLocaleString()}`;
@@ -66,13 +70,13 @@ const FinanceUserDashboard = () => {
     { key: "status", title: "Status" },
   ];
 
-  const formattedTransactions = financeData.map((tx: any, idx: number) => ({
-    txId: tx.txId || tx.id || `TX-${901 + idx}`,
-    entity: tx.entity || tx.donor || tx.name || "-",
-    type: tx.type || tx.category || "Donation",
-    amount: tx.amount !== undefined ? `$${tx.amount}` : "-",
-    date: tx.date || tx.created_at || "-",
-    status: tx.status || "Completed",
+  const formattedTransactions = financeData.map((tx: any) => ({
+    txId: tx.id ?? tx.transaction_id ?? tx.tx_id ?? "",
+    entity: tx.entity ?? tx.donor ?? tx.name ?? "",
+    type: tx.category ?? tx.type ?? "",
+    amount: tx.amount !== undefined && tx.amount !== null ? `$${tx.amount}` : "",
+    date: tx.created_at ?? tx.date ?? "",
+    status: tx.status ?? "",
   }));
 
   return (
@@ -103,9 +107,9 @@ const FinanceUserDashboard = () => {
 
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaHandHoldingHeart />} title="Record Donation" subtitle="Log sponsor contribution" color="#10B981" onClick={() => alert("Record Donation modal")} />
-        <QuickActionCard icon={<FaFileInvoiceDollar />} title="Log Expense Bill" subtitle="Record medical or shelter bill" color="#2563EB" onClick={() => alert("Log Expense modal")} />
-        <QuickActionCard icon={<FaChartLine />} title="Financial Audit Report" subtitle="Export balance sheet" color="#6366F1" onClick={() => alert("Financial Audit modal")} />
+        <QuickActionCard icon={<FaHandHoldingHeart />} title="Record Donation" subtitle="Log sponsor contribution" color="#10B981" onClick={() => navigate("/finance")} />
+        <QuickActionCard icon={<FaFileInvoiceDollar />} title="Log Expense Bill" subtitle="Record medical or shelter bill" color="#2563EB" onClick={() => navigate("/finance")} />
+        <QuickActionCard icon={<FaChartLine />} title="Financial Audit Report" subtitle="Export balance sheet" color="#6366F1" onClick={() => navigate("/reports")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

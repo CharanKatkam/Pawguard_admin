@@ -5,8 +5,10 @@ import axios from "axios";
 import PasswordInput from "./PasswordInput";
 import authService from "../../services/auth/authService";
 import { getDashboardPathForRole, normalizeRole } from "../../utils/roleUtils";
+import { useToast } from "../../context/ToastContext";
 
 const LoginForm = () => {
+  const { addToast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -104,6 +106,7 @@ const LoginForm = () => {
       throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
     }
 
+    userObj.role = userRole;
     localStorage.setItem("user", JSON.stringify(userObj));
 
     if (rememberMe) {
@@ -196,8 +199,10 @@ const LoginForm = () => {
       <div style={{ marginBottom: "16px" }}>
         <label htmlFor="password">Password</label>
         <PasswordInput
+          id="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
         />
       </div>
 
@@ -212,7 +217,7 @@ const LoginForm = () => {
           Remember me
         </label>
 
-        <a href="#forgot" onClick={(e) => { e.preventDefault(); alert("Password reset instructions sent to your administrator."); }}>
+        <a href="#forgot" onClick={(e) => { e.preventDefault(); addToast("Password reset instructions sent to system administrator.", "info"); }}>
           Forgot Password?
         </a>
       </div>

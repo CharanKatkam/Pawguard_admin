@@ -1,26 +1,24 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaBoxes, FaPills, FaTruck, FaExclamationTriangle } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import { useDataSync } from "../../../utils/dataSync";
 
 const InventoryManagerDashboard = () => {
+  const navigate = useNavigate();
   const [inventoryData, setInventoryData] = useState<Record<string, unknown>[]>([]);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchInventory();
-  }, []);
 
   const fetchInventory = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await dashboardService.getInventoryDashboard();
-      console.log("Inventory Dashboard:", res);
       const data = res?.data || res || {};
       setSummaryData(data);
 
@@ -44,6 +42,12 @@ const InventoryManagerDashboard = () => {
     }
   };
 
+  useEffect(() => {
+    fetchInventory();
+  }, []);
+
+  useDataSync(fetchInventory);
+
   const stats = [
     { title: "Total Inventory Units", value: loading ? "..." : String(summaryData?.total_items ?? summaryData?.totalItems ?? inventoryData.length), trend: "Categories", color: "#2563EB", icon: <FaBoxes /> },
     { title: "Medicines & Vaccines", value: loading ? "..." : String(summaryData?.medicines_stock ?? summaryData?.medicinesStock ?? "0"), trend: "Medical Stock", color: "#10B981", icon: <FaPills /> },
@@ -60,13 +64,13 @@ const InventoryManagerDashboard = () => {
     { key: "supplier", title: "Supplier" },
   ];
 
-  const formattedInventory = inventoryData.map((item: any, idx: number) => ({
-    sku: item.sku || item.code || item.id || `SKU-${101 + idx}`,
-    itemName: item.itemName || item.name || item.item_name || "-",
-    category: item.category || "-",
-    stock: item.stock !== undefined ? item.stock : item.quantity !== undefined ? item.quantity : "-",
-    status: item.status || "In Stock",
-    supplier: item.supplier || item.vendor || "-",
+  const formattedInventory = inventoryData.map((item: any) => ({
+    sku: item.id ?? item.sku ?? item.code ?? "",
+    itemName: item.name ?? item.item_name ?? item.itemName ?? "",
+    category: item.category ?? "",
+    stock: item.stock !== undefined ? item.stock : item.quantity !== undefined ? item.quantity : "",
+    status: item.status ?? "",
+    supplier: item.supplier ?? item.vendor ?? "",
   }));
 
   return (
@@ -97,9 +101,9 @@ const InventoryManagerDashboard = () => {
 
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaBoxes />} title="Add Inventory Item" subtitle="Register new item" color="#2563EB" onClick={() => alert("Add Item modal")} />
-        <QuickActionCard icon={<FaTruck />} title="Issue Purchase Order" subtitle="Order from vendor" color="#10B981" onClick={() => alert("Purchase Order modal")} />
-        <QuickActionCard icon={<FaExclamationTriangle />} title="Low Stock Audit" subtitle="Review depleted items" color="#EF4444" onClick={() => alert("Stock Audit modal")} />
+        <QuickActionCard icon={<FaBoxes />} title="Add Inventory Item" subtitle="Register new item" color="#2563EB" onClick={() => navigate("/inventory")} />
+        <QuickActionCard icon={<FaTruck />} title="Issue Purchase Order" subtitle="Order from vendor" color="#10B981" onClick={() => navigate("/inventory")} />
+        <QuickActionCard icon={<FaExclamationTriangle />} title="Low Stock Audit" subtitle="Review depleted items" color="#EF4444" onClick={() => navigate("/inventory")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>

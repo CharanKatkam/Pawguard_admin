@@ -1,94 +1,109 @@
 import api from "../api/axios";
 
 export const dashboardService = {
-  // GET /dashboards/super-admin
+  // GET /admin/dashboard/summary (Exact OpenAPI endpoint for Super Admin Dashboard)
   getSuperAdminDashboard: async () => {
-    const response = await api.get("/dashboards/super-admin");
+    const response = await api.get("/admin/dashboard/summary");
     return response.data;
   },
 
   // Backwards compatibility alias for Super Admin Dashboard
   getDashboardStats: async (_role?: string) => {
-    const response = await api.get("/dashboards/super-admin");
+    const response = await api.get("/admin/dashboard/summary");
     return response.data;
   },
 
-  // GET /dashboards/recent-activity
-  getRecentActivities: async () => {
-    const response = await api.get("/dashboards/recent-activity");
+  // GET /admin/dashboard/recent-activity (Exact OpenAPI endpoint)
+  getRecentActivities: async (limit: number = 20) => {
+    const response = await api.get("/admin/dashboard/recent-activity", { params: { limit } });
     return response.data;
   },
 
-  // GET /dashboards/audit-logs
-  getAuditLogs: async () => {
-    const response = await api.get("/dashboards/audit-logs");
+  // GET /admin/audit-logs (Exact OpenAPI endpoint)
+  getAuditLogs: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/admin/audit-logs", { params });
     return response.data;
   },
 
-
-  // GET /dashboards/rescue-centre
+  // GET /dashboards/rescue (Exact OpenAPI endpoint)
   getRescueCentreDashboard: async () => {
-    const response = await api.get("/dashboards/rescue-centre");
+    const response = await api.get("/dashboards/rescue");
     return response.data;
   },
 
-  // GET /dashboards/rescue
   getRescueDashboard: async () => {
     const response = await api.get("/dashboards/rescue");
     return response.data;
   },
 
-  // GET /dashboards/veterinarian
+  // GET /dashboards/medical (Exact OpenAPI endpoint)
   getVeterinarianDashboard: async () => {
-    const response = await api.get("/dashboards/veterinarian");
+    const response = await api.get("/dashboards/medical");
     return response.data;
   },
 
-  // Backwards compatibility alias for medical dashboard
   getMedicalDashboard: async () => {
-    const response = await api.get("/dashboards/veterinarian");
+    const response = await api.get("/dashboards/medical");
     return response.data;
   },
 
-  // GET /dashboards/shelter
+  // GET /dashboards/shelter (Exact OpenAPI endpoint)
   getShelterDashboard: async () => {
     const response = await api.get("/dashboards/shelter");
     return response.data;
   },
 
-  // GET /dashboards/adoption
+  // GET /dashboards/adoption (Exact OpenAPI endpoint)
   getAdoptionDashboard: async () => {
     const response = await api.get("/dashboards/adoption");
     return response.data;
   },
 
-  // GET /dashboards/foster
+  // GET /dashboards/foster (Exact OpenAPI endpoint)
   getFosterDashboard: async () => {
     const response = await api.get("/dashboards/foster");
     return response.data;
   },
 
-  // GET /dashboards/volunteer
+  // GET /dashboards/volunteer (Exact OpenAPI endpoint)
   getVolunteerDashboard: async () => {
     const response = await api.get("/dashboards/volunteer");
     return response.data;
   },
 
-  // GET /dashboards/inventory
+  // GET /dashboards/inventory (Exact OpenAPI endpoint)
   getInventoryDashboard: async () => {
     const response = await api.get("/dashboards/inventory");
     return response.data;
   },
 
-  // GET /dashboards/finance
+  // GET /dashboards/finance (Exact OpenAPI endpoint)
   getFinanceDashboard: async () => {
     const response = await api.get("/dashboards/finance");
     return response.data;
   },
 
-  // GET /dashboards/staff
+  // GET /dashboards/staff (Exact OpenAPI endpoint)
   getStaffDashboard: async () => {
     const response = await api.get("/dashboards/staff");
+    return response.data;
+  },
+
+  // GET /dashboards/executive (Exact OpenAPI endpoint)
+  getExecutiveDashboard: async () => {
+    const response = await api.get("/dashboards/executive");
+    return response.data;
+  },
+
+  // GET /dashboards/public (Exact OpenAPI endpoint)
+  getPublicDashboard: async () => {
+    const response = await api.get("/dashboards/public");
+    return response.data;
+  },
+
+  // GET /dashboards/operations (Exact OpenAPI endpoint)
+  getOperationsDashboard: async () => {
+    const response = await api.get("/dashboards/operations");
     return response.data;
   },
 };
