@@ -23,6 +23,7 @@ import FosterManagement from "./pages/fosters/FosterManagement";
 import VolunteerManagement from "./pages/volunteers/VolunteerManagement";
 import LostAndFound from "./pages/lostfound/LostAndFound";
 import VehicleManagement from "./pages/vehicles/VehicleManagement";
+import Notifications from "./pages/notifications/Notifications";
 
 import SuperAdminDashboard from "./pages/dashboard/roles/SuperAdminDashboard";
 import RescueCentreAdminDashboard from "./pages/dashboard/roles/RescueCentreAdminDashboard";
@@ -106,6 +107,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_users"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -123,6 +125,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission={["view_rescues", "view_rescue_requests", "view_rescue_dispatch"]}
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -140,6 +143,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_animals"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -159,6 +163,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_shelters"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -174,7 +179,10 @@ function App() {
 
             <Route
               element={
-                <ProtectedRoute allowedRoles={["super_admin", "adoption_coordinator", "rescue_centre_admin"]} />
+                <ProtectedRoute
+                  permission="view_adoptions"
+                  allowedRoles={["super_admin", "adoption_coordinator", "rescue_centre_admin"]}
+                />
               }
             >
               <Route path="/adoptions" element={<Adoptions />} />
@@ -182,7 +190,10 @@ function App() {
 
             <Route
               element={
-                <ProtectedRoute allowedRoles={["super_admin", "foster_coordinator", "rescue_centre_admin"]} />
+                <ProtectedRoute
+                  permission="view_foster_placements"
+                  allowedRoles={["super_admin", "foster_coordinator", "rescue_centre_admin"]}
+                />
               }
             >
               <Route path="/fosters" element={<FosterManagement />} />
@@ -190,7 +201,10 @@ function App() {
 
             <Route
               element={
-                <ProtectedRoute allowedRoles={["super_admin", "volunteer_coordinator", "shelter_manager"]} />
+                <ProtectedRoute
+                  permission="view_volunteers"
+                  allowedRoles={["super_admin", "volunteer_coordinator", "shelter_manager"]}
+                />
               }
             >
               <Route path="/volunteers" element={<VolunteerManagement />} />
@@ -199,6 +213,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_lost_found"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -215,6 +230,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_medical"
                   allowedRoles={["super_admin", "rescue_centre_admin", "veterinarian"]}
                 />
               }
@@ -225,6 +241,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_inventory"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -239,7 +256,7 @@ function App() {
 
             <Route
               element={
-                <ProtectedRoute allowedRoles={["super_admin", "finance_user"]} />
+                <ProtectedRoute permission="view_finance" allowedRoles={["super_admin", "finance_user"]} />
               }
             >
               <Route path="/finance" element={<Finance />} />
@@ -248,6 +265,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_vehicles"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -262,6 +280,7 @@ function App() {
             <Route
               element={
                 <ProtectedRoute
+                  permission="view_reports"
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
@@ -280,15 +299,47 @@ function App() {
               <Route path="/reports" element={<Reports />} />
             </Route>
 
-            <Route element={<ProtectedRoute allowedRoles={["super_admin"]} />}>
+            <Route
+              element={
+                <ProtectedRoute
+                  permission={["view_roles", "manage_roles"]}
+                  allowedRoles={["super_admin"]}
+                />
+              }
+            >
               <Route path="/roles-permissions" element={<RolesPermissions />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute permission="view_audit_logs" allowedRoles={["super_admin"]} />
+              }
+            >
               <Route path="/audit-logs" element={<AuditLogs />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute permission="view_settings" allowedRoles={["super_admin"]} />
+              }
+            >
               <Route path="/settings" element={<Settings />} />
             </Route>
 
             <Route
               element={
-                <ProtectedRoute allowedRoles={["super_admin", "veterinarian"]} />
+                <ProtectedRoute permission="view_notifications" allowedRoles={["super_admin"]} />
+              }
+            >
+              <Route path="/notifications" element={<Notifications />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  permission="view_certificates"
+                  allowedRoles={["super_admin", "veterinarian"]}
+                />
               }
             >
               <Route path="/certificates" element={<Certificates />} />

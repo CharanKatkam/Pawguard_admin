@@ -4,6 +4,7 @@ import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaHeart, FaUserCheck, FaClipboardCheck, FaPlus, FaTrash } from "react-icons/fa";
 import adoptionService from "../../services/adoptionService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -165,9 +166,15 @@ const Adoptions = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="New Adoption Request" subtitle="Log walk-in applicant" color="#2563EB" onClick={() => setIsNewModalOpen(true)} />
-        <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#10B981" onClick={() => setIsScheduleModalOpen(true)} />
-        <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Issue certificate & finalize" color="#6366F1" onClick={() => setIsApproveModalOpen(true)} />
+        <Can permission="create_adoptions">
+          <QuickActionCard icon={<FaPlus />} title="New Adoption Request" subtitle="Log walk-in applicant" color="#2563EB" onClick={() => setIsNewModalOpen(true)} />
+        </Can>
+        <Can permission="create_adoptions">
+          <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#10B981" onClick={() => setIsScheduleModalOpen(true)} />
+        </Can>
+        <Can permission="approve_adoptions">
+          <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Issue certificate & finalize" color="#6366F1" onClick={() => setIsApproveModalOpen(true)} />
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -186,6 +193,7 @@ const Adoptions = () => {
         <DataTable
           columns={columns}
           data={adoptions}
+          module="adoptions"
           onEdit={async (r) => {
             await adoptionService.updateAdoptionStatus(r.id || "1", r.status || "Approved");
             fetchAdoptions();

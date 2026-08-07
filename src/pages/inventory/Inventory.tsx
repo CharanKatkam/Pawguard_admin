@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaBoxes, FaPills, FaTruck, FaExclamationTriangle, FaPlusCircle, FaTrash } from "react-icons/fa";
 import inventoryService from "../../services/inventoryService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -12,9 +14,10 @@ const Inventory = () => {
   const [inventory, setInventory] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const { addToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   // Modals state
-  const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false);
+  const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(() => searchParams.get("action") === "add");
   const [isPoModalOpen, setIsPoModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -48,6 +51,12 @@ const Inventory = () => {
   useEffect(() => {
     fetchInventory();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const fetchInventory = async () => {
     try {
@@ -193,8 +202,12 @@ const Inventory = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlusCircle />} title="Add Stock Item" subtitle="Register new inventory item" color="#2563EB" onClick={() => setIsAddItemModalOpen(true)} />
-        <QuickActionCard icon={<FaTruck />} title="Create Purchase Order" subtitle="Order supplies from vendor" color="#10B981" onClick={() => setIsPoModalOpen(true)} />
+        <Can permission="create_inventory">
+          <QuickActionCard icon={<FaPlusCircle />} title="Add Stock Item" subtitle="Register new inventory item" color="#2563EB" onClick={() => setIsAddItemModalOpen(true)} />
+        </Can>
+        <Can permission="create_inventory">
+          <QuickActionCard icon={<FaTruck />} title="Create Purchase Order" subtitle="Order supplies from vendor" color="#10B981" onClick={() => setIsPoModalOpen(true)} />
+        </Can>
         <QuickActionCard icon={<FaExclamationTriangle />} title="Low Stock Audit" subtitle="Review depleted items" color="#EF4444" onClick={() => setIsAuditModalOpen(true)} />
       </div>
 
@@ -214,6 +227,7 @@ const Inventory = () => {
         <DataTable
           columns={columns}
           data={inventory}
+          module="inventory"
           onEdit={async (r) => {
             await inventoryService.updateInventoryItem(r.id || "1", r);
             fetchInventory();

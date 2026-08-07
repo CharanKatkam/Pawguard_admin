@@ -46,6 +46,7 @@ const RecentActivities = () => {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadActivities();
   }, []);
 
@@ -85,17 +86,18 @@ const RecentActivities = () => {
                 "Activity"}
             </h4>
 
-            <p
-              style={{
-                margin: "6px 0",
-                color: "#6B7280",
-              }}
-            >
-              {activity.desc ||
-                activity.description ||
-                activity.message ||
-                "No description available"}
-            </p>
+            {(activity.desc ||
+              activity.description ||
+              activity.message) && (
+              <p
+                style={{
+                  margin: "6px 0",
+                  color: "#6B7280",
+                }}
+              >
+                {activity.desc || activity.description || activity.message}
+              </p>
+            )}
 
             <small
               style={{

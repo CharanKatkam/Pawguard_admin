@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import {
   FaUserPlus,
   FaUsers,
@@ -20,9 +22,10 @@ const Users = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   // Modals state
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(() => searchParams.get("action") === "add");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
@@ -40,6 +43,12 @@ const Users = () => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const fetchUsers = async () => {
     try {
@@ -225,16 +234,18 @@ const Users = () => {
           marginBottom: "24px",
         }}
       >
-        <QuickActionCard
-          icon={<FaUserPlus />}
-          title="Provision User Account"
-          subtitle="Onboard new staff member"
-          color="#2563EB"
-          onClick={() => {
-            setFormData({ name: "", email: "", role: "rescue_agent", department: "Rescue Operations", password: "" });
-            setIsAddModalOpen(true);
-          }}
-        />
+        <Can permission="create_users">
+          <QuickActionCard
+            icon={<FaUserPlus />}
+            title="Provision User Account"
+            subtitle="Onboard new staff member"
+            color="#2563EB"
+            onClick={() => {
+              setFormData({ name: "", email: "", role: "rescue_agent", department: "Rescue Operations", password: "" });
+              setIsAddModalOpen(true);
+            }}
+          />
+        </Can>
 
         <QuickActionCard
           icon={<FaUserShield />}
@@ -276,6 +287,7 @@ const Users = () => {
         <DataTable
           columns={columns}
           data={users}
+          module="users"
           onEdit={async (row) => {
             await userService.updateUser(row.id || "1", row);
             fetchUsers();

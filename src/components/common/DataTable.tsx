@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { FaSearch, FaChevronLeft, FaChevronRight, FaEdit, FaTrash, FaSave, FaExclamationTriangle } from "react-icons/fa";
 import Modal from "./Modal";
 import { useToast } from "../../context/ToastContext";
+import { usePermissions } from "../../context/PermissionContext";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 export interface Column {
@@ -25,6 +26,8 @@ interface DataTableProps {
   onDelete?: (row: any) => void;
   onRowClick?: (row: any) => void;
   renderRowActions?: (row: any) => React.ReactNode;
+  /** Permission module name used to gate Edit/Delete actions (e.g. "users"). */
+  module?: string;
 }
 
 const DataTable: React.FC<DataTableProps> = ({
@@ -39,8 +42,12 @@ const DataTable: React.FC<DataTableProps> = ({
   onEdit,
   onDelete,
   onRowClick,
+  module,
 }) => {
   const { addToast } = useToast();
+  const { can } = usePermissions();
+  const canEdit = !module || can("edit", module);
+  const canDelete = !module || can("delete", module);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -432,42 +439,46 @@ const DataTable: React.FC<DataTableProps> = ({
           footer={
             modalMode === "view" ? (
               <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
-                <button
-                  onClick={handleStartEdit}
-                  style={{
-                    background: "#2563EB",
-                    color: "#FFFFFF",
-                    border: "none",
-                    padding: "9px 18px",
-                    borderRadius: "8px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <FaEdit /> Edit
-                </button>
-                <button
-                  onClick={() => setIsDeleteConfirmOpen(true)}
-                  style={{
-                    background: "#EF4444",
-                    color: "#FFFFFF",
-                    border: "none",
-                    padding: "9px 18px",
-                    borderRadius: "8px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <FaTrash /> Delete
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={handleStartEdit}
+                    style={{
+                      background: "#2563EB",
+                      color: "#FFFFFF",
+                      border: "none",
+                      padding: "9px 18px",
+                      borderRadius: "8px",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FaEdit /> Edit
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    onClick={() => setIsDeleteConfirmOpen(true)}
+                    style={{
+                      background: "#EF4444",
+                      color: "#FFFFFF",
+                      border: "none",
+                      padding: "9px 18px",
+                      borderRadius: "8px",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FaTrash /> Delete
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setModalMode(null);

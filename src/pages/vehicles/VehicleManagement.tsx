@@ -3,6 +3,7 @@ import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaTruck, FaAmbulance, FaWrench, FaPlus } from "react-icons/fa";
 import vehicleService from "../../services/vehicleService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -111,25 +112,27 @@ fetchVehicles();
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          style={{
-            background: "#2563EB",
-            color: "#FFFFFF",
-            border: "none",
-            borderRadius: "10px",
-            padding: "10px 18px",
-            fontSize: "14px",
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            cursor: "pointer",
-          }}
-        >
-          <FaPlus size={14} />
-          <span>Add Vehicle Unit</span>
-        </button>
+        <Can permission="create_vehicles">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            style={{
+              background: "#2563EB",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: "10px",
+              padding: "10px 18px",
+              fontSize: "14px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer",
+            }}
+          >
+            <FaPlus size={14} />
+            <span>Add Vehicle Unit</span>
+          </button>
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -145,6 +148,7 @@ fetchVehicles();
         error={error}
         onRetry={fetchVehicles}
         emptyMessage="No vehicles registered in fleet."
+        module="vehicles"
       />
 
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Register Fleet Vehicle">

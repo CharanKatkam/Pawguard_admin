@@ -3,6 +3,7 @@ import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -137,25 +138,27 @@ const RescueRequests = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          style={{
-            background: "#2563EB",
-            color: "#FFFFFF",
-            border: "none",
-            borderRadius: "10px",
-            padding: "10px 18px",
-            fontSize: "14px",
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            cursor: "pointer",
-          }}
-        >
-          <FaPlus size={14} />
-          <span>Log Report</span>
-        </button>
+        <Can permission="create_rescue_requests">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            style={{
+              background: "#2563EB",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: "10px",
+              padding: "10px 18px",
+              fontSize: "14px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer",
+            }}
+          >
+            <FaPlus size={14} />
+            <span>Log Report</span>
+          </button>
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -172,6 +175,7 @@ const RescueRequests = () => {
         error={error}
         onRetry={fetchRequests}
         emptyMessage="No pending public rescue requests."
+        module="rescue_requests"
         onView={(item: any) => {
           setSelectedRequest(item);
           setIsViewModalOpen(true);

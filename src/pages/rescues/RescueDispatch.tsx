@@ -3,6 +3,7 @@ import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaTruck, FaAmbulance, FaUserCheck, FaClock, FaPlus } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -112,25 +113,27 @@ const RescueDispatch = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          style={{
-            background: "#2563EB",
-            color: "#FFFFFF",
-            border: "none",
-            borderRadius: "10px",
-            padding: "10px 18px",
-            fontSize: "14px",
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            cursor: "pointer",
-          }}
-        >
-          <FaPlus size={14} />
-          <span>New Dispatch</span>
-        </button>
+        <Can permission="create_rescue_dispatch">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            style={{
+              background: "#2563EB",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: "10px",
+              padding: "10px 18px",
+              fontSize: "14px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer",
+            }}
+          >
+            <FaPlus size={14} />
+            <span>New Dispatch</span>
+          </button>
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -147,6 +150,7 @@ const RescueDispatch = () => {
         error={error}
         onRetry={fetchDispatches}
         emptyMessage="No dispatches currently active."
+        module="rescue_dispatch"
       />
 
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Dispatch Rescue Team">

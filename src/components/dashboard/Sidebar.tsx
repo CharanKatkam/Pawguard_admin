@@ -21,9 +21,14 @@ import {
   FaTruck,
   FaBell,
 } from "react-icons/fa";
-import { NavLink, useNavigate } from "react-router-dom";
-import { getCurrentUserRole, getMenusForRole } from "../../utils/roleUtils";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import {
+  getCurrentUserRole,
+  getMenusForRole,
+  getMenuViewPermission,
+} from "../../utils/roleUtils";
 import type { RoleMenuItem } from "../../utils/roleUtils";
+import { usePermissions } from "../../context/PermissionContext";
 import PawGuardLogo from "../common/PawGuardLogo";
 
 interface SidebarProps {
@@ -81,8 +86,15 @@ const renderIcon = (iconType: RoleMenuItem["iconType"]) => {
 
 const Sidebar = ({ collapsed = false }: SidebarProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const currentRole = getCurrentUserRole() || "super_admin";
-  const menus = getMenusForRole(currentRole);
+  const { has } = usePermissions();
+  // Enforce permission-based visibility: menus for modules the user is not
+  // allowed to view are hidden immediately when permissions change.
+  const menus = getMenusForRole(currentRole).filter((menu) => {
+    const required = getMenuViewPermission(menu.path);
+    return !required || has(required);
+  });
 
   const handleLogout = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -90,6 +102,22 @@ const Sidebar = ({ collapsed = false }: SidebarProps) => {
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
     navigate("/");
+  };
+
+  // Explicit active-state resolution based on the current page path.
+  // Query strings / hashes are ignored (they never affect which menu is open).
+  const isPathActive = (menuPath: string): boolean => {
+    const current = location.pathname;
+
+    // Dashboard links are role-specific (/dashboard/<role>). Keep them active
+    // while on the generic /dashboard redirect and their own sub-paths only.
+    if (menuPath.startsWith("/dashboard")) {
+      if (current === "/dashboard") return true;
+      return current === menuPath || current.startsWith(`${menuPath}/`);
+    }
+
+    if (current === menuPath) return true;
+    return current.startsWith(`${menuPath}/`);
   };
 
   const sidebarWidth = collapsed ? "70px" : "260px";
@@ -150,52 +178,55 @@ const Sidebar = ({ collapsed = false }: SidebarProps) => {
             maxHeight: "calc(100vh - 140px)",
           }}
         >
-          {menus.map((menu) => (
-            <NavLink
-              key={menu.name}
-              to={menu.path}
-              title={menu.name}
-              style={({ isActive }) => ({
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                padding: collapsed ? "12px" : "10px 14px",
-                justifyContent: collapsed ? "center" : "flex-start",
-                marginBottom: "4px",
-                borderRadius: "10px",
-                textDecoration: "none",
-                color: isActive ? "#FFFFFF" : "#94A3B8",
-                fontSize: "14px",
-                fontWeight: isActive ? 600 : 500,
-                background: isActive ? "#2563EB" : "transparent",
-                boxShadow: isActive ? "0 4px 12px rgba(37, 99, 235, 0.35)" : "none",
-                transition: "all 0.15s ease",
-              })}
-              onMouseEnter={(e) => {
-                const target = e.currentTarget;
-                if (!target.classList.contains("active")) {
-                  target.style.background = "rgba(255, 255, 255, 0.06)";
-                  target.style.color = "#FFFFFF";
-                }
-              }}
-              onMouseLeave={(e) => {
-                const target = e.currentTarget;
-                if (!target.classList.contains("active")) {
-                  target.style.background = "transparent";
-                  target.style.color = "#94A3B8";
-                }
-              }}
-            >
-              <span style={{ fontSize: "17px", display: "flex", alignItems: "center", flexShrink: 0 }}>
-                {renderIcon(menu.iconType)}
-              </span>
-              {!collapsed && (
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {menu.name}
+          {menus.map((menu) => {
+            const active = isPathActive(menu.path);
+            return (
+              <NavLink
+                key={menu.name}
+                to={menu.path}
+                title={menu.name}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: collapsed ? "12px" : "10px 14px",
+                  justifyContent: collapsed ? "center" : "flex-start",
+                  marginBottom: "4px",
+                  borderRadius: "10px",
+                  textDecoration: "none",
+                  color: active ? "#FFFFFF" : "#94A3B8",
+                  fontSize: "14px",
+                  fontWeight: active ? 600 : 500,
+                  background: active ? "#2563EB" : "transparent",
+                  boxShadow: active ? "0 4px 12px rgba(37, 99, 235, 0.35)" : "none",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  const target = e.currentTarget;
+                  if (!active) {
+                    target.style.background = "rgba(255, 255, 255, 0.06)";
+                    target.style.color = "#FFFFFF";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  const target = e.currentTarget;
+                  if (!active) {
+                    target.style.background = "transparent";
+                    target.style.color = "#94A3B8";
+                  }
+                }}
+              >
+                <span style={{ fontSize: "17px", display: "flex", alignItems: "center", flexShrink: 0 }}>
+                  {renderIcon(menu.iconType)}
                 </span>
-              )}
-            </NavLink>
-          ))}
+                {!collapsed && (
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {menu.name}
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { FaBell, FaCheckDouble, FaExclamationTriangle, FaStethoscope, FaHeart, FaUserCheck, FaSpinner, FaTimesCircle } from "react-icons/fa";
 import useNotifications from "../../hooks/useNotifications";
 import type { NotificationItem } from "../../types/auth";
@@ -6,6 +7,7 @@ import type { NotificationItem } from "../../types/auth";
 const NotificationDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   // Use the notifications hook with auto-refresh every 30 seconds
   const {
@@ -358,6 +360,9 @@ const NotificationDropdown = () => {
                 borderTop: "1px solid #F1F5F9",
                 background: "#F8FAFC",
                 textAlign: "center",
+                display: "flex",
+                justifyContent: "center",
+                gap: "8px",
               }}
             >
               <button
@@ -380,6 +385,31 @@ const NotificationDropdown = () => {
                 }}
               >
                 Refresh
+              </button>
+              <span style={{ color: "#CBD5E1" }}>|</span>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  navigate("/notifications");
+                }}
+                style={{
+                  background: "transparent",
+                  color: "#2563EB",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                  borderRadius: "4px",
+                }}
+                onMouseEnter={(e) => {
+                  (e.target as HTMLButtonElement).style.background = "#EFF6FF";
+                }}
+                onMouseLeave={(e) => {
+                  (e.target as HTMLButtonElement).style.background = "transparent";
+                }}
+              >
+                View all
               </button>
             </div>
           )}

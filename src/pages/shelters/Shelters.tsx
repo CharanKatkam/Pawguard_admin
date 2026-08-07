@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaHome, FaBed, FaUserShield, FaPlus } from "react-icons/fa";
 import shelterService from "../../services/shelterService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -13,9 +15,10 @@ const Shelters = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   // Modals state
-  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(() => searchParams.get("action") === "add");
   const [isCageModalOpen, setIsCageModalOpen] = useState(false);
 
 
@@ -36,6 +39,12 @@ const Shelters = () => {
   useEffect(() => {
     fetchShelters();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const fetchShelters = async () => {
     try {
@@ -156,13 +165,15 @@ const Shelters = () => {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard
-          icon={<FaPlus />}
-          title="Register New Facility"
-          subtitle="Onboard rescue centre"
-          color="#2563EB"
-          onClick={() => setIsRegisterModalOpen(true)}
-        />
+        <Can permission="create_shelters">
+          <QuickActionCard
+            icon={<FaPlus />}
+            title="Register New Facility"
+            subtitle="Onboard rescue centre"
+            color="#2563EB"
+            onClick={() => setIsRegisterModalOpen(true)}
+          />
+        </Can>
         <QuickActionCard
           icon={<FaBed />}
           title="Manage Cage Allocation"
@@ -188,6 +199,7 @@ const Shelters = () => {
         <DataTable
           columns={columns}
           data={shelters}
+          module="shelters"
           onEdit={async (r) => {
             await shelterService.createShelter(r);
             fetchShelters();

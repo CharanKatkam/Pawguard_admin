@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 interface QuickActionCardProps {
   icon?: React.ReactNode;
@@ -6,6 +7,7 @@ interface QuickActionCardProps {
   subtitle?: string;
   description?: string;
   color?: string;
+  path?: string;
   onClick?: () => void;
 }
 
@@ -15,11 +17,18 @@ const QuickActionCard = ({
   subtitle,
   description,
   color = "#2563EB",
+  path,
   onClick,
 }: QuickActionCardProps) => {
+  const navigate = useNavigate();
+  const handleClick = () => {
+    if (onClick) onClick();
+    else if (path) navigate(path);
+  };
+
   return (
     <button
-      onClick={onClick}
+      onClick={handleClick}
       style={{
         background: "#FFFFFF",
         border: "1px solid #E2E8F0",

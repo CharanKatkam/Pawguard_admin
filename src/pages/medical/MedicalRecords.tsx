@@ -4,6 +4,7 @@ import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaStethoscope, FaSyringe, FaNotesMedical, FaFileMedical, FaUserMd, FaTrash } from "react-icons/fa";
 import medicalService from "../../services/medicalService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -213,10 +214,18 @@ const MedicalRecords = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaStethoscope />} title="Record Examination" subtitle="Log new clinical diagnosis" color="#2563EB" onClick={() => setIsExamModalOpen(true)} />
-        <QuickActionCard icon={<FaSyringe />} title="Log Vaccination" subtitle="Administer vaccine booster" color="#10B981" onClick={() => setIsVaccineModalOpen(true)} />
-        <QuickActionCard icon={<FaUserMd />} title="Schedule Surgery" subtitle="Book operating theater" color="#F59E0B" onClick={() => setIsSurgeryModalOpen(true)} />
-        <QuickActionCard icon={<FaFileMedical />} title="Issue Certificate" subtitle="Generate health clearance" color="#6366F1" onClick={() => setIsCertModalOpen(true)} />
+        <Can permission="create_medical">
+          <QuickActionCard icon={<FaStethoscope />} title="Record Examination" subtitle="Log new clinical diagnosis" color="#2563EB" onClick={() => setIsExamModalOpen(true)} />
+        </Can>
+        <Can permission="create_medical">
+          <QuickActionCard icon={<FaSyringe />} title="Log Vaccination" subtitle="Administer vaccine booster" color="#10B981" onClick={() => setIsVaccineModalOpen(true)} />
+        </Can>
+        <Can permission="create_medical">
+          <QuickActionCard icon={<FaUserMd />} title="Schedule Surgery" subtitle="Book operating theater" color="#F59E0B" onClick={() => setIsSurgeryModalOpen(true)} />
+        </Can>
+        <Can permission="create_medical">
+          <QuickActionCard icon={<FaFileMedical />} title="Issue Certificate" subtitle="Generate health clearance" color="#6366F1" onClick={() => setIsCertModalOpen(true)} />
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -235,6 +244,7 @@ const MedicalRecords = () => {
         <DataTable
           columns={columns}
           data={medicalRecords}
+          module="medical"
           onEdit={async (row) => {
             await medicalService.updateMedicalExam(row.recordId || row.id || "1", row);
             fetchRecords();

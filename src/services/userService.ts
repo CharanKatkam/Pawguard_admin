@@ -18,8 +18,51 @@ export interface RolePayload {
   id?: string;
   name: string;
   description?: string;
+  category?: string;
   permissions?: string[];
+  permission_codes?: string[];
 }
+
+/** Unwrap a backend response body into its `data` payload when wrapped. */
+const unwrap = <T,>(body: unknown): T => {
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    if (obj.data !== undefined) return obj.data as T;
+  }
+  return body as T;
+};
+
+const isNotFound = (err: unknown): boolean => {
+  if (err && typeof err === "object") {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    return status === 404;
+  }
+  return false;
+};
+
+/** Extract permission codes from any role/permission payload shape. */
+export const extractPermissionCodes = (raw: unknown): string[] => {
+  if (!raw || typeof raw !== "object") return [];
+  const obj = raw as Record<string, unknown>;
+  const source =
+    obj.permission_codes ??
+    obj.permissionCodes ??
+    obj.permissions ??
+    obj.permissionList;
+  if (source === undefined || source === null) return [];
+  if (!Array.isArray(source)) return [];
+  const codes: string[] = [];
+  for (const item of source) {
+    if (typeof item === "string") {
+      codes.push(item);
+    } else if (item && typeof item === "object") {
+      const perm = item as Record<string, unknown>;
+      const code = perm.permission_code ?? perm.code ?? perm.key ?? perm.name ?? perm.slug;
+      if (typeof code === "string") codes.push(code);
+    }
+  }
+  return Array.from(new Set(codes));
+};
 
 export const userService = {
   // Super Admin - Users
@@ -27,8 +70,8 @@ export const userService = {
     try {
       const response = await api.get("/admin/users", { params });
       return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) {
+    } catch (err: unknown) {
+      if (isNotFound(err)) {
         try {
           const res2 = await api.get("/users", { params });
           return res2.data;
@@ -85,9 +128,9 @@ export const userService = {
   getRoles: async (params?: Record<string, unknown>) => {
     try {
       const response = await api.get("/admin/roles", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
+      return unwrap<unknown>(response.data);
+    } catch (err: unknown) {
+      if (isNotFound(err)) return [];
       throw err;
     }
   },
@@ -106,7 +149,7 @@ export const userService = {
 
   getRoleById: async (roleId: string) => {
     const response = await api.get(`/admin/roles/${roleId}`);
-    return response.data;
+    return unwrap<Record<string, unknown>>(response.data);
   },
 
   updateRole: async (roleId: string, data: Partial<RolePayload>) => {
@@ -118,7 +161,20 @@ export const userService = {
       message: `Role ${data.name || roleId} permissions updated.`,
       targetRoles: ["super_admin"],
     });
-    return response.data;
+    return unwrap<Record<string, unknown>>(response.data);
+  },
+
+  /** Update only the permission codes of a role (PUT with permission_codes). */
+  updateRolePermissions: async (roleId: string, permissionCodes: string[]) => {
+    const response = await api.put(`/admin/roles/${roleId}`, { permission_codes: permissionCodes });
+    await publishActionEvent({
+      module: "role",
+      action: "update",
+      title: "RBAC Role Policy Modified",
+      message: `Role ${roleId} permission set updated (${permissionCodes.length} grants).`,
+      targetRoles: ["super_admin"],
+    });
+    return unwrap<Record<string, unknown>>(response.data);
   },
 
   deleteRole: async (roleId: string) => {
@@ -136,7 +192,7 @@ export const userService = {
   // Super Admin - Permissions
   getPermissions: async () => {
     const response = await api.get("/admin/permissions");
-    return response.data;
+    return unwrap<unknown>(response.data);
   },
 };
 

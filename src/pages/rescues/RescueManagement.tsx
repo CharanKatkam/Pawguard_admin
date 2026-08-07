@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import {
   FaLifeRing,
   FaAmbulance,
@@ -19,9 +21,10 @@ const RescueManagement = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   // Modals
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(() => searchParams.get("action") === "add");
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -43,6 +46,12 @@ const RescueManagement = () => {
   useEffect(() => {
     fetchRescueCases();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const fetchRescueCases = async () => {
     try {
@@ -272,26 +281,28 @@ const RescueManagement = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          style={{
-            background: "#2563EB",
-            color: "#FFFFFF",
-            border: "none",
-            borderRadius: "10px",
-            padding: "10px 18px",
-            fontSize: "14px",
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            cursor: "pointer",
-            boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
-          }}
-        >
-          <FaPlus size={14} />
-          <span>New Rescue Case</span>
-        </button>
+        <Can permission="create_rescues">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            style={{
+              background: "#2563EB",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: "10px",
+              padding: "10px 18px",
+              fontSize: "14px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
+            }}
+          >
+            <FaPlus size={14} />
+            <span>New Rescue Case</span>
+          </button>
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -313,6 +324,7 @@ const RescueManagement = () => {
           loading={loading}
           error={error}
           onRetry={fetchRescueCases}
+          module="rescues"
           emptyMessage="No active rescue cases found. Click 'New Rescue Case' to report one."
           onView={(item: any) => {
             setSelectedCase(item);

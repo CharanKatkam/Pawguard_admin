@@ -312,6 +312,37 @@ export interface RoleMenuItem {
     | "notifications";
 }
 
+/**
+ * Maps a route path to the granular view permission required to access it.
+ * Used by the sidebar and route guards so revoking a permission immediately
+ * hides the corresponding menu and blocks the page.
+ */
+export const MODULE_VIEW_PERMISSIONS: Record<string, string> = {
+  "/users": "view_users",
+  "/rescues": "view_rescues",
+  "/rescue-requests": "view_rescue_requests",
+  "/rescue-dispatch": "view_rescue_dispatch",
+  "/pets": "view_animals",
+  "/medical-records": "view_medical",
+  "/shelters": "view_shelters",
+  "/adoptions": "view_adoptions",
+  "/fosters": "view_foster_placements",
+  "/volunteers": "view_volunteers",
+  "/lost-and-found": "view_lost_found",
+  "/inventory": "view_inventory",
+  "/finance": "view_finance",
+  "/vehicles": "view_vehicles",
+  "/reports": "view_reports",
+  "/roles-permissions": "view_roles",
+  "/audit-logs": "view_audit_logs",
+  "/certificates": "view_certificates",
+  "/notifications": "view_notifications",
+  "/settings": "view_settings",
+};
+
+export const getMenuViewPermission = (path: string): string | undefined =>
+  MODULE_VIEW_PERMISSIONS[path];
+
 export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[] => {
   const normalized = normalizeRole(role) || "super_admin";
   const dashboardPath = getDashboardPathForRole(normalized);
@@ -338,6 +369,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Roles & Permissions", path: "/roles-permissions", iconType: "users" },
         { name: "Audit Logs", path: "/audit-logs", iconType: "audit" },
         { name: "Certificates", path: "/certificates", iconType: "certificates" },
+        { name: "Notifications", path: "/notifications", iconType: "notifications" },
         { name: "System Settings", path: "/settings", iconType: "settings" },
       ];
 

@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import {
   FaPaw,
   FaAmbulance,
@@ -19,9 +21,10 @@ const Pets = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   // Modals state
-  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(() => searchParams.get("action") === "register");
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isAdoptableModalOpen, setIsAdoptableModalOpen] = useState(false);
 
@@ -46,6 +49,12 @@ const Pets = () => {
   useEffect(() => {
     fetchDogs();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "register") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const fetchDogs = async () => {
     try {
@@ -265,16 +274,18 @@ const Pets = () => {
           marginBottom: "24px",
         }}
       >
-        <QuickActionCard
-          icon={<FaPlus />}
-          title="Register New Dog"
-          subtitle="Register rescued dog"
-          color="#2563EB"
-          onClick={() => {
-            setPetForm({ name: "", breed: "Indie Rescue Mix", age: "2 Years", gender: "Male", status: "Adoptable" });
-            setIsRegisterModalOpen(true);
-          }}
-        />
+        <Can permission="create_animals">
+          <QuickActionCard
+            icon={<FaPlus />}
+            title="Register New Dog"
+            subtitle="Register rescued dog"
+            color="#2563EB"
+            onClick={() => {
+              setPetForm({ name: "", breed: "Indie Rescue Mix", age: "2 Years", gender: "Male", status: "Adoptable" });
+              setIsRegisterModalOpen(true);
+            }}
+          />
+        </Can>
 
         <QuickActionCard
           icon={<FaAmbulance />}
@@ -328,6 +339,7 @@ const Pets = () => {
         <DataTable
           columns={columns}
           data={dogs}
+          module="animals"
           onEdit={async (row) => {
             await petService.updatePet(row.dog_id || row.id || "1", row);
             fetchDogs();

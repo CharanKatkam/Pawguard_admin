@@ -1,12 +1,15 @@
 import { Navigate, Outlet } from "react-router-dom";
 import type { UserRole } from "../../../types/auth";
 import { getCurrentUser, getCurrentUserRole, isInternalRole } from "../../../utils/roleUtils";
+import { hasPermission, hasAnyPermission } from "../../../utils/rbac";
 
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
+  /** Permission code(s) required to access this route (any-of). */
+  permission?: string | string[];
 }
 
-const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
+const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
   const user = getCurrentUser();
   const token = localStorage.getItem("access_token");
 
@@ -24,6 +27,16 @@ const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
   // If allowedRoles is specified, ensure user has authorization
   if (allowedRoles && allowedRoles.length > 0) {
     if (!allowedRoles.includes(currentRole)) {
+      return <Navigate to="/403" replace />;
+    }
+  }
+
+  // Permission-based enforcement: revoking a permission must block the page.
+  if (permission) {
+    const allowed = Array.isArray(permission)
+      ? hasAnyPermission(permission)
+      : hasPermission(permission);
+    if (!allowed) {
       return <Navigate to="/403" replace />;
     }
   }

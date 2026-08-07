@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import { FaCoins, FaHandHoldingHeart, FaFileInvoiceDollar, FaChartLine, FaPlus, FaTrash } from "react-icons/fa";
 import financeService from "../../services/financeService";
 import reportsService from "../../services/reportsService";
@@ -13,9 +15,10 @@ const Finance = () => {
   const [transactions, setTransactions] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const { addToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   // Modals state
-  const [isDonationModalOpen, setIsDonationModalOpen] = useState(false);
+  const [isDonationModalOpen, setIsDonationModalOpen] = useState(() => searchParams.get("action") === "donation");
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -29,6 +32,12 @@ const Finance = () => {
   useEffect(() => {
     fetchFinance();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "donation") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const fetchFinance = async () => {
     try {
@@ -184,9 +193,15 @@ const Finance = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log new sponsor contribution" color="#10B981" onClick={() => setIsDonationModalOpen(true)} />
-        <QuickActionCard icon={<FaFileInvoiceDollar />} title="Log Expense Bill" subtitle="Record medical or shelter bill" color="#2563EB" onClick={() => setIsExpenseModalOpen(true)} />
-        <QuickActionCard icon={<FaChartLine />} title="Generate Financial Report" subtitle="Download quarterly balance" color="#6366F1" onClick={() => setIsReportModalOpen(true)} />
+        <Can permission="create_finance">
+          <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log new sponsor contribution" color="#10B981" onClick={() => setIsDonationModalOpen(true)} />
+        </Can>
+        <Can permission="create_finance">
+          <QuickActionCard icon={<FaFileInvoiceDollar />} title="Log Expense Bill" subtitle="Record medical or shelter bill" color="#2563EB" onClick={() => setIsExpenseModalOpen(true)} />
+        </Can>
+        <Can permission="export_finance">
+          <QuickActionCard icon={<FaChartLine />} title="Generate Financial Report" subtitle="Download quarterly balance" color="#6366F1" onClick={() => setIsReportModalOpen(true)} />
+        </Can>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
@@ -205,6 +220,7 @@ const Finance = () => {
         <DataTable
           columns={columns}
           data={transactions}
+          module="finance"
           onEdit={async (r) => {
             await financeService.updateTransaction(r.txId || r.id || "1", r);
             fetchFinance();

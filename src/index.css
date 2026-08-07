@@ -159,3 +159,24 @@ button {
 button:active {
   transform: scale(0.98);
 }
+
+/* Dashboard loading states */
+@keyframes dashShimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.dash-shimmer {
+  background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 37%, #F1F5F9 63%);
+  background-size: 400px 100%;
+  animation: dashShimmer 1.4s ease infinite;
+}
+
+.dash-spin {
+  animation: dashSpin 0.8s linear infinite;
+}
+
+@keyframes dashSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

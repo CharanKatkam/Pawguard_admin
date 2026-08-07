@@ -1,93 +1,84 @@
 import type { UserRole } from "../types/auth";
 import { getCurrentUserRole } from "./roleUtils";
+import {
+  DEFAULT_ROLE_PERMISSIONS,
+  PERMISSION_ACTIONS,
+  parsePermissionKey,
+  permissionKey,
+} from "./permissionsCatalog";
+
+/** Custom event broadcast whenever a role's permission set changes. */
+export const PERMISSIONS_CHANGED_EVENT = "pawguard:permissions-changed";
+
+/** Dispatch an event so every mounted consumer re-evaluates access immediately. */
+export const notifyPermissionsChanged = (): void => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(PERMISSIONS_CHANGED_EVENT));
+  }
+};
 
 /**
  * Role-based access control utility
  * Centralized permission checking for features and actions
  */
 
-// Define permissions for each role
-const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  super_admin: [
-    "view_dashboard",
-    "manage_users",
-    "manage_roles",
-    "manage_permissions",
-    "view_notifications",
-    "manage_settings",
-    "view_audit_logs",
-    "manage_shelters",
-    "manage_animals",
-    "manage_adoptions",
-    "manage_medical",
-    "manage_inventory",
-    "manage_finance",
-    "view_all_notifications",
-    "create_backup",
-    "manage_certificates",
-  ],
-  rescue_centre_admin: [
-    "view_dashboard",
-    "manage_animals",
-    "manage_adoptions",
-    "view_notifications",
-    "manage_inventory",
-    "manage_medical",
-    "view_shelter_data",
-  ],
-  rescue_coordinator: [
-    "view_dashboard",
-    "manage_animals",
-    "view_notifications",
-    "manage_rescues",
-    "view_emergency_alerts",
-  ],
-  rescue_agent: [
-    "view_dashboard",
-    "report_rescue",
-    "view_notifications",
-    "update_animal_status",
-  ],
-  veterinarian: [
-    "view_dashboard",
-    "manage_medical",
-    "view_animals",
-    "view_notifications",
-  ],
-  shelter_manager: [
-    "view_dashboard",
-    "manage_animals",
-    "manage_adoptions",
-    "view_notifications",
-    "manage_inventory",
-  ],
-  adoption_coordinator: [
-    "view_dashboard",
-    "manage_adoptions",
-    "view_animals",
-    "view_notifications",
-  ],
-  foster_coordinator: [
-    "view_dashboard",
-    "manage_foster_placements",
-    "view_animals",
-    "view_notifications",
-  ],
-  volunteer_coordinator: [
-    "view_dashboard",
-    "manage_volunteers",
-    "view_notifications",
-  ],
-  inventory_manager: [
-    "view_dashboard",
-    "manage_inventory",
-    "view_notifications",
-  ],
-  finance_user: [
-    "view_dashboard",
-    "manage_finance",
-    "view_notifications",
-  ],
+/**
+ * Live permission overrides loaded from the backend (via the Roles &
+ * Permissions module). When present they take precedence over the static
+ * defaults so permission checks reflect the real database data.
+ */
+let permissionOverrides: Record<string, string[]> | null = null;
+
+/**
+ * Register permission overrides keyed by role name. Pass `null` to reset back
+ * to the static default matrix.
+ */
+export const setRolePermissionOverrides = (
+  overrides: Record<string, string[]> | null
+): void => {
+  permissionOverrides = overrides;
+};
+
+/**
+ * Override (or revoke) the permission set of a single role. An empty array
+ * fully revokes every permission, which is how a Super Admin's "clear all"
+ * takes immediate effect for that role.
+ */
+export const setRolePermissionOverride = (
+  roleName: string | null | undefined,
+  permissions: string[]
+): void => {
+  const key = String(roleName || "").toLowerCase().trim();
+  if (!key) return;
+  const next = permissionOverrides ? { ...permissionOverrides } : {};
+  next[key] = [...permissions];
+  permissionOverrides = next;
+};
+
+/**
+ * Expand a raw permission code list into the full implied set:
+ * - `manage_<module>` implies every action on that module.
+ * - any non-`view` action on a module implies `view_<module>`.
+ * This keeps legacy coarse codes (`manage_animals`, ...) fully compatible with
+ * the granular matrix checks (`view_animals`, ...).
+ */
+export const expandPermissions = (codes: string[]): string[] => {
+  const set = new Set<string>(codes);
+  for (const code of codes) {
+    const parsed = parsePermissionKey(code);
+    if (parsed && parsed.action === "manage") {
+      for (const a of PERMISSION_ACTIONS) {
+        set.add(permissionKey(a.key, parsed.module));
+      }
+    }
+  }
+  for (const code of Array.from(set)) {
+    const parsed = parsePermissionKey(code);
+    if (parsed && parsed.action !== "view") {
+      set.add(`view_${parsed.module}`);
+    }
+  }
+  return Array.from(set);
 };
 
 /**
@@ -187,8 +178,8 @@ export const hasPermission = (permission: string, role?: UserRole): boolean => {
   const currentRole = role || getCurrentUserRole();
   if (!currentRole) return false;
 
-  const permissions = ROLE_PERMISSIONS[currentRole];
-  return permissions ? permissions.includes(permission) : false;
+  const permissions = getPermissionsForRole(currentRole);
+  return permissions.includes(permission);
 };
 
 /**
@@ -284,11 +275,41 @@ export const hasAnyPermission = (
 };
 
 /**
- * Get all permissions for a specific role
+ * Get all permissions for a specific role.
+ * Live overrides (from the backend) take precedence over the static defaults,
+ * and the result is expanded so `manage_X`/action codes imply `view_X`.
  */
 export const getPermissionsForRole = (role: UserRole): string[] => {
-  return ROLE_PERMISSIONS[role] || [];
+  const base =
+    permissionOverrides && permissionOverrides[role]
+      ? permissionOverrides[role]
+      : DEFAULT_ROLE_PERMISSIONS[role] || [];
+  return expandPermissions(base);
 };
+
+/**
+ * Get the effective permission code list for the current (or given) user.
+ */
+export const getCurrentUserPermissions = (role?: UserRole): string[] => {
+  const currentRole = role || getCurrentUserRole();
+  if (!currentRole) return [];
+  return getPermissionsForRole(currentRole);
+};
+
+/**
+ * Check a granular permission, e.g. `can("create", "adoptions")`.
+ */
+export const can = (
+  action: string,
+  module: string,
+  role?: UserRole
+): boolean => hasPermission(permissionKey(action, module), role);
+
+export const canView = (module: string, role?: UserRole): boolean =>
+  can("view", module, role);
+
+export const canManage = (module: string, role?: UserRole): boolean =>
+  can("manage", module, role);
 
 /**
  * Get notification types accessible by a role
@@ -301,10 +322,17 @@ export const getNotificationTypesForRole = (role: UserRole): string[] => {
 
 export default {
   hasPermission,
+  can,
+  canView,
+  canManage,
+  getCurrentUserPermissions,
+  expandPermissions,
   canViewSettings,
   canViewNotifications,
   canViewAuditLogs,
   canCreateBackup,
+  setRolePermissionOverrides,
+  setRolePermissionOverride,
   getRolesForNotificationType,
   canReceiveNotification,
   filterNotificationsByRole,
@@ -312,4 +340,6 @@ export default {
   hasAnyPermission,
   getPermissionsForRole,
   getNotificationTypesForRole,
+  notifyPermissionsChanged,
+  PERMISSIONS_CHANGED_EVENT,
 };

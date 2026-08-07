@@ -4,6 +4,7 @@ import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
+import Can from "../../components/rbac/Can";
 import reportsService from "../../services/reportsService";
 import medicalService from "../../services/medicalService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -122,8 +123,12 @@ const Certificates = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="Generate Adoption Cert" subtitle="Create formal adoption document" color="#2563EB" onClick={() => setIsAdoptionModalOpen(true)} />
-        <QuickActionCard icon={<FaCertificate />} title="Issue Health Cert" subtitle="Vet medical clearance" color="#10B981" onClick={() => setIsHealthModalOpen(true)} />
+        <Can permission="create_certificates">
+          <QuickActionCard icon={<FaPlus />} title="Generate Adoption Cert" subtitle="Create formal adoption document" color="#2563EB" onClick={() => setIsAdoptionModalOpen(true)} />
+        </Can>
+        <Can permission="create_certificates">
+          <QuickActionCard icon={<FaCertificate />} title="Issue Health Cert" subtitle="Vet medical clearance" color="#10B981" onClick={() => setIsHealthModalOpen(true)} />
+        </Can>
         <QuickActionCard icon={<FaPrint />} title="Print Certificate" subtitle="Export high-res PDF" color="#6366F1" onClick={handlePrintCertificates} />
       </div>
 
