@@ -15,7 +15,7 @@ import {
   PERMISSIONS_CHANGED_EVENT,
 } from "../utils/rbac";
 import { getCurrentUser, getCurrentUserRole } from "../utils/roleUtils";
-import { subscribeToDataChange } from "../utils/dataSync";
+import { subscribeToDataChange, AUTH_CHANGED_EVENT } from "../utils/dataSync";
 
 export interface PermissionContextValue {
   /** Effective permission codes for the current user (expanded). */
@@ -39,6 +39,9 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
   // `tick` forces re-render whenever overrides change so every consumer
   // (sidebar, routes, buttons, forms) re-evaluates access immediately.
   const [tick, setTick] = useState(0);
+  // Bumped when a login/logout happens in this tab so the captured role and
+  // override map are re-derived instead of going stale.
+  const [authVersion, setAuthVersion] = useState(0);
   const role = getCurrentUserRole();
 
   /** Re-read the current override map and bump consumers (no network). */
@@ -88,16 +91,19 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
     // override map directly and broadcast this event — consumers only need to
     // re-read the map to take effect immediately.
     const onPermissionsChanged = () => refresh();
+    const onAuthChanged = () => setAuthVersion((v) => v + 1);
     const unsubscribe = subscribeToDataChange(refresh);
     window.addEventListener(PERMISSIONS_CHANGED_EVENT, onPermissionsChanged);
     window.addEventListener("storage", onPermissionsChanged);
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
       window.removeEventListener(PERMISSIONS_CHANGED_EVENT, onPermissionsChanged);
       window.removeEventListener("storage", onPermissionsChanged);
+      window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
     };
-  }, [loadFromBackend, refresh]);
+  }, [loadFromBackend, refresh, authVersion]);
 
   const permissions = useMemo(
     () => getCurrentUserPermissions(role ?? undefined),

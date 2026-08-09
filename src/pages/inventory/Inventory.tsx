@@ -22,28 +22,25 @@ const Inventory = () => {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [selectedItem, _setSelectedItem] = useState<any | null>(null);
+  const [selectedItem, setSelectedItem] = useState<any | null>(null);
 
   // Form states
   const [itemForm, setItemForm] = useState({
     itemName: "",
     category: "Medicines",
-    stock: "100 Vials",
-    threshold: "20 Vials",
-    supplier: "PharmaVet",
+    stock: "",
+    threshold: "",
+    supplier: "",
   });
 
   const [poForm, setPoForm] = useState({
-    vendor: "PharmaVet",
-    item: "Amoxicillin 500mg",
-    quantity: 50,
+    item_id: "",
+    quantity: 0,
   });
 
   const [editForm, setEditForm] = useState({
     itemName: "",
-    category: "",
     stock: "",
-    supplier: "",
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -83,7 +80,7 @@ const Inventory = () => {
       await inventoryService.createInventoryItem(itemForm);
       addToast(`Added item "${itemForm.itemName}" to inventory!`, "success");
       setIsAddItemModalOpen(false);
-      setItemForm({ itemName: "", category: "Medicines", stock: "100 Vials", threshold: "20 Vials", supplier: "PharmaVet" });
+      setItemForm({ itemName: "", category: "Medicines", stock: "", threshold: "", supplier: "" });
       fetchInventory();
       notifyDataChanged();
     } catch (err: any) {
@@ -96,15 +93,24 @@ const Inventory = () => {
 
   const handleCreatePo = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!poForm.item_id) {
+      addToast("Please select an inventory item to reorder.", "error");
+      return;
+    }
+    if (!poForm.quantity || poForm.quantity <= 0) {
+      addToast("Please enter a quantity greater than zero.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
       await inventoryService.createPurchaseOrder(poForm);
-      addToast(`Purchase Order issued for ${poForm.quantity} units of ${poForm.item}!`, "success");
+      addToast(`Requisition issued for ${poForm.quantity} units!`, "success");
       setIsPoModalOpen(false);
+      setPoForm({ item_id: "", quantity: 0 });
       fetchInventory();
       notifyDataChanged();
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to create purchase order.";
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to issue requisition.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -117,13 +123,14 @@ const Inventory = () => {
     try {
       setIsSubmitting(true);
       const id = selectedItem.id || selectedItem.sku;
-      await inventoryService.updateInventoryItem(id, editForm);
-      addToast(`Updated stock details for ${editForm.itemName}!`, "success");
+      await inventoryService.updateInventoryItem(id, { quantity: Number(editForm.stock) });
+      addToast(`Stock adjusted for ${editForm.itemName}!`, "success");
       setIsEditModalOpen(false);
+      setSelectedItem(null);
       fetchInventory();
       notifyDataChanged();
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update stock details.";
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to adjust stock.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -228,13 +235,18 @@ const Inventory = () => {
           columns={columns}
           data={inventory}
           module="inventory"
-          onEdit={async (r) => {
-            await inventoryService.updateInventoryItem(r.id || "1", r);
-            fetchInventory();
+          onEdit={(r) => {
+            setSelectedItem(r);
+            const parsed = numericValue(r.stock);
+            setEditForm({
+              itemName: String(r.itemName || r.name || ""),
+              stock: parsed ? String(parsed) : "",
+            });
+            setIsEditModalOpen(true);
           }}
-          onDelete={async (r) => {
-            await inventoryService.deleteInventoryItem(r.id || "1");
-            fetchInventory();
+          onDelete={(r) => {
+            setSelectedItem(r);
+            setIsDeleteModalOpen(true);
           }}
         />
       </div>
@@ -269,23 +281,24 @@ const Inventory = () => {
       </Modal>
 
       {/* Create Purchase Order Modal */}
-      <Modal isOpen={isPoModalOpen} onClose={() => setIsPoModalOpen(false)} title="Issue Vendor Purchase Order">
+      <Modal isOpen={isPoModalOpen} onClose={() => setIsPoModalOpen(false)} title="Issue Inventory Requisition">
         <form onSubmit={handleCreatePo} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Vendor Name</label>
-            <input type="text" value={poForm.vendor} onChange={(e) => setPoForm({ ...poForm, vendor: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inventory Item *</label>
+            <select required value={poForm.item_id} onChange={(e) => setPoForm({ ...poForm, item_id: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+              <option value="">Select an item...</option>
+              {inventory.map((i: any) => (
+                <option key={i.id} value={i.id}>{i.itemName} ({i.stock})</option>
+              ))}
+            </select>
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Item Name</label>
-            <input type="text" value={poForm.item} onChange={(e) => setPoForm({ ...poForm, item: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Quantity</label>
-            <input type="number" min="1" value={poForm.quantity} onChange={(e) => setPoForm({ ...poForm, quantity: Number(e.target.value) })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Quantity *</label>
+            <input type="number" min="1" required value={poForm.quantity || ""} onChange={(e) => setPoForm({ ...poForm, quantity: Number(e.target.value) })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsPoModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Issuing..." : "Issue Purchase Order"}</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Issuing..." : "Issue Requisition"}</button>
           </div>
         </form>
       </Modal>
@@ -308,8 +321,7 @@ const Inventory = () => {
                   <button
                     onClick={() => {
                       setPoForm({
-                        vendor: String(i.supplier || poForm.vendor),
-                        item: String(i.itemName || i.item_name || i.name || poForm.item),
+                        item_id: String(i.id || i.sku || ""),
                         quantity: 50,
                       });
                       setIsAuditModalOpen(false);
@@ -328,19 +340,22 @@ const Inventory = () => {
 
 
       {/* Edit Modal */}
-      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Inventory Details">
+      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Adjust Stock Level">
         <form onSubmit={handleEditSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Item Name</label>
-            <input type="text" value={editForm.itemName} onChange={(e) => setEditForm({ ...editForm, itemName: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            <input type="text" value={editForm.itemName} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#475569" }} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Stock</label>
-            <input type="text" value={editForm.stock} onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>New Quantity *</label>
+            <input type="number" min="0" step="any" required value={editForm.stock} onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#64748B" }}>
+              The backend records stock corrections as inventory movements (no item metadata updates).
+            </p>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsEditModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Saving..." : "Save Changes"}</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Saving..." : "Adjust Stock"}</button>
           </div>
         </form>
       </Modal>

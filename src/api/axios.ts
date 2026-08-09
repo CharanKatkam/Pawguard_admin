@@ -1,4 +1,5 @@
 import axios from "axios";
+import { notifyAuthChanged } from "../utils/dataSync";
 
 // Base API configuration for production and development environment
 const API_BASE_URL = "https://pawguard-backend-mqri.onrender.com/api/v1";
@@ -36,6 +37,7 @@ api.interceptors.response.use(
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
         localStorage.removeItem("user");
+        notifyAuthChanged();
         window.location.href = "/";
       }
     }

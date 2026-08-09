@@ -4,8 +4,9 @@ import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import { useToast } from "../../context/ToastContext";
 import { useDataSync } from "../../utils/dataSync";
+import Can from "../../components/rbac/Can";
 import { buildMonthlyAdoptionHistory } from "../../utils/adoptionStats";
-import { FaChartBar, FaFileDownload, FaFileAlt, FaFilter } from "react-icons/fa";
+import { FaChartBar, FaFileDownload, FaFileAlt, FaFilter, FaReceipt } from "react-icons/fa";
 import reportsService from "../../services/reportsService";
 import adoptionService from "../../services/adoptionService";
 import rescueService from "../../services/rescueService";
@@ -52,9 +53,9 @@ const Reports = () => {
 
   const handleExportPdf = async () => {
     try {
-      addToast("Exporting Executive Summary PDF Report...", "info");
-      await reportsService.exportExecutivePdf();
-      addToast("Executive Report PDF downloaded successfully!", "success");
+      addToast("Exporting Finance Report (PDF)...", "info");
+      await reportsService.generateAndDownloadReport({ report_type: "finance", format: "pdf" });
+      addToast("Finance Report PDF downloaded successfully!", "success");
     } catch {
       addToast("Failed to export PDF report.", "error");
     }
@@ -62,11 +63,21 @@ const Reports = () => {
 
   const handleExportCsv = async () => {
     try {
-      addToast("Exporting CSV Data Dump...", "info");
-      await reportsService.exportCsvDump();
-      addToast("CSV Data Dump downloaded successfully!", "success");
+      addToast("Exporting Rescue Report (CSV)...", "info");
+      await reportsService.generateAndDownloadReport({ report_type: "rescue", format: "csv" });
+      addToast("Rescue Report CSV downloaded successfully!", "success");
     } catch {
       addToast("Failed to export CSV data.", "error");
+    }
+  };
+
+  const handleExportDonationPdf = async () => {
+    try {
+      addToast("Exporting Donation Report (PDF)...", "info");
+      await reportsService.generateAndDownloadReport({ report_type: "donation", format: "pdf" });
+      addToast("Donation Report PDF downloaded successfully!", "success");
+    } catch {
+      addToast("Failed to export donation report.", "error");
     }
   };
 
@@ -117,8 +128,13 @@ const Reports = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaFileDownload />} title="Export Executive Report" subtitle="Download PDF executive summary" color="#2563EB" onClick={handleExportPdf} />
-        <QuickActionCard icon={<FaFileAlt />} title="Export CSV Data Dump" subtitle="Raw datasets for audit" color="#10B981" onClick={handleExportCsv} />
+        <Can permission="view_finance">
+          <QuickActionCard icon={<FaFileDownload />} title="Export Finance Report" subtitle="Download PDF finance report" color="#2563EB" onClick={handleExportPdf} />
+        </Can>
+        <Can permission="view_finance">
+          <QuickActionCard icon={<FaReceipt />} title="Export Donation Report" subtitle="Download PDF donation report" color="#10B981" onClick={handleExportDonationPdf} />
+        </Can>
+        <QuickActionCard icon={<FaFileAlt />} title="Export Rescue Report" subtitle="Raw rescue datasets (CSV)" color="#6366F1" onClick={handleExportCsv} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>

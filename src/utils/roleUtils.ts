@@ -76,7 +76,7 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
     lower.includes("superadmin") ||
     lower.includes("super_administrator") ||
     lower.includes("super.admin") ||
-    lower.includes("super") ||
+    lower.split(/[^a-z0-9]+/).includes("super") ||
     lower === "admin" ||
     lower.includes("administrator") ||
     lower === "sysadmin" ||
@@ -422,7 +422,11 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Shelter Facilities", path: "/shelters", iconType: "shelters" },
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
         { name: "Shelter Staff", path: "/users", iconType: "users" },
+        { name: "Medical Records", path: "/medical-records", iconType: "medical" },
+        { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
+        { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
+        { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
 
     case "adoption_coordinator":

@@ -181,7 +181,7 @@ function App() {
               element={
                 <ProtectedRoute
                   permission="view_adoptions"
-                  allowedRoles={["super_admin", "adoption_coordinator", "rescue_centre_admin"]}
+                  allowedRoles={["super_admin", "adoption_coordinator", "rescue_centre_admin", "shelter_manager"]}
                 />
               }
             >
@@ -231,7 +231,7 @@ function App() {
               element={
                 <ProtectedRoute
                   permission="view_medical"
-                  allowedRoles={["super_admin", "rescue_centre_admin", "veterinarian"]}
+                  allowedRoles={["super_admin", "rescue_centre_admin", "veterinarian", "shelter_manager"]}
                 />
               }
             >
@@ -328,7 +328,22 @@ function App() {
 
             <Route
               element={
-                <ProtectedRoute permission="view_notifications" allowedRoles={["super_admin"]} />
+                <ProtectedRoute
+                  permission="view_notifications"
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "rescue_coordinator",
+                    "rescue_agent",
+                    "veterinarian",
+                    "shelter_manager",
+                    "adoption_coordinator",
+                    "foster_coordinator",
+                    "volunteer_coordinator",
+                    "inventory_manager",
+                    "finance_user",
+                  ]}
+                />
               }
             >
               <Route path="/notifications" element={<Notifications />} />

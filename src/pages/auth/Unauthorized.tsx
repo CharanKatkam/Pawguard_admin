@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { getCurrentUserRole, getDashboardPathForRole, getRoleTitle } from "../../utils/roleUtils";
+import { notifyAuthChanged } from "../../utils/dataSync";
 import { FaShieldAlt, FaArrowLeft, FaSignOutAlt } from "react-icons/fa";
 
 const Unauthorized = () => {
@@ -16,6 +17,7 @@ const Unauthorized = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
+    notifyAuthChanged();
     navigate("/");
   };
 

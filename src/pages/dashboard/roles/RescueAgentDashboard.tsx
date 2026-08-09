@@ -192,7 +192,7 @@ const RescueAgentDashboard = () => {
           title="Confirm Delivery"
           subtitle="Send to Shelter"
           color="#6366F1"
-          onClick={() => navigate("/shelters")}
+          onClick={() => navigate("/rescues")}
         />
       </div>
 

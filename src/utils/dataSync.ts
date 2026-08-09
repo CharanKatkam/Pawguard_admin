@@ -6,6 +6,14 @@ type Listener = () => void;
 
 const listeners = new Set<Listener>();
 
+/** Broadcast after login/logout so mounted contexts (e.g. PermissionProvider)
+ *  can re-read the authenticated role without a full page reload. */
+export const AUTH_CHANGED_EVENT = "pawguard:auth-changed";
+
+export function notifyAuthChanged(): void {
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
 export function subscribeToDataChange(listener: Listener): () => void {
   listeners.add(listener);
   return () => {

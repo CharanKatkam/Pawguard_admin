@@ -4,25 +4,26 @@ import { publishActionEvent } from "../utils/eventSystem";
 export interface PetPayload {
   id?: string;
   name: string;
-  breed: string;
-  age: string;
+  breed?: string;
+  breed_classification?: string;
   gender?: string;
-  location?: string;
+  estimated_age?: string;
+  age_months?: number;
+  weight?: number;
+  color?: string;
+  temperament?: string;
+  is_spayed_neutered?: boolean;
+  is_adoptable?: boolean;
+  is_quarantine_passed?: boolean;
   status?: string;
-  medical_history?: string;
   [key: string]: unknown;
 }
 
 export const petService = {
   // GET /dogs (Exact OpenAPI endpoint)
   getPets: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/dogs", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/dogs", { params });
+    return response.data;
   },
 
   getPetById: async (dogId: string) => {
@@ -30,13 +31,13 @@ export const petService = {
     return response.data;
   },
 
-  createPet: async (data: PetPayload) => {
+  createPet: async (data: Record<string, unknown>) => {
     const response = await api.post("/dogs", data);
     await publishActionEvent({
       module: "shelter",
       action: "create",
       title: "New Animal Intake Registered",
-      message: `Animal ${data.name} (${data.breed || "Dog"}) registered in facility database.`,
+      message: `Animal ${data.name || ""} (${data.breed || "Dog"}) registered in facility database.`,
       targetRoles: [
         "super_admin",
         "rescue_centre_admin",
@@ -48,7 +49,7 @@ export const petService = {
     return response.data;
   },
 
-  updatePet: async (dogId: string, data: Partial<PetPayload>) => {
+  updatePet: async (dogId: string, data: Record<string, unknown>) => {
     const response = await api.put(`/dogs/${dogId}`, data);
     await publishActionEvent({
       module: "shelter",
@@ -72,6 +73,23 @@ export const petService = {
         "shelter_manager",
         "veterinarian",
         "adoption_coordinator",
+      ],
+    });
+    return response.data;
+  },
+
+  markDogAdoptable: async (dogId: string) => {
+    const response = await api.put(`/dogs/${dogId}`, { is_adoptable: true });
+    await publishActionEvent({
+      module: "shelter",
+      action: "update",
+      title: "Animal Marked Ready for Adoption",
+      message: `Animal ${dogId} cleared for adoption listing.`,
+      targetRoles: [
+        "super_admin",
+        "shelter_manager",
+        "adoption_coordinator",
+        "rescue_centre_admin",
       ],
     });
     return response.data;

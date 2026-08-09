@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FaSlidersH, FaShieldAlt, FaDatabase, FaSave, FaExclamationTriangle, FaCheckCircle, FaSpinner } from "react-icons/fa";
+import { FaSlidersH, FaShieldAlt, FaSave, FaExclamationTriangle, FaCheckCircle, FaSpinner } from "react-icons/fa";
 import { Navigate } from "react-router-dom";
 import { getCurrentUserRole } from "../../utils/roleUtils";
 import settingsService from "../../services/settingsService";
@@ -26,7 +26,6 @@ const Settings = () => {
   const [sessionTimeout, setSessionTimeout] = useState("60");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [saving, setSaving] = useState(false);
-  const [backingUp, setBackingUp] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
@@ -184,30 +183,6 @@ const Settings = () => {
     setSessionTimeout(String(initialSettings.sessionTimeout || 60));
     setHasChanges(false);
     addToast("Settings reset to last saved values.", "info");
-  };
-
-  /**
-   * Handle trigger backup
-   */
-  const handleTriggerBackup = async () => {
-    try {
-      setBackingUp(true);
-      setError(null);
-
-      const result = await settingsService.triggerBackup();
-
-      addToast(
-        `✓ Database backup created successfully! Timestamp: ${new Date(result.timestamp || Date.now()).toLocaleString()}`,
-        "success"
-      );
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to create backup";
-      console.error("Error triggering backup:", err);
-      setError(errorMessage);
-      addToast(errorMessage, "error");
-    } finally {
-      setBackingUp(false);
-    }
   };
 
   if (loading) {
@@ -549,39 +524,6 @@ const Settings = () => {
               </button>
             )}
           </div>
-
-          <button
-            type="button"
-            onClick={handleTriggerBackup}
-            disabled={backingUp}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              background: "#F1F5F9",
-              color: "#0F172A",
-              border: "1px solid #CBD5E1",
-              padding: "12px 24px",
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: backingUp ? "not-allowed" : "pointer",
-              transition: "background 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              if (!backingUp) {
-                (e.target as HTMLButtonElement).style.background = "#E2E8F0";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!backingUp) {
-                (e.target as HTMLButtonElement).style.background = "#F1F5F9";
-              }
-            }}
-          >
-            {backingUp ? <FaSpinner style={{ animation: "spin 1s linear infinite" }} /> : <FaDatabase />}
-            {backingUp ? "Creating Backup..." : "Trigger Instant Backup"}
-          </button>
         </div>
       </form>
 

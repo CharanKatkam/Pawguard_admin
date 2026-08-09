@@ -1,4 +1,5 @@
 import axios from "../../api/axios";
+import { notifyAuthChanged } from "../../utils/dataSync";
 
 export interface LoginPayload {
   email: string;
@@ -41,6 +42,7 @@ const logout = async () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
+    notifyAuthChanged();
   }
 };
 

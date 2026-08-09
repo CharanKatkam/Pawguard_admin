@@ -192,7 +192,7 @@ const RescueCoordinatorDashboard = () => {
           title="Track Agents"
           subtitle="Live Tracking"
           color="#10B981"
-          onClick={() => navigate("/dispatch")}
+          onClick={() => navigate("/rescue-dispatch")}
         />
 
         <QuickActionCard
@@ -202,7 +202,7 @@ const RescueCoordinatorDashboard = () => {
           color="#6366F1"
           onClick={async () => {
             addToast("Exporting rescue logs...", "info");
-            await reportsService.exportCsvDump();
+            await reportsService.generateAndDownloadReport({ report_type: "rescue", format: "csv" });
             addToast("Rescue logs exported successfully!", "success");
           }}
         />

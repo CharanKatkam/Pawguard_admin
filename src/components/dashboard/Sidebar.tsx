@@ -29,6 +29,7 @@ import {
 } from "../../utils/roleUtils";
 import type { RoleMenuItem } from "../../utils/roleUtils";
 import { usePermissions } from "../../context/PermissionContext";
+import { notifyAuthChanged } from "../../utils/dataSync";
 import PawGuardLogo from "../common/PawGuardLogo";
 
 interface SidebarProps {
@@ -101,6 +102,7 @@ const Sidebar = ({ collapsed = false }: SidebarProps) => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
+    notifyAuthChanged();
     navigate("/");
   };
 

@@ -140,7 +140,7 @@ const RescueDispatch = () => {
         <StatCard title="Active Dispatches" value={dispatches.length} icon={<FaTruck />} color="#2563EB" />
         <StatCard title="En Route" value={dispatches.filter((d) => d.status === "En Route").length} icon={<FaAmbulance />} color="#F59E0B" />
         <StatCard title="Arrived On Scene" value={dispatches.filter((d) => d.status === "Arrived").length} icon={<FaUserCheck />} color="#10B981" />
-        <StatCard title="Standby Units" value={3} icon={<FaClock />} color="#8B5CF6" />
+        <StatCard title="Standby Units" value="—" icon={<FaClock />} color="#8B5CF6" />
       </div>
 
       <DataTable

@@ -6,14 +6,15 @@ import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import {
   FaHome,
   FaBed,
-  FaUtensils,
+  FaPaw,
   FaBoxes,
   FaUsers,
-  FaClipboardList,
 } from "react-icons/fa";
-import dashboardService from "../../../services/dashboardService";
 import shelterService from "../../../services/shelterService";
+import petService from "../../../services/petService";
 import { useDataSync } from "../../../utils/dataSync";
+
+const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
 
 const ShelterManagerDashboard = () => {
   const navigate = useNavigate();
@@ -26,58 +27,82 @@ const ShelterManagerDashboard = () => {
     total_dogs: 0,
     adoptable_dogs: 0,
     total_kennels: 0,
-    occupancy_rate: 0,
+    in_shelter_dogs: 0,
+    total_capacity: 0,
   });
 
   const unwrapList = (v: any) =>
     Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
+
+  const mapKennel = (k: any, sectionName?: string) => ({
+    id: k.id || k.kennel_id || "",
+    cageNo: k.identifier || k.kennel_number || k.name || "",
+    section: sectionName || k.section_name || "",
+    capacity: k.capacity ?? "",
+    status: k.sanitation_state || k.sanitation || "",
+  });
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await dashboardService.getShelterDashboard();
+      // Derive every headline metric from real record endpoints (facilities,
+      // dogs, kennel hierarchy). The free-form /dashboards/shelter payload is
+      // intentionally not trusted for counts or occupancy.
+      const [facilitiesRes, dogsRes] = await Promise.all([
+        shelterService.getShelters({ page: 1, page_size: 200 }),
+        petService.getPets({ page: 1, page_size: 500 }),
+      ]);
 
-      const data = response?.data || response || {};
+      const facilities = unwrapList(facilitiesRes);
+      const dogs = unwrapList(dogsRes);
+
+      const totalCapacity = facilities.reduce(
+        (acc: number, f: any) => acc + (Number(f.total_capacity) || 0),
+        0
+      );
+      const inShelterDogs = dogs.filter((d: any) =>
+        IN_SHELTER_STATUSES.includes(String(d.status).toLowerCase())
+      ).length;
+      const adoptableDogs = dogs.filter((d: any) => d.is_adoptable).length;
+      const totalDogs =
+        dogsRes?.meta?.total ?? dogsRes?.data?.meta?.total ?? dogs.length;
+
       setDashboardData({
-        total_facilities: data.total_facilities ?? data.totalFacilities ?? 0,
-        total_dogs: data.total_dogs ?? data.totalDogs ?? data.totalPets ?? 0,
-        adoptable_dogs: data.adoptable_dogs ?? data.adoptableDogs ?? 0,
-        total_kennels: data.total_kennels ?? data.totalKennels ?? 0,
-        occupancy_rate: data.occupancy_rate ?? data.occupancyRate ?? 0,
+        total_facilities: facilities.length,
+        total_dogs: totalDogs,
+        adoptable_dogs: adoptableDogs,
+        in_shelter_dogs: inShelterDogs,
+        total_capacity: totalCapacity,
+        total_kennels: 0,
       });
 
-      // Prefer kennel data included in the dashboard payload, otherwise load
-      // it live from the shelter facility hierarchy.
-      const payloadKennels =
-        Array.isArray(data.kennels) ? data.kennels : Array.isArray(data.kennel_list) ? data.kennel_list : null;
+      // Kennel registry loaded live from the shelter facility hierarchy.
+      const sectionResults = await Promise.allSettled(
+        facilities.map((s: any) =>
+          shelterService.getFacilitySections(s.facility_id ?? s.id)
+        )
+      );
+      const sections = sectionResults.flatMap((r) =>
+        r.status === "fulfilled" ? unwrapList(r.value) : []
+      );
 
-      if (payloadKennels) {
-        setKennelRows(payloadKennels.map((k: any) => mapKennel(k)));
-      } else {
-        const shelterRes = await shelterService.getShelters();
-        const shelters = unwrapList(shelterRes);
-
-        const sectionResults = await Promise.allSettled(
-          shelters.map((s: any) =>
-            shelterService.getFacilitySections(s.facility_id ?? s.id)
-          )
-        );
-        const sections = sectionResults.flatMap((r) =>
-          r.status === "fulfilled" ? unwrapList(r.value) : []
-        );
-
-        const kennelResults = await Promise.allSettled(
-          sections.map((sec: any) =>
-            shelterService.getSectionKennels(sec.section_id ?? sec.id)
-          )
-        );
-        const kennels = kennelResults.flatMap((r) =>
-          r.status === "fulfilled" ? unwrapList(r.value) : []
-        );
-        setKennelRows(kennels.map((k: any) => mapKennel(k)));
+      const sectionNames: Record<string, string> = {};
+      for (const sec of sections) {
+        if (sec?.id) sectionNames[sec.id] = sec.name || sec.id;
       }
+
+      const kennelResults = await Promise.allSettled(
+        sections.map((sec: any) =>
+          shelterService.getSectionKennels(sec.section_id ?? sec.id)
+        )
+      );
+      const kennels = kennelResults.flatMap((r) =>
+        r.status === "fulfilled" ? unwrapList(r.value) : []
+      );
+      setKennelRows(kennels.map((k: any) => mapKennel(k, sectionNames[k.section_id])));
+      setDashboardData((prev) => ({ ...prev, total_kennels: kennels.length }));
     } catch (err: any) {
       console.error("Shelter Dashboard Error:", err);
       setError(
@@ -90,21 +115,17 @@ const ShelterManagerDashboard = () => {
     }
   };
 
-  const mapKennel = (k: any) => ({
-    cageNo: k.kennel_id ?? k.id ?? k.kennel_name ?? k.name ?? "",
-    petName:
-      k.dog_name ?? k.pet_name ?? (k.dog ? `${k.dog.name ?? ""} (${k.dog.dog_id ?? k.dog.id ?? ""})` : ""),
-    feeding: k.feeding_plan ?? k.diet ?? k.feeding ?? "",
-    careLog: k.care_notes ?? k.care_requirements ?? k.care_log ?? k.notes ?? "",
-    status: k.status ?? (k.is_occupied ? "Occupied" : "Available"),
-  });
-
   useDataSync(fetchDashboard);
 
   useEffect(() => {
     fetchDashboard();
   }, []);
 
+  const { total_capacity, in_shelter_dogs } = dashboardData;
+  const occupancyText =
+    total_capacity > 0
+      ? `${Math.round((in_shelter_dogs / total_capacity) * 100)}%`
+      : "N/A";
 
   const stats = [
     {
@@ -117,16 +138,16 @@ const ShelterManagerDashboard = () => {
     {
       title: "Kennels",
       value: loading ? "..." : dashboardData.total_kennels,
-      trend: "Available Kennels",
+      trend: "Registered Kennels",
       color: "#10B981",
       icon: <FaBed />,
     },
     {
       title: "Occupancy",
-      value: loading ? "..." : `${dashboardData.occupancy_rate}%`,
-      trend: "Current Capacity",
+      value: loading ? "..." : occupancyText,
+      trend: `${in_shelter_dogs} In Care / ${total_capacity} Capacity`,
       color: "#F59E0B",
-      icon: <FaUtensils />,
+      icon: <FaPaw />,
     },
     {
       title: "Facilities",
@@ -139,10 +160,9 @@ const ShelterManagerDashboard = () => {
 
   const columns = [
     { key: "cageNo", title: "Cage / Ward" },
-    { key: "petName", title: "Pet Name & ID" },
-    { key: "feeding", title: "Diet & Feeding Plan" },
-    { key: "careLog", title: "Special Care Requirements" },
-    { key: "status", title: "Status" },
+    { key: "section", title: "Section" },
+    { key: "capacity", title: "Capacity" },
+    { key: "status", title: "Sanitation State" },
   ];
 
   return (
@@ -174,8 +194,8 @@ const ShelterManagerDashboard = () => {
             fontSize: "13px",
           }}
         >
-          Facility care suite: cage allocation, animal feeding schedules,
-          shelter staff rosters and inventory management.
+          Facility care suite: cage allocation, shelter capacity, kennel sanitation
+          and inventory management.
         </p>
       </div>
 
@@ -197,8 +217,6 @@ const ShelterManagerDashboard = () => {
       )}
 
       {/* Quick Actions */}
-
-
       <div
         style={{
           display: "grid",
@@ -216,11 +234,11 @@ const ShelterManagerDashboard = () => {
         />
 
         <QuickActionCard
-          icon={<FaUtensils />}
-          title="Log Feeding"
-          subtitle="Update nutrition plan"
+          icon={<FaPaw />}
+          title="Register Dog"
+          subtitle="New animal intake"
           color="#10B981"
-          onClick={() => navigate("/pets")}
+          onClick={() => navigate("/pets?action=register")}
         />
 
         <QuickActionCard
@@ -232,16 +250,15 @@ const ShelterManagerDashboard = () => {
         />
 
         <QuickActionCard
-          icon={<FaClipboardList />}
-          title="Shift Roster"
-          subtitle="Manage Staff"
+          icon={<FaUsers />}
+          title="Staff Roster"
+          subtitle="View Shelter Staff"
           color="#6366F1"
           onClick={() => navigate("/users")}
         />
       </div>
 
       {/* Statistics */}
-
       <div
         style={{
           display: "grid",
@@ -256,7 +273,6 @@ const ShelterManagerDashboard = () => {
       </div>
 
       {/* Table */}
-
       <div className="soft-card" style={{ padding: "20px" }}>
         <div
           style={{
@@ -272,7 +288,7 @@ const ShelterManagerDashboard = () => {
               fontWeight: 700,
             }}
           >
-            Shelter Kennel Allocation & Feeding Registry
+            Kennel Registry & Sanitation Status
           </h3>
 
           {loading && (
@@ -291,7 +307,7 @@ const ShelterManagerDashboard = () => {
           columns={columns}
           data={kennelRows}
           loading={loading}
-          emptyMessage="No kennel allocations found. Allocate a cage from the Shelters module."
+          emptyMessage="No kennels registered yet. Create kennels from the Shelters module."
         />
       </div>
     </div>

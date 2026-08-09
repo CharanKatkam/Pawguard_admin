@@ -28,6 +28,18 @@ interface DataTableProps {
   renderRowActions?: (row: any) => React.ReactNode;
   /** Permission module name used to gate Edit/Delete actions (e.g. "users"). */
   module?: string;
+  /** Server-driven mode: search + pagination are delegated to the parent. */
+  serverMode?: boolean;
+  /** Total row count (server mode) used for pagination and counts. */
+  totalCount?: number;
+  /** Current page (server mode, 1-based). */
+  page?: number;
+  /** Called with the new page when the user navigates (server mode). */
+  onPageChange?: (page: number) => void;
+  /** Controlled search term (server mode). */
+  searchValue?: string;
+  /** Called when the search term changes (server mode). */
+  onSearchChange?: (term: string) => void;
 }
 
 const DataTable: React.FC<DataTableProps> = ({
@@ -43,13 +55,30 @@ const DataTable: React.FC<DataTableProps> = ({
   onDelete,
   onRowClick,
   module,
+  renderRowActions,
+  serverMode = false,
+  totalCount = 0,
+  page: controlledPage,
+  onPageChange,
+  searchValue,
+  onSearchChange,
 }) => {
   const { addToast } = useToast();
   const { can } = usePermissions();
   const canEdit = !module || can("edit", module);
   const canDelete = !module || can("delete", module);
+  const showRowActions = !!renderRowActions;
+  const actionColCount = columns.length + (showRowActions ? 1 : 0);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  const goToPage = (next: number) => {
+    if (serverMode) {
+      if (onPageChange) onPageChange(next);
+    } else {
+      setCurrentPage(next);
+    }
+  };
 
   // Modal State
   const [selectedRow, setSelectedRow] = useState<Record<string, any> | null>(null);
@@ -59,6 +88,7 @@ const DataTable: React.FC<DataTableProps> = ({
 
   // Filter
   const filteredData = useMemo(() => {
+    if (serverMode) return data;
     if (!searchTerm.trim()) return data;
     const lower = searchTerm.toLowerCase();
     return data.filter((row) =>
@@ -67,14 +97,18 @@ const DataTable: React.FC<DataTableProps> = ({
         return val !== undefined && val !== null && String(val).toLowerCase().includes(lower);
       })
     );
-  }, [data, searchTerm, columns]);
+  }, [data, searchTerm, columns, serverMode]);
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
+  const activePage = serverMode ? (controlledPage ?? 1) : currentPage;
+  const totalPages = serverMode
+    ? Math.max(1, Math.ceil((totalCount || 0) / pageSize))
+    : Math.max(1, Math.ceil(filteredData.length / pageSize));
   const pageData = useMemo(() => {
+    if (serverMode) return data;
     const start = (currentPage - 1) * pageSize;
     return filteredData.slice(start, start + pageSize);
-  }, [filteredData, currentPage, pageSize]);
+  }, [filteredData, currentPage, pageSize, serverMode, data]);
 
   const renderStatusBadge = (val: string) => {
     const lower = val.toLowerCase();
@@ -209,10 +243,14 @@ const DataTable: React.FC<DataTableProps> = ({
           <input
             type="text"
             placeholder="Search records..."
-            value={searchTerm}
+            value={serverMode ? (searchValue ?? "") : searchTerm}
             onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setCurrentPage(1);
+              if (serverMode) {
+                if (onSearchChange) onSearchChange(e.target.value);
+              } else {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }
             }}
             style={{
               width: "100%",
@@ -228,7 +266,7 @@ const DataTable: React.FC<DataTableProps> = ({
         </div>
 
         <div style={{ fontSize: "13px", color: "#64748B" }}>
-          Showing <strong>{pageData.length}</strong> of <strong>{filteredData.length}</strong> entries
+          Showing <strong>{pageData.length}</strong> of <strong>{serverMode ? totalCount : filteredData.length}</strong> entries
         </div>
       </div>
 
@@ -260,6 +298,19 @@ const DataTable: React.FC<DataTableProps> = ({
                   {col.title || col.header || col.key}
                 </th>
               ))}
+              {showRowActions && (
+                <th
+                  style={{
+                    padding: "14px 16px",
+                    fontWeight: 700,
+                    color: "#475569",
+                    whiteSpace: "nowrap",
+                    textAlign: "right",
+                  }}
+                >
+                  Actions
+                </th>
+              )}
             </tr>
           </thead>
 
@@ -267,7 +318,7 @@ const DataTable: React.FC<DataTableProps> = ({
             {loading ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={actionColCount}
                   style={{ padding: "40px", textAlign: "center", color: "#2563EB" }}
                 >
                   <div
@@ -288,7 +339,7 @@ const DataTable: React.FC<DataTableProps> = ({
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={columns.length} style={{ padding: "24px", textAlign: "center" }}>
+                <td colSpan={actionColCount} style={{ padding: "24px", textAlign: "center" }}>
                   <div
                     style={{
                       background: "#FEF2F2",
@@ -326,7 +377,7 @@ const DataTable: React.FC<DataTableProps> = ({
             ) : pageData.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={actionColCount}
                   style={{ padding: "32px", textAlign: "center", color: "#94A3B8" }}
                 >
                   {emptyMessage}
@@ -361,6 +412,11 @@ const DataTable: React.FC<DataTableProps> = ({
                       </td>
                     );
                   })}
+                  {showRowActions && (
+                    <td style={{ padding: "14px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      {renderRowActions && renderRowActions(row)}
+                    </td>
+                  )}
                 </tr>
               ))
             )}
@@ -380,13 +436,13 @@ const DataTable: React.FC<DataTableProps> = ({
         }}
       >
         <span style={{ fontSize: "13px", color: "#64748B" }}>
-          Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+          Page <strong>{activePage}</strong> of <strong>{totalPages}</strong>
         </span>
 
         <div style={{ display: "flex", gap: "8px" }}>
           <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
+            onClick={() => goToPage(Math.max(1, activePage - 1))}
+            disabled={activePage === 1}
             style={{
               display: "flex",
               alignItems: "center",
@@ -394,19 +450,19 @@ const DataTable: React.FC<DataTableProps> = ({
               padding: "6px 12px",
               borderRadius: "8px",
               border: "1px solid #CBD5E1",
-              background: currentPage === 1 ? "#F1F5F9" : "#FFFFFF",
-              color: currentPage === 1 ? "#94A3B8" : "#0F172A",
+              background: activePage === 1 ? "#F1F5F9" : "#FFFFFF",
+              color: activePage === 1 ? "#94A3B8" : "#0F172A",
               fontSize: "13px",
               fontWeight: 600,
-              cursor: currentPage === 1 ? "not-allowed" : "pointer",
+              cursor: activePage === 1 ? "not-allowed" : "pointer",
             }}
           >
             <FaChevronLeft size={11} /> Previous
           </button>
 
           <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
+            onClick={() => goToPage(Math.min(totalPages, activePage + 1))}
+            disabled={activePage === totalPages}
             style={{
               display: "flex",
               alignItems: "center",
@@ -414,11 +470,11 @@ const DataTable: React.FC<DataTableProps> = ({
               padding: "6px 12px",
               borderRadius: "8px",
               border: "1px solid #CBD5E1",
-              background: currentPage === totalPages ? "#F1F5F9" : "#FFFFFF",
-              color: currentPage === totalPages ? "#94A3B8" : "#0F172A",
+              background: activePage === totalPages ? "#F1F5F9" : "#FFFFFF",
+              color: activePage === totalPages ? "#94A3B8" : "#0F172A",
               fontSize: "13px",
               fontWeight: 600,
-              cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+              cursor: activePage === totalPages ? "not-allowed" : "pointer",
             }}
           >
             Next <FaChevronRight size={11} />

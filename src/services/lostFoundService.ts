@@ -16,34 +16,19 @@ export interface LostFoundPayload {
 export const lostFoundService = {
   // GET /lost-found/lost (Exact OpenAPI endpoint for lost reports)
   getLostReports: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/lost-found/lost", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/lost-found/lost", { params });
+    return response.data;
   },
 
   // GET /lost-found/found (Exact OpenAPI endpoint for found reports)
   getFoundReports: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/lost-found/found", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/lost-found/found", { params });
+    return response.data;
   },
 
   getLostFoundList: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/lost-found/lost", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/lost-found/lost", { params });
+    return response.data;
   },
 
   createReport: async (data: LostFoundPayload) => {

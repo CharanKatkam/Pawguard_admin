@@ -247,16 +247,18 @@ const Users = () => {
           />
         </Can>
 
-        <QuickActionCard
-          icon={<FaUserShield />}
-          title="Manage Role Access"
-          subtitle="Update user permissions"
-          color="#6366F1"
-          onClick={() => {
-            addToast("Opening role permission management matrix", "info");
-            window.location.href = "/roles-permissions";
-          }}
-        />
+        <Can permission="manage_permissions">
+          <QuickActionCard
+            icon={<FaUserShield />}
+            title="Manage Role Access"
+            subtitle="Update user permissions"
+            color="#6366F1"
+            onClick={() => {
+              addToast("Opening role permission management matrix", "info");
+              window.location.href = "/roles-permissions";
+            }}
+          />
+        </Can>
       </div>
 
       <div

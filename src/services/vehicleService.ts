@@ -15,13 +15,8 @@ export interface VehiclePayload {
 export const vehicleService = {
   // GET /fleet/vehicles (Exact OpenAPI endpoint)
   getVehicles: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/fleet/vehicles", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/fleet/vehicles", { params });
+    return response.data;
   },
 
   createVehicle: async (data: VehiclePayload) => {

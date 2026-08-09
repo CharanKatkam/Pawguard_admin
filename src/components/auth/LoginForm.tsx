@@ -5,6 +5,7 @@ import axios from "axios";
 import PasswordInput from "./PasswordInput";
 import authService from "../../services/auth/authService";
 import { getDashboardPathForRole, normalizeRole } from "../../utils/roleUtils";
+import { notifyAuthChanged } from "../../utils/dataSync";
 import { useToast } from "../../context/ToastContext";
 
 const LoginForm = () => {
@@ -115,6 +116,7 @@ const LoginForm = () => {
       localStorage.removeItem("remember_email");
     }
 
+    notifyAuthChanged();
     navigate(getDashboardPathForRole(userRole), { replace: true });
   };
 

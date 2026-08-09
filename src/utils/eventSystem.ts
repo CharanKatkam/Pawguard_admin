@@ -26,29 +26,14 @@ export interface ActionEventPayload {
   metadata?: Record<string, unknown>;
 }
 
-// In-memory activity and audit log stores to complement backend streams
+// In-memory activity and audit log streams populated from real user actions
 const activityLogStream: Array<{
   id: string;
   title: string;
   desc: string;
   time: string;
   type: string;
-}> = [
-  {
-    id: "ACT-101",
-    title: "System Audit Verified",
-    desc: "Centralized workflow sync initialized across all 15 role dashboards.",
-    time: "Just now",
-    type: "system",
-  },
-  {
-    id: "ACT-102",
-    title: "Cross-Dashboard Sync Active",
-    desc: "Role-based notifications, real-time KPI updates, and audit logging active.",
-    time: "5 mins ago",
-    type: "security",
-  },
-];
+}> = [];
 
 const auditLogStream: Array<{
   id: string;
@@ -56,22 +41,7 @@ const auditLogStream: Array<{
   user: string;
   time: string;
   status: string;
-}> = [
-  {
-    id: "AUD-9901",
-    action: "User Role Permission Granted",
-    user: "superadmin@pawguard.org",
-    time: "Just now",
-    status: "Success",
-  },
-  {
-    id: "AUD-9902",
-    action: "System Audit Trail Initialized",
-    user: "system_cron",
-    time: "10 mins ago",
-    status: "Success",
-  },
-];
+}> = [];
 
 export const getActivityStream = () => [...activityLogStream];
 export const getAuditStream = () => [...auditLogStream];
@@ -86,7 +56,7 @@ export const getAuditStream = () => [...auditLogStream];
  */
 export async function publishActionEvent(payload: ActionEventPayload): Promise<void> {
   const currentUser = getCurrentUser();
-  const actor = payload.user || currentUser?.email || "admin@pawguard.org";
+  const actor = payload.user || currentUser?.email || "System";
   const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   // 1. Create & Broadcast Notification

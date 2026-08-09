@@ -102,10 +102,10 @@ const DonorDashboard = () => {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
         <QuickActionCard icon={<FaHeart />} title="Make New Donation" subtitle="Sponsor emergency rescue" color="#10B981" onClick={() => addToast("Open the Finance module to make a donation", "info")} />
-        <QuickActionCard icon={<FaFileInvoice />} title="Download Tax Receipts" subtitle="Export 80G tax receipt" color="#2563EB" onClick={async () => {
-          addToast("Generating tax exemption receipt PDF...", "info");
-          await reportsService.exportExecutivePdf();
-          addToast("Tax receipt downloaded!", "success");
+        <QuickActionCard icon={<FaFileInvoice />} title="Download Tax Receipts" subtitle="Export donation report" color="#2563EB" onClick={async () => {
+          addToast("Generating donation report PDF...", "info");
+          await reportsService.generateAndDownloadReport({ report_type: "donation", format: "pdf" });
+          addToast("Donation report downloaded!", "success");
         }} />
       </div>
 

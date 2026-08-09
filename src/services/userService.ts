@@ -32,14 +32,6 @@ const unwrap = <T,>(body: unknown): T => {
   return body as T;
 };
 
-const isNotFound = (err: unknown): boolean => {
-  if (err && typeof err === "object") {
-    const status = (err as { response?: { status?: number } })?.response?.status;
-    return status === 404;
-  }
-  return false;
-};
-
 /** Extract permission codes from any role/permission payload shape. */
 export const extractPermissionCodes = (raw: unknown): string[] => {
   if (!raw || typeof raw !== "object") return [];
@@ -67,20 +59,8 @@ export const extractPermissionCodes = (raw: unknown): string[] => {
 export const userService = {
   // Super Admin - Users
   getUsers: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/admin/users", { params });
-      return response.data;
-    } catch (err: unknown) {
-      if (isNotFound(err)) {
-        try {
-          const res2 = await api.get("/users", { params });
-          return res2.data;
-        } catch {
-          return { data: [], total: 0 };
-        }
-      }
-      throw err;
-    }
+    const response = await api.get("/admin/users", { params });
+    return response.data;
   },
 
   createUser: async (data: UserPayload) => {
@@ -126,13 +106,8 @@ export const userService = {
 
   // Super Admin - Roles
   getRoles: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/admin/roles", { params });
-      return unwrap<unknown>(response.data);
-    } catch (err: unknown) {
-      if (isNotFound(err)) return [];
-      throw err;
-    }
+    const response = await api.get("/admin/roles", { params });
+    return unwrap<unknown>(response.data);
   },
 
   createRole: async (data: RolePayload) => {

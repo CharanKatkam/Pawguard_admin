@@ -11,15 +11,43 @@ import {
   FaAmbulance,
   FaHeart,
   FaPlus,
+  FaEdit,
   FaTrash,
 } from "react-icons/fa";
 import petService from "../../services/petService";
 import { notifyDataChanged } from "../../utils/dataSync";
 
+const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
+const GENDERS = ["male", "female", "unknown"];
+const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
+
+const emptyPetForm = {
+  name: "",
+  breed: "",
+  gender: "unknown",
+  estimated_age: "",
+  age_months: "",
+  weight: "",
+  is_adoptable: false,
+  status: "shelter",
+};
+
+const cleanPayload = (data: Record<string, unknown>) => {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v !== undefined && v !== null && v !== "") out[k] = v;
+  }
+  return out;
+};
+
 const Pets = () => {
   const [dogs, setDogs] = useState<any[]>([]);
+  const [allDogs, setAllDogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
@@ -33,51 +61,46 @@ const Pets = () => {
   const [selectedDog, setSelectedDog] = useState<any | null>(null);
 
   // Form states
-  const [petForm, setPetForm] = useState({
-    name: "",
-    breed: "Indie Rescue Mix",
-    age: "2 Years",
-    gender: "Male",
-    status: "Adoptable",
-  });
+  const [petForm, setPetForm] = useState({ ...emptyPetForm });
   const [statusUpdateForm, setStatusUpdateForm] = useState({
     dogId: "",
-    status: "In Treatment",
+    status: "shelter",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchDogs();
-  }, []);
+  const unwrapList = (v: any) =>
+    Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-  useEffect(() => {
-    if (searchParams.get("action") === "register") {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, [searchParams]);
+  const dogId = (dog: any) => dog?.id || dog?.dog_id || "";
+
+  const formatDog = (dog: any) => ({
+    ...dog,
+    registration_number: dog.registration_number || dog.id || "-",
+    name: dog.name || "-",
+    breed: dog.breed || "-",
+    gender: dog.gender || "",
+    estimated_age: dog.estimated_age || dog.age || "-",
+    age_months: dog.age_months ?? "",
+    weight: dog.weight ?? "",
+    is_adoptable: !!dog.is_adoptable,
+    status: dog.status || "-",
+  });
 
   const fetchDogs = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await petService.getPets();
-      const dogList = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
+      const response = await petService.getPets({
+        search: search.trim() || undefined,
+        page,
+        page_size: 5,
+      });
+      const dogList = unwrapList(response);
+      const total = response?.meta?.total ?? response?.data?.meta?.total ?? dogList.length;
+      setTotalCount(total);
 
-      const formattedDogs = dogList.map((dog: any) => ({
-        ...dog,
-        registration_number: dog.registration_number || dog.id || dog.petId || "-",
-        name: dog.name || "-",
-        breed: dog.breed || "-",
-        estimated_age: dog.estimated_age || dog.age || "-",
-        status: dog.status || "Adoptable",
-      }));
-
-      setDogs(formattedDogs);
+      setDogs(dogList.map(formatDog));
     } catch (err: any) {
       setError(
         err?.response?.data?.detail ||
@@ -89,6 +112,30 @@ const Pets = () => {
     }
   };
 
+  const fetchAllDogs = async () => {
+    try {
+      const response = await petService.getPets({ page: 1, page_size: 500 });
+      setAllDogs(unwrapList(response).map(formatDog));
+    } catch {
+      setAllDogs([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchDogs();
+  }, [search, page]);
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchAllDogs(), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "register") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
+
   const handleRegisterPet = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!petForm.name) {
@@ -97,16 +144,20 @@ const Pets = () => {
     }
     try {
       setIsSubmitting(true);
-      await petService.createPet({
-        name: petForm.name,
-        breed: petForm.breed,
-        age: petForm.age,
-        gender: petForm.gender,
-        status: petForm.status,
-      });
+      await petService.createPet(
+        cleanPayload({
+          name: petForm.name,
+          breed: petForm.breed,
+          gender: petForm.gender,
+          estimated_age: petForm.estimated_age,
+          age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
+          weight: petForm.weight ? Number(petForm.weight) : undefined,
+          is_adoptable: petForm.is_adoptable,
+        })
+      );
       addToast(`Rescued pet "${petForm.name}" registered successfully!`, "success");
       setIsRegisterModalOpen(false);
-      setPetForm({ name: "", breed: "Indie Rescue Mix", age: "2 Years", gender: "Male", status: "Adoptable" });
+      setPetForm({ ...emptyPetForm });
       fetchDogs();
       notifyDataChanged();
     } catch (err: any) {
@@ -129,7 +180,7 @@ const Pets = () => {
       await petService.updatePetStatus(id, statusUpdateForm.status);
       addToast(`Status updated for pet ${id} to ${statusUpdateForm.status}`, "success");
       setIsStatusModalOpen(false);
-      setStatusUpdateForm({ dogId: "", status: "In Treatment" });
+      setStatusUpdateForm({ dogId: "", status: "shelter" });
       fetchDogs();
       notifyDataChanged();
     } catch (err: any) {
@@ -141,8 +192,13 @@ const Pets = () => {
   };
 
   const handleMarkAdoptable = async (dog: any) => {
+    const id = dogId(dog);
+    if (!id) {
+      addToast("Could not determine the dog record to update.", "error");
+      return;
+    }
     try {
-      await petService.updatePetStatus(dog.id || dog.registration_number, "Adoptable");
+      await petService.markDogAdoptable(id);
       addToast(`${dog.name} is now marked Ready for Adoption!`, "success");
       setIsAdoptableModalOpen(false);
       fetchDogs();
@@ -153,19 +209,51 @@ const Pets = () => {
     }
   };
 
+  const openEdit = (dog: any) => {
+    setSelectedDog(dog);
+    setPetForm({
+      name: dog.name && dog.name !== "-" ? dog.name : "",
+      breed: dog.breed && dog.breed !== "-" ? dog.breed : "",
+      gender: GENDERS.includes(dog.gender) ? dog.gender : "unknown",
+      estimated_age: dog.estimated_age && dog.estimated_age !== "-" ? dog.estimated_age : "",
+      age_months: dog.age_months !== undefined && dog.age_months !== "" ? String(dog.age_months) : "",
+      weight: dog.weight !== undefined && dog.weight !== "" ? String(dog.weight) : "",
+      is_adoptable: !!dog.is_adoptable,
+      status: DOG_STATUSES.includes(dog.status) ? dog.status : "shelter",
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const openDelete = (dog: any) => {
+    setSelectedDog(dog);
+    setIsDeleteModalOpen(true);
+  };
+
   const handleEditDogSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDog) return;
+    const id = dogId(selectedDog);
+    if (!id) {
+      addToast("Could not determine the dog record to update.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
-      await petService.updatePet(selectedDog.id || selectedDog.registration_number, {
-        name: petForm.name,
-        breed: petForm.breed,
-        age: petForm.age,
-        status: petForm.status,
-      });
+      await petService.updatePet(
+        id,
+        cleanPayload({
+          name: petForm.name,
+          breed: petForm.breed,
+          gender: petForm.gender,
+          estimated_age: petForm.estimated_age,
+          age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
+          weight: petForm.weight ? Number(petForm.weight) : undefined,
+          is_adoptable: petForm.is_adoptable,
+          status: DOG_STATUSES.includes(petForm.status) ? petForm.status : undefined,
+        })
+      );
       addToast(`Updated record for ${petForm.name}!`, "success");
       setIsEditModalOpen(false);
+      setSelectedDog(null);
       fetchDogs();
       notifyDataChanged();
     } catch (err: any) {
@@ -177,11 +265,15 @@ const Pets = () => {
   };
 
   const handleDeleteDog = async () => {
-    if (!selectedDog) return;
+    const id = dogId(selectedDog);
+    if (!id) {
+      addToast("Could not determine the dog record to delete.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
-      await petService.deletePet(selectedDog.id || selectedDog.registration_number);
-      addToast(`Deleted pet ${selectedDog.name}`, "success");
+      await petService.deletePet(id);
+      addToast(`Deleted pet ${selectedDog?.name}`, "success");
       setIsDeleteModalOpen(false);
       setSelectedDog(null);
       fetchDogs();
@@ -194,28 +286,29 @@ const Pets = () => {
     }
   };
 
+  const inShelterCount = allDogs.filter((dog) =>
+    IN_SHELTER_STATUSES.includes(String(dog.status).toLowerCase())
+  ).length;
+  const adoptableCount = allDogs.filter((dog) => dog.is_adoptable).length;
+
   const stats = [
     {
       title: "Total Registered Dogs",
-      value: loading ? "..." : dogs.length,
+      value: loading ? "..." : totalCount,
       trend: "Registered Dogs",
       color: "#2563EB",
       icon: <FaPaw />,
     },
     {
       title: "Dogs in Shelter",
-      value: loading
-        ? "..."
-        : dogs.filter((dog) => String(dog.status).toLowerCase().includes("shelter") || String(dog.status).toLowerCase().includes("treatment")).length,
+      value: loading ? "..." : inShelterCount,
       trend: "Currently Sheltered",
       color: "#EF4444",
       icon: <FaAmbulance />,
     },
     {
       title: "Adoptable Dogs",
-      value: loading
-        ? "..."
-        : dogs.filter((dog) => dog.is_adoptable || String(dog.status).toLowerCase().includes("adopt")).length,
+      value: loading ? "..." : adoptableCount,
       trend: "Ready for Adoption",
       color: "#10B981",
       icon: <FaHeart />,
@@ -226,9 +319,60 @@ const Pets = () => {
     { key: "registration_number", title: "Dog ID" },
     { key: "name", title: "Dog Name" },
     { key: "breed", title: "Breed" },
+    {
+      key: "gender",
+      title: "Gender",
+      render: (v: string) =>
+        v ? v.charAt(0).toUpperCase() + v.slice(1) : "-",
+    },
     { key: "estimated_age", title: "Age" },
     { key: "status", title: "Status" },
   ];
+
+  const rowActions = (row: any) => (
+    <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+      <Can permission="edit_animals">
+        <button
+          onClick={() => openEdit(row)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 12px",
+            borderRadius: "6px",
+            border: "1px solid #CBD5E1",
+            background: "#FFFFFF",
+            color: "#2563EB",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          <FaEdit /> Edit
+        </button>
+      </Can>
+      <Can permission="delete_animals">
+        <button
+          onClick={() => openDelete(row)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 12px",
+            borderRadius: "6px",
+            border: "1px solid #FCA5A5",
+            background: "#FFFFFF",
+            color: "#DC2626",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          <FaTrash /> Delete
+        </button>
+      </Can>
+    </div>
+  );
 
   return (
     <div>
@@ -281,27 +425,31 @@ const Pets = () => {
             subtitle="Register rescued dog"
             color="#2563EB"
             onClick={() => {
-              setPetForm({ name: "", breed: "Indie Rescue Mix", age: "2 Years", gender: "Male", status: "Adoptable" });
+              setPetForm({ ...emptyPetForm });
               setIsRegisterModalOpen(true);
             }}
           />
         </Can>
 
-        <QuickActionCard
-          icon={<FaAmbulance />}
-          title="Update Status"
-          subtitle="Update dog status"
-          color="#EF4444"
-          onClick={() => setIsStatusModalOpen(true)}
-        />
+        <Can permission="edit_animals">
+          <QuickActionCard
+            icon={<FaAmbulance />}
+            title="Update Status"
+            subtitle="Update dog status"
+            color="#EF4444"
+            onClick={() => setIsStatusModalOpen(true)}
+          />
+        </Can>
 
-        <QuickActionCard
-          icon={<FaHeart />}
-          title="Ready For Adoption"
-          subtitle="Mark adoptable"
-          color="#10B981"
-          onClick={() => setIsAdoptableModalOpen(true)}
-        />
+        <Can permission="edit_animals">
+          <QuickActionCard
+            icon={<FaHeart />}
+            title="Ready For Adoption"
+            subtitle="Mark adoptable"
+            color="#10B981"
+            onClick={() => setIsAdoptableModalOpen(true)}
+          />
+        </Can>
       </div>
 
       <div
@@ -340,13 +488,19 @@ const Pets = () => {
           columns={columns}
           data={dogs}
           module="animals"
-          onEdit={async (row) => {
-            await petService.updatePet(row.dog_id || row.id || "1", row);
-            fetchDogs();
-          }}
-          onDelete={async (row) => {
-            await petService.deletePet(row.dog_id || row.id || "1");
-            fetchDogs();
+          loading={loading}
+          error={error}
+          onRetry={fetchDogs}
+          emptyMessage="No dogs registered yet. Register a rescued dog to get started."
+          renderRowActions={rowActions}
+          serverMode
+          totalCount={totalCount}
+          page={page}
+          onPageChange={setPage}
+          searchValue={search}
+          onSearchChange={(term) => {
+            setSearch(term);
+            setPage(1);
           }}
         />
       </div>
@@ -363,7 +517,7 @@ const Pets = () => {
             <input
               type="text"
               required
-              placeholder="e.g. Max or DOG-501"
+              placeholder="e.g. Max"
               value={petForm.name}
               onChange={(e) => setPetForm({ ...petForm, name: e.target.value })}
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
@@ -375,6 +529,7 @@ const Pets = () => {
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Breed</label>
               <input
                 type="text"
+                placeholder="e.g. Indie Mix"
                 value={petForm.breed}
                 onChange={(e) => setPetForm({ ...petForm, breed: e.target.value })}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
@@ -382,29 +537,70 @@ const Pets = () => {
             </div>
 
             <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Gender</label>
+              <select
+                value={petForm.gender}
+                onChange={(e) => setPetForm({ ...petForm, gender: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {GENDERS.map((g) => (
+                  <option key={g} value={g}>
+                    {g.charAt(0).toUpperCase() + g.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Estimated Age</label>
               <input
                 type="text"
-                value={petForm.age}
-                onChange={(e) => setPetForm({ ...petForm, age: e.target.value })}
+                placeholder="e.g. 2 years"
+                value={petForm.estimated_age}
+                onChange={(e) => setPetForm({ ...petForm, estimated_age: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Age (months)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 24"
+                value={petForm.age_months}
+                onChange={(e) => setPetForm({ ...petForm, age_months: e.target.value })}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
               />
             </div>
           </div>
 
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Initial Health / Rescue Status</label>
-            <select
-              value={petForm.status}
-              onChange={(e) => setPetForm({ ...petForm, status: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            >
-              <option value="Adoptable">Adoptable</option>
-              <option value="In Treatment">In Treatment</option>
-              <option value="Critical Care">Critical Care</option>
-              <option value="Fostered">Fostered</option>
-              <option value="Quarantine">Quarantine</option>
-            </select>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Weight (kg)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                placeholder="e.g. 16.4"
+                value={petForm.weight}
+                onChange={(e) => setPetForm({ ...petForm, weight: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 600, color: "#334155" }}>
+                <input
+                  type="checkbox"
+                  checked={petForm.is_adoptable}
+                  onChange={(e) => setPetForm({ ...petForm, is_adoptable: e.target.checked })}
+                />
+                Ready for adoption
+              </label>
+            </div>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
@@ -441,8 +637,8 @@ const Pets = () => {
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
             >
               <option value="">Choose a dog...</option>
-              {dogs.map((d) => (
-                <option key={d.registration_number} value={d.registration_number}>
+              {allDogs.map((d) => (
+                <option key={d.registration_number} value={dogId(d) || d.registration_number}>
                   {d.name} ({d.registration_number})
                 </option>
               ))}
@@ -456,11 +652,11 @@ const Pets = () => {
               onChange={(e) => setStatusUpdateForm({ ...statusUpdateForm, status: e.target.value })}
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
             >
-              <option value="Adoptable">Adoptable</option>
-              <option value="In Treatment">In Treatment</option>
-              <option value="Critical Care">Critical Care</option>
-              <option value="Fostered">Fostered</option>
-              <option value="Discharged">Discharged</option>
+              {DOG_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -494,7 +690,7 @@ const Pets = () => {
             Select an animal to clear for adoption listing:
           </p>
           <div style={{ maxHeight: "250px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
-            {dogs.map((d) => (
+            {allDogs.map((d) => (
               <div
                 key={d.registration_number}
                 style={{
@@ -512,19 +708,20 @@ const Pets = () => {
                   <div style={{ fontSize: "12px", color: "#64748B" }}>ID: {d.registration_number} | {d.breed}</div>
                 </div>
                 <button
+                  disabled={d.is_adoptable}
                   onClick={() => handleMarkAdoptable(d)}
                   style={{
                     padding: "6px 12px",
                     borderRadius: "6px",
                     border: "none",
-                    background: "#10B981",
+                    background: d.is_adoptable ? "#CBD5E1" : "#10B981",
                     color: "#FFF",
                     fontSize: "12px",
                     fontWeight: 600,
-                    cursor: "pointer",
+                    cursor: d.is_adoptable ? "not-allowed" : "pointer",
                   }}
                 >
-                  Clear for Adoption
+                  {d.is_adoptable ? "Adoptable" : "Clear for Adoption"}
                 </button>
               </div>
             ))}
@@ -532,12 +729,13 @@ const Pets = () => {
         </div>
       </Modal>
 
-
-
       {/* Edit Dog Modal */}
       <Modal
         isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setSelectedDog(null);
+        }}
         title="Edit Animal Record"
       >
         <form onSubmit={handleEditDogSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -564,20 +762,75 @@ const Pets = () => {
             </div>
 
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Age</label>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Gender</label>
+              <select
+                value={petForm.gender}
+                onChange={(e) => setPetForm({ ...petForm, gender: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {GENDERS.map((g) => (
+                  <option key={g} value={g}>
+                    {g.charAt(0).toUpperCase() + g.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Estimated Age</label>
               <input
                 type="text"
-                value={petForm.age}
-                onChange={(e) => setPetForm({ ...petForm, age: e.target.value })}
+                value={petForm.estimated_age}
+                onChange={(e) => setPetForm({ ...petForm, estimated_age: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Age (months)</label>
+              <input
+                type="number"
+                min="0"
+                value={petForm.age_months}
+                onChange={(e) => setPetForm({ ...petForm, age_months: e.target.value })}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
               />
             </div>
           </div>
 
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Status</label>
+            <select
+              value={petForm.status}
+              onChange={(e) => setPetForm({ ...petForm, status: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            >
+              {DOG_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 600, color: "#334155" }}>
+            <input
+              type="checkbox"
+              checked={petForm.is_adoptable}
+              onChange={(e) => setPetForm({ ...petForm, is_adoptable: e.target.checked })}
+            />
+            Ready for adoption
+          </label>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button
               type="button"
-              onClick={() => setIsEditModalOpen(false)}
+              onClick={() => {
+                setIsEditModalOpen(false);
+                setSelectedDog(null);
+              }}
               style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
             >
               Cancel
@@ -596,7 +849,10 @@ const Pets = () => {
       {/* Delete Dog Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setSelectedDog(null);
+        }}
         title="Confirm Animal Record Deletion"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -606,7 +862,10 @@ const Pets = () => {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
             <button
               type="button"
-              onClick={() => setIsDeleteModalOpen(false)}
+              onClick={() => {
+                setIsDeleteModalOpen(false);
+                setSelectedDog(null);
+              }}
               style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
             >
               Cancel

@@ -119,7 +119,7 @@ export function useExecutiveDashboard() {
       fosterService.getFosterPlacements({ limit: 200 }),
       volunteerService.getVolunteers({ limit: 300 }),
       inventoryService.getInventory({ limit: 300 }),
-      medicalService.getMedicalRecords({ limit: 300 }),
+      medicalService.getMedicalRecords(),
       financeService.getFinanceRecords({ limit: 500 }),
     ]);
 

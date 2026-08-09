@@ -8,56 +8,102 @@ export interface TransactionPayload {
   amount: string | number;
   date?: string;
   status?: string;
-  type?: "donation" | "expense";
+  type?: "donation" | "expense" | "income" | "transfer" | "refund";
+  [key: string]: unknown;
 }
+
+/** Map a friendly status label to the TransactionStatus enum. */
+const toTransactionStatus = (status?: string): string => {
+  const s = String(status || "").toLowerCase().trim();
+  const map: Record<string, string> = {
+    completed: "posted",
+    posted: "posted",
+    reconciled: "reconciled",
+    pending: "pending",
+    voided: "voided",
+    cancelled: "voided",
+  };
+  return map[s] || "posted";
+};
+
+/** Map a friendly type label to the TransactionType enum. */
+const toTransactionType = (type?: string): string => {
+  const s = String(type || "").toLowerCase().trim();
+  if (s.includes("donation") || s.includes("income") || s.includes("revenue")) return "income";
+  if (s.includes("expense")) return "expense";
+  if (s.includes("transfer")) return "transfer";
+  if (s.includes("refund")) return "refund";
+  if (s.includes("reconcil")) return "reconciliation";
+  return "income";
+};
+
+/** Normalize a raw FinancialTransactionResponse row to the page shape. */
+export const normalizeTransactionRow = (tx: any): any => ({
+  txId: tx.id,
+  id: tx.id,
+  transactionNumber: tx.transaction_number,
+  entity: tx.description || tx.reference_type || tx.donor_name || "—",
+  category: tx.reference_type || "General",
+  amount: tx.amount,
+  date: tx.transaction_date || tx.created_at,
+  status: tx.status || "posted",
+  type: tx.transaction_type || "income",
+  currency: tx.currency,
+});
 
 export const financeService = {
   getFinanceRecords: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/finance/transactions", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/finance/transactions", { params });
+    const body = response.data;
+    const raw = Array.isArray(body) ? body : body?.data;
+    const rows = Array.isArray(raw) ? raw.map(normalizeTransactionRow) : [];
+    return { ...body, data: rows, total: body?.meta?.total ?? rows.length };
   },
 
   getFinanceSummary: async () => {
-    try {
-      const response = await api.get("/finance/summary");
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { revenue: 0, expenses: 0 };
-      throw err;
-    }
+    const response = await api.get("/finance/summary");
+    return response.data;
   },
 
+  // POST /finance/transactions - FinancialTransactionCreate
   createTransaction: async (data: TransactionPayload) => {
-    const response = await api.post("/finance/transactions", data);
+    const payload: Record<string, unknown> = {
+      transaction_type:
+        data.transaction_type || toTransactionType(String(data.type || "donation")),
+      amount: Number(data.amount),
+      currency: data.currency || "USD",
+    };
+    if (data.description || data.entity || data.category) {
+      payload.description = String(data.description || `${data.entity || ""}${data.category ? ` - ${data.category}` : ""}`).trim();
+    }
+    if (data.date || data.transaction_date) {
+      payload.transaction_date = String(data.date || data.transaction_date);
+    }
+    if (data.reference_type) payload.reference_type = data.reference_type;
+    if (data.reference_id) payload.reference_id = data.reference_id;
+
+    const response = await api.post("/finance/transactions", payload);
     await publishActionEvent({
       module: "finance",
       action: "create",
       title: "Financial Transaction Recorded",
-      message: `Transaction ${data.category || "General"} of $${data.amount} logged for ${data.entity}.`,
+      message: `Transaction ${String(payload.description || "General")} of $${data.amount} logged.`,
       targetRoles: ["super_admin", "finance_user"],
     });
     return response.data;
   },
 
   logExpense: async (data: TransactionPayload) => {
-    const response = await api.post("/finance/expenses", data);
-    await publishActionEvent({
-      module: "finance",
-      action: "create",
-      title: "Operational Expense Logged",
-      message: `Expense of $${data.amount} logged under ${data.category}.`,
-      targetRoles: ["super_admin", "finance_user"],
-    });
+    const response = await financeService.createTransaction({ ...data, type: "expense" });
     return response.data;
   },
 
+  // PATCH /finance/transactions/{tx_id}/status
+  // The backend has no full transaction update endpoint - only status transitions.
   updateTransaction: async (txId: string, data: Partial<TransactionPayload>) => {
-    const response = await api.put(`/finance/transactions/${txId}`, data);
+    const response = await api.patch(`/finance/transactions/${txId}/status`, {
+      status: toTransactionStatus(data.status || "posted"),
+    });
     await publishActionEvent({
       module: "finance",
       action: "update",

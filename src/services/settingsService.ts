@@ -1,5 +1,4 @@
 import api from "../api/axios";
-import { getCurrentUserRole } from "../utils/roleUtils";
 
 export interface SystemSettingsPayload {
   siteName?: string;
@@ -31,17 +30,10 @@ export interface SystemSettings {
  */
 export const settingsService = {
   /**
-   * Fetch all system settings (Super Admin only)
+   * Fetch all system settings
    */
   getSettings: async (): Promise<SystemSettings> => {
     try {
-      const role = getCurrentUserRole();
-
-      // Check if user has permission to view settings
-      if (role !== "super_admin") {
-        throw new Error("Insufficient permissions to access settings");
-      }
-
       const response = await api.get<{ data: SystemSettings } | SystemSettings>("/settings/system");
 
       let data: SystemSettings;
@@ -51,13 +43,7 @@ export const settingsService = {
         data = response.data as SystemSettings;
       }
 
-      return {
-        siteName: data.siteName || "PawGuard Admin Portal",
-        adminEmail: data.adminEmail || "",
-        smtpServer: data.smtpServer || "",
-        sessionTimeout: data.sessionTimeout || 60,
-        ...data,
-      };
+      return data;
     } catch (error) {
       console.error("Failed to fetch system settings:", error);
       throw error;
@@ -78,29 +64,23 @@ export const settingsService = {
   },
 
   /**
-   * Update a single setting key-value pair
+   * Update a single setting key-value pair (PUT /settings/system/{key}, falls back to POST /settings/system to create)
    */
   updateSettingKey: async (key: string, value: string | number | boolean): Promise<SystemSetting> => {
     try {
-      const role = getCurrentUserRole();
-
-      // Check if user has permission
-      if (role !== "super_admin") {
-        throw new Error("Insufficient permissions to update settings");
-      }
-
-      // Try PUT endpoint first
       try {
         const response = await api.put<SystemSetting>(`/settings/system/${key}`, { value });
         return response.data;
-      } catch {
-        // Fallback to POST endpoint
-        const response = await api.post<SystemSetting>("/settings/system", {
-          key,
-          value,
-          category: "general",
-        });
-        return response.data;
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          const response = await api.post<SystemSetting>("/settings/system", {
+            key,
+            value,
+            category: "general",
+          });
+          return response.data;
+        }
+        throw err;
       }
     } catch (error) {
       console.error(`Failed to update setting ${key}:`, error);
@@ -113,13 +93,6 @@ export const settingsService = {
    */
   updateSettings: async (data: SystemSettingsPayload): Promise<{ success: boolean; updated: string[] }> => {
     try {
-      const role = getCurrentUserRole();
-
-      // Check if user has permission
-      if (role !== "super_admin") {
-        throw new Error("Insufficient permissions to update settings");
-      }
-
       const updates: string[] = [];
 
       // Map frontend field names to backend keys
@@ -148,94 +121,6 @@ export const settingsService = {
       return { success: true, updated: updates };
     } catch (error) {
       console.error("Failed to update settings:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Trigger database backup
-   */
-  triggerBackup: async (): Promise<{ success: boolean; timestamp: string }> => {
-    try {
-      const role = getCurrentUserRole();
-
-      // Check if user has permission
-      if (role !== "super_admin") {
-        throw new Error("Insufficient permissions to trigger backup");
-      }
-
-      const now = new Date().toISOString();
-
-      const response = await api.post<{ success: boolean; timestamp: string }>(
-        "/settings/backup",
-        { timestamp: now }
-      );
-      return response.data;
-    } catch (error) {
-      console.error("Failed to trigger backup:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Get all available settings categories
-   */
-  getCategories: async (): Promise<string[]> => {
-    try {
-      const response = await api.get<{ data: string[] }>("/settings/categories");
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-      if (response.data.data && Array.isArray(response.data.data)) {
-        return response.data.data;
-      }
-      return [];
-    } catch (error) {
-      console.error("Failed to fetch categories:", error);
-      return [];
-    }
-  },
-
-  /**
-   * Get settings by category
-   */
-  getSettingsByCategory: async (category: string): Promise<SystemSetting[]> => {
-    try {
-      const response = await api.get<{ data: SystemSetting[] }>(
-        `/settings/system/category/${category}`
-      );
-
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-
-      if (response.data.data && Array.isArray(response.data.data)) {
-        return response.data.data;
-      }
-
-      return [];
-    } catch (error) {
-      console.error(`Failed to fetch settings for category ${category}:`, error);
-      return [];
-    }
-  },
-
-  /**
-   * Reset settings to defaults
-   */
-  resetToDefaults: async (): Promise<{ success: boolean }> => {
-    try {
-      const role = getCurrentUserRole();
-
-      // Check if user has permission
-      if (role !== "super_admin") {
-        throw new Error("Insufficient permissions to reset settings");
-      }
-
-      const response = await api.post<{ success: boolean }>("/settings/system/reset");
-      return response.data;
-    } catch (error) {
-      console.error("Failed to reset settings:", error);
       throw error;
     }
   },

@@ -27,16 +27,19 @@ export interface DispatchPayload {
   [key: string]: unknown;
 }
 
+/** Extract the list from a paginated GET /rescue response. */
+const unwrapList = (body: unknown): any[] => {
+  if (!body || typeof body !== "object") return [];
+  const obj = body as Record<string, unknown>;
+  const data = Array.isArray(body) ? body : obj.data;
+  return Array.isArray(data) ? data : [];
+};
+
 export const rescueService = {
-  // GET /rescue (Exact OpenAPI endpoint for rescue requests/cases)
+  // GET /rescue - list rescue requests/cases
   getRescueCases: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/rescue", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/rescue", { params });
+    return response.data;
   },
 
   getRescueCaseById: async (requestId: string) => {
@@ -44,6 +47,7 @@ export const rescueService = {
     return response.data;
   },
 
+  // POST /rescue/report - RescueRequestCreate
   createRescueCase: async (data: RescueCasePayload) => {
     const response = await api.post("/rescue/report", data);
     await publishActionEvent({
@@ -56,13 +60,21 @@ export const rescueService = {
     return response.data;
   },
 
+  // POST /rescue/{request_id}/verify - RescueRequestUpdate
+  // The backend only supports {status, rejection_rationale, severity, is_urgent, media_evidence}.
   updateRescueCase: async (requestId: string, data: Partial<RescueCasePayload>) => {
-    const response = await api.put(`/rescue/${requestId}`, data);
+    const payload: Record<string, unknown> = {};
+    if (data.status) payload.status = data.status;
+    if (data.severity !== undefined && data.severity !== null && data.severity !== "") {
+      payload.severity = String(data.severity).toLowerCase();
+    }
+    if (typeof data.is_urgent === "boolean") payload.is_urgent = data.is_urgent;
+    const response = await api.post(`/rescue/${requestId}/verify`, payload);
     await publishActionEvent({
       module: "rescue",
       action: "update",
       title: "Rescue Incident Updated",
-      message: `Rescue case ${requestId} status updated to ${data.status || "In Progress"}.`,
+      message: `Rescue case ${requestId} updated (${payload.severity || "no change"} severity${typeof payload.is_urgent === "boolean" ? `, urgent: ${payload.is_urgent}` : ""}).`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator"],
     });
     return response.data;
@@ -92,15 +104,10 @@ export const rescueService = {
     return response.data;
   },
 
-  // Rescue Requests
+  // Rescue Requests (same GET /rescue source)
   getRescueRequests: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/rescue", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
-    }
+    const response = await api.get("/rescue", { params });
+    return response.data;
   },
 
   createRescueRequest: async (data: Record<string, unknown>) => {
@@ -127,8 +134,9 @@ export const rescueService = {
     return response.data;
   },
 
-  rejectRescueRequest: async (requestId: string, _reason?: string) => {
-    const response = await api.post(`/rescue/${requestId}/fail`);
+  rejectRescueRequest: async (requestId: string, reason?: string) => {
+    const payload = reason ? { rejection_rationale: reason } : {};
+    const response = await api.post(`/rescue/${requestId}/fail`, payload);
     await publishActionEvent({
       module: "rescue",
       action: "reject",
@@ -140,19 +148,44 @@ export const rescueService = {
   },
 
   // Rescue Dispatch
+  // There is no GET dispatch-list endpoint, so dispatches are derived from
+  // the nested `dispatch` object on each rescue request returned by GET /rescue.
   getDispatches: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/rescue", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 404) return { data: [], total: 0 };
-      throw err;
+    const response = await api.get("/rescue", { params });
+    const list = unwrapList(response.data);
+    const dispatches: any[] = [];
+    for (const req of list) {
+      if (req.dispatch) {
+        const d = req.dispatch;
+        dispatches.push({
+          id: d.id,
+          dispatch_id: d.id,
+          case_id: d.rescue_request_id || req.id,
+          vehicle_id: d.vehicle_id || d.assigned_vehicle_id,
+          driver_id: d.assigned_driver_id,
+          agent_id: Array.isArray(d.agents) && d.agents[0] ? d.agents[0].agent_id : undefined,
+          dispatch_time: d.dispatched_at,
+          status: req.status || "dispatched",
+          notes: d.notes,
+        });
+      }
     }
+    return { data: dispatches, total: dispatches.length };
   },
 
+  // POST /rescue/{request_id}/dispatch - RescueDispatchCreate
   createDispatch: async (data: DispatchPayload) => {
-    const requestId = data.case_id || data.id || "1";
-    const response = await api.post(`/rescue/${requestId}/dispatch`, data);
+    const requestId = data.case_id;
+    if (!requestId) {
+      throw new Error("A target rescue case (case_id) is required to dispatch a team.");
+    }
+    const payload: Record<string, unknown> = {};
+    if (data.vehicle_id) payload.vehicle_id = data.vehicle_id;
+    if (data.driver_id) payload.assigned_driver_id = data.driver_id;
+    if (data.agent_id) payload.assigned_agent_ids = [data.agent_id];
+    if (data.notes) payload.equipment_details = data.notes;
+
+    const response = await api.post(`/rescue/${requestId}/dispatch`, payload);
     await publishActionEvent({
       module: "rescue",
       action: "assign",
@@ -163,13 +196,16 @@ export const rescueService = {
     return response.data;
   },
 
-  updateDispatchStatus: async (requestId: string, _status: string) => {
-    const response = await api.post(`/rescue/${requestId}/dispatch`);
+  // PATCH /rescue/dispatch/{dispatch_id} - RescueDispatchUpdate
+  updateDispatchStatus: async (dispatchId: string, status: string) => {
+    const response = await api.patch(`/rescue/dispatch/${dispatchId}`, {
+      status: String(status || "").toLowerCase(),
+    });
     await publishActionEvent({
       module: "rescue",
       action: "update",
       title: "Dispatch Progress Updated",
-      message: `Field agent confirmed status update for rescue ${requestId}.`,
+      message: `Field agent confirmed status update for dispatch ${dispatchId}.`,
       targetRoles: ["super_admin", "rescue_coordinator", "rescue_agent"],
     });
     return response.data;
