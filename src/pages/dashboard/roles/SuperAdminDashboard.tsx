@@ -20,7 +20,6 @@ import SystemAlerts from "../../../components/dashboard/SystemAlerts";
 import DashboardNotificationsPanel from "../../../components/dashboard/DashboardNotificationsPanel";
 import RecentActivitiesPanel from "../../../components/dashboard/RecentActivitiesPanel";
 import DashboardNavigationCards from "../../../components/dashboard/DashboardNavigationCards";
-import SuperAdminModuleNavigation from "../../../components/dashboard/SuperAdminModuleNavigation";
 import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../../utils/roleUtils";
 import { isPending } from "../../../utils/chartUtils";
 import type { AnyRecord, DashboardSummary } from "../../../types/dashboard";
@@ -57,7 +56,7 @@ const SuperAdminDashboard = () => {
   }, []);
 
   const user = getCurrentUser();
-  const displayName = user?.name || user?.first_name || "Administrator";
+  const displayName = user?.name || "Administrator";
   const roleTitle = getRoleTitle(getCurrentUserRole() ?? "super_admin");
 
   const kpis = [
@@ -213,14 +212,6 @@ const SuperAdminDashboard = () => {
           {error}
         </div>
       )}
-
-      <div style={{ marginBottom: "28px" }}>
-        <DashboardSectionHeader
-          title="Operational Dashboards"
-          subtitle="Open any role dashboard. You remain authenticated as Super Admin throughout."
-        />
-        <SuperAdminModuleNavigation />
-      </div>
 
       <div
         style={{

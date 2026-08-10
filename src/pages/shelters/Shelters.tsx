@@ -100,7 +100,7 @@ const Shelters = () => {
 
   const fetchAllShelters = async () => {
     try {
-      const response = await shelterService.getShelters({ page: 1, page_size: 200 });
+      const response = await shelterService.getShelters({ page: 1, page_size: 100 });
       setAllShelters(unwrapList(response).map(formatFacility));
     } catch {
       setAllShelters([]);

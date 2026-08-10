@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
@@ -12,23 +12,120 @@ import {
   FaUserCheck,
   FaUserShield,
   FaTrash,
+  FaCheckCircle,
+  FaTimesCircle,
 } from "react-icons/fa";
-import userService from "../../services/userService";
+import userService, { type UserPayload } from "../../services/userService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { normalizeRole } from "../../utils/roleUtils";
+
+interface UserTableRow {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  roles: string[];
+  role: string; // formatted for display fallback
+  isActive: boolean;
+  isVerified: boolean;
+  mfaEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  status: "Active" | "Inactive";
+  [key: string]: unknown;
+}
+
+const formatDate = (isoString?: string): string => {
+  if (!isoString) return "—";
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }) + " " + date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "—";
+  }
+};
+
+const formatRole = (role: string): string => {
+  return role
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+const formatRoles = (roles: string[]): React.ReactNode => {
+  if (!roles || roles.length === 0) return <span style={{ color: "#94A3B8" }}>No Role</span>;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+      {roles.map((role) => (
+        <span
+          key={role}
+          style={{
+            background: "#EFF6FF",
+            color: "#1E40AF",
+            padding: "2px 8px",
+            borderRadius: "999px",
+            fontSize: "11px",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {formatRole(role)}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+// Role filter configuration - matches backend role values with display labels
+const ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendRoles: string[] }> = [
+  { value: "all", label: "All Users", backendRoles: [] },
+  { value: "super_admin", label: "Super Admin", backendRoles: ["super_admin"] },
+  { value: "rescue_centre_admin", label: "Rescue Centre", backendRoles: ["rescue_centre_admin"] },
+  { value: "rescue_coordinator", label: "Rescue Coordinator", backendRoles: ["rescue_coordinator"] },
+  { value: "rescue_agent", label: "Rescue Agent", backendRoles: ["rescue_agent"] },
+  { value: "veterinarian", label: "Veterinarian", backendRoles: ["veterinarian"] },
+  { value: "shelter_manager", label: "Shelter", backendRoles: ["shelter_manager"] },
+  { value: "adoption_coordinator", label: "Adoption", backendRoles: ["adoption_coordinator"] },
+  { value: "foster_coordinator", label: "Foster Care", backendRoles: ["foster_coordinator"] },
+  { value: "volunteer_coordinator", label: "Volunteer", backendRoles: ["volunteer_coordinator"] },
+  { value: "inventory_manager", label: "Inventory", backendRoles: ["inventory_manager"] },
+  { value: "finance_user", label: "Finance", backendRoles: ["finance_user"] },
+];
+
+const isAdminRole = (roles: string[]): boolean => {
+  if (!roles || roles.length === 0) return false;
+  return roles.some((role) => {
+    const normalized = normalizeRole(role);
+    return normalized === "super_admin" || normalized === "rescue_centre_admin";
+  });
+};
 
 const Users = () => {
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<UserTableRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
+  // Filter state for summary cards
+  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "admin">("all");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(() => searchParams.get("action") === "add");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [selectedUser, setSelectedUser] = useState<UserTableRow | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -40,48 +137,59 @@ const Users = () => {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  useEffect(() => {
-    if (searchParams.get("action") === "add") {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, [searchParams]);
-
-  const fetchUsers = async () => {
+  // Fetch users function - defined before useEffect to avoid "accessed before declaration" error
+  const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const response = await userService.getUsers();
       const userList = Array.isArray(response)
-        ? response
+        ? (response as UserPayload[])
         : Array.isArray(response?.data)
-        ? response.data
+        ? (response.data as UserPayload[])
         : [];
 
-      const formattedUsers = userList.map((user: any) => ({
-        id: user.id || user.user_id || "-",
-        name: user.full_name || user.name || user.username || "-",
-        email: user.email || "-",
-        role: Array.isArray(user.roles) ? user.roles.join(", ") : user.role || "-",
-        department: user.department || user.facility || "-",
-        status: user.is_active !== undefined ? (user.is_active ? "Active" : "Inactive") : (user.status || "Active"),
-      }));
+      const formattedUsers = userList.map((user: UserPayload): UserTableRow => {
+        const roles = Array.isArray(user.roles) ? user.roles : [];
+        return {
+          id: user.id || "-",
+          name: user.full_name || user.name || "-",
+          email: user.email || "-",
+          phone: user.phone ?? null,
+          roles,
+          role: roles.length > 0 ? roles.join(", ") : user.role || "-",
+          isActive: user.is_active !== undefined ? user.is_active : (user.status === "Active"),
+          isVerified: user.is_verified !== undefined ? user.is_verified : false,
+          mfaEnabled: user.mfa_enabled !== undefined ? user.mfa_enabled : false,
+          createdAt: user.created_at || "",
+          updatedAt: user.updated_at || "",
+          status: user.is_active !== undefined ? (user.is_active ? "Active" : "Inactive") : (user.status === "Active" ? "Active" : "Inactive"),
+        };
+      });
 
       setUsers(formattedUsers);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
       setError(
-        err?.response?.data?.detail ||
-        err?.response?.data?.message ||
+        axiosError?.response?.data?.detail ||
+        axiosError?.response?.data?.message ||
         "Failed to load registered users. Please check permissions."
       );
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,8 +211,9 @@ const Users = () => {
       setFormData({ name: "", email: "", role: "rescue_agent", department: "Rescue Operations", password: "" });
       fetchUsers();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to provision user.";
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      const msg = axiosError?.response?.data?.detail || axiosError?.response?.data?.message || "Failed to provision user.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -127,8 +236,9 @@ const Users = () => {
       setSelectedUser(null);
       fetchUsers();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update user.";
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      const msg = axiosError?.response?.data?.detail || axiosError?.response?.data?.message || "Failed to update user.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -145,49 +255,205 @@ const Users = () => {
       setSelectedUser(null);
       fetchUsers();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to delete user.";
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      const msg = axiosError?.response?.data?.detail || axiosError?.response?.data?.message || "Failed to delete user.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const stats = [
-    {
-      title: "Total Registered Users",
-      value: loading ? "..." : `${users.length} Users`,
-      trend: "Organization Accounts",
-      color: "#2563EB",
-      icon: <FaUsers />,
+  // Check if user matches the selected role filter
+  const matchesRoleFilter = useCallback(
+    (userRoles: string[], filterValue: string): boolean => {
+      if (filterValue === "all") return true;
+      const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === filterValue);
+      if (!option || option.backendRoles.length === 0) return true;
+      return userRoles.some((role) => option.backendRoles.includes(normalizeRole(role) || role));
     },
-    {
-      title: "Active Personnel",
-      value: loading
-        ? "..."
-        : `${users.filter((u) => u.status === "Active").length} Active`,
-      trend: "Current Workforce",
-      color: "#10B981",
-      icon: <FaUserCheck />,
-    },
-    {
-      title: "Administrators",
-      value: loading
-        ? "..."
-        : `${users.filter((u) => String(u.role).toLowerCase().includes("admin")).length} Admins`,
-      trend: "System Access",
-      color: "#EF4444",
-      icon: <FaUserShield />,
-    },
-  ];
+    []
+  );
+
+  // Memoize filtered users for stats
+  const filteredUsersForStats = useMemo(() => {
+    return users.filter((user: UserTableRow) => {
+      if (activeFilter === "active" && !user.isActive) return false;
+      if (activeFilter === "admin" && !isAdminRole(user.roles)) return false;
+      if (!matchesRoleFilter(user.roles, roleFilter)) return false;
+      const lowerSearch = searchTerm.trim().toLowerCase();
+      if (lowerSearch) {
+        const searchableFields = [
+          user.name,
+          user.email,
+          user.phone,
+          user.id,
+          ...user.roles,
+        ].filter(Boolean);
+        if (!searchableFields.some((field) => String(field).toLowerCase().includes(lowerSearch))) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [users, activeFilter, roleFilter, searchTerm, matchesRoleFilter]);
+
+  // Memoize stats to avoid ref access during render lint error
+  // The stats array contains onClick handlers that scroll to the table using document.getElementById
+  // By memoizing, we ensure the array is only recreated when dependencies change
+  const stats = useMemo(
+    () => [
+      {
+        title: "Total Registered Users",
+        value: loading ? "..." : `${filteredUsersForStats.length} Users`,
+        trend: roleFilter !== "all" ? "Filtered View" : "Organization Accounts",
+        color: "#2563EB",
+        icon: <FaUsers />,
+        onClick: () => {
+          setActiveFilter("all");
+          setRoleFilter("all");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "all" && roleFilter === "all" && !searchTerm,
+      },
+      {
+        title: "Active Personnel",
+        value: loading
+          ? "..."
+          : `${filteredUsersForStats.filter((u: UserTableRow) => u.status === "Active").length} Active`,
+        trend: roleFilter !== "all" ? "Filtered View" : "Current Workforce",
+        color: "#10B981",
+        icon: <FaUserCheck />,
+        onClick: () => {
+          setActiveFilter("active");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "active",
+      },
+      {
+        title: "Administrators",
+        value: loading
+          ? "..."
+          : `${filteredUsersForStats.filter((u: UserTableRow) => isAdminRole(u.roles)).length} Admins`,
+        trend: roleFilter !== "all" ? "Filtered View" : "System Access",
+        color: "#EF4444",
+        icon: <FaUserShield />,
+        onClick: () => {
+          setActiveFilter("admin");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "admin",
+      },
+    ],
+    [loading, filteredUsersForStats, activeFilter, roleFilter, searchTerm]
+  );
+
+  // Filter users based on active filter, role filter, and search term
+  const filteredUsers = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    return users.filter((user) => {
+      // Active/Admin filter
+      if (activeFilter === "active" && !user.isActive) return false;
+      if (activeFilter === "admin" && !isAdminRole(user.roles)) return false;
+
+      // Role filter
+      if (!matchesRoleFilter(user.roles, roleFilter)) return false;
+
+      // Search filter
+      if (lowerSearch) {
+        const searchableFields = [
+          user.name,
+          user.email,
+          user.phone,
+          user.id,
+          ...user.roles,
+        ].filter(Boolean);
+        if (!searchableFields.some((field) => String(field).toLowerCase().includes(lowerSearch))) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [users, activeFilter, roleFilter, searchTerm, matchesRoleFilter]);
+
+  const getTableTitle = () => {
+    if (roleFilter !== "all") {
+      const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
+      if (option) return `${option.label} Users`;
+    }
+    switch (activeFilter) {
+      case "active":
+        return "Active Personnel";
+      case "admin":
+        return "Administrators";
+      default:
+        return "All Registered Users";
+    }
+  };
 
   const columns = [
     { key: "id", title: "User ID" },
     { key: "name", title: "Full Name" },
     { key: "email", title: "Email Address" },
-    { key: "role", title: "Assigned Role" },
-    { key: "department", title: "Department / Facility" },
-    { key: "status", title: "Status" },
+    {
+      key: "phone",
+      title: "Phone",
+      render: (val: string | null) => val ?? "—",
+    },
+    {
+      key: "roles",
+      title: "Assigned Role",
+      render: (_val: string, row: UserTableRow) => formatRoles(row.roles),
+    },
+    {
+      key: "isActive",
+      title: "Status",
+      render: (val: boolean) => (
+        <span
+          style={{
+            background: val ? "#EFF6FF" : "#FEF2F2",
+            color: val ? "#1E40AF" : "#991B1B",
+            padding: "4px 10px",
+            borderRadius: "999px",
+            fontSize: "12px",
+            fontWeight: 700,
+            display: "inline-block",
+            textTransform: "capitalize",
+          }}
+        >
+          {val ? "Active" : "Inactive"}
+        </span>
+      ),
+    },
+    {
+      key: "isVerified",
+      title: "Verified",
+      render: (val: boolean) => (
+        val ? (
+          <FaCheckCircle style={{ color: "#10B981", fontSize: "16px" }} />
+        ) : (
+          <FaTimesCircle style={{ color: "#EF4444", fontSize: "16px" }} />
+        )
+      ),
+    },
+    {
+      key: "mfaEnabled",
+      title: "MFA",
+      render: (val: boolean) => (
+        val ? (
+          <FaCheckCircle style={{ color: "#10B981", fontSize: "16px" }} />
+        ) : (
+          <FaTimesCircle style={{ color: "#EF4444", fontSize: "16px" }} />
+        )
+      ),
+    },
+    {
+      key: "createdAt",
+      title: "Created At",
+      render: (val: string) => formatDate(val),
+    },
   ];
 
   return (
@@ -275,30 +541,63 @@ const Users = () => {
       </div>
 
       <div className="soft-card" style={{ padding: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "16px" }}>
           <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            Registered Organization Accounts
+            {getTableTitle()}
           </h3>
-          {loading && (
-            <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
-              Loading users...
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Filter by Role:</label>
+            <select
+              value={roleFilter}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setSearchTerm("");
+              }}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: "#FFFFFF",
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "#0F172A",
+                cursor: "pointer",
+                minWidth: "200px",
+              }}
+            >
+              {ROLE_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {loading && (
+              <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
+                Loading users...
+              </span>
+            )}
+          </div>
         </div>
 
-        <DataTable
-          columns={columns}
-          data={users}
-          module="users"
-          onEdit={async (row) => {
-            await userService.updateUser(row.id || "1", row);
-            fetchUsers();
-          }}
-          onDelete={async (row) => {
-            await userService.deleteUser(row.id || "1");
-            fetchUsers();
-          }}
-        />
+        <div id="users-table">
+          <DataTable
+            columns={columns}
+            data={filteredUsers}
+            module="users"
+            serverMode={true}
+            totalCount={filteredUsers.length}
+            searchValue={searchTerm}
+            onSearchChange={setSearchTerm}
+            onEdit={async (row) => {
+              await userService.updateUser(row.id || "1", row);
+              fetchUsers();
+            }}
+            onDelete={async (row) => {
+              await userService.deleteUser(row.id || "1");
+              fetchUsers();
+            }}
+          />
+        </div>
       </div>
 
       {/* Provision User Modal */}

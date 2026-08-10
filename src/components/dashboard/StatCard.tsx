@@ -10,6 +10,8 @@ interface StatCardProps {
   icon?: React.ReactNode;
   color?: string;
   compact?: boolean;
+  onClick?: () => void;
+  selected?: boolean;
 }
 
 const StatCard = ({
@@ -21,12 +23,14 @@ const StatCard = ({
   icon,
   color = "#2563EB",
   compact = true,
+  onClick,
+  selected = false,
 }: StatCardProps) => {
   return (
     <div
       style={{
         background: "#FFFFFF",
-        border: "1px solid #E2E8F0",
+        border: selected ? `2px solid ${color}` : "1px solid #E2E8F0",
         borderRadius: compact ? "12px" : "16px",
         padding: compact ? "14px 16px" : "20px 22px",
         boxShadow: "0 1px 3px rgba(15, 23, 42, 0.05)",
@@ -36,16 +40,20 @@ const StatCard = ({
         transition: "all 0.2s ease-in-out",
         height: "100%",
         boxSizing: "border-box",
+        cursor: onClick ? "pointer" : "default",
       }}
+      onClick={onClick}
       onMouseEnter={(e) => {
+        if (!onClick) return;
         e.currentTarget.style.transform = "translateY(-2px)";
         e.currentTarget.style.boxShadow = "0 8px 16px -4px rgba(15, 23, 42, 0.08)";
-        e.currentTarget.style.borderColor = "#CBD5E1";
+        e.currentTarget.style.borderColor = selected ? color : "#CBD5E1";
       }}
       onMouseLeave={(e) => {
+        if (!onClick) return;
         e.currentTarget.style.transform = "translateY(0)";
         e.currentTarget.style.boxShadow = "0 1px 3px rgba(15, 23, 42, 0.05)";
-        e.currentTarget.style.borderColor = "#E2E8F0";
+        e.currentTarget.style.borderColor = selected ? color : "#E2E8F0";
       }}
     >
       {/* Top Header */}

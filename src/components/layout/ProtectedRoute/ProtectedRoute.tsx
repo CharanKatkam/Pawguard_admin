@@ -25,6 +25,11 @@ const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
     return <Navigate to="/" replace />;
   }
 
+  // Super Admin has unrestricted access to all routes
+  if (currentRole === "super_admin") {
+    return <Outlet />;
+  }
+
   // If allowedRoles is specified, ensure user has authorization
   if (allowedRoles && allowedRoles.length > 0) {
     if (!allowedRoles.includes(currentRole)) {

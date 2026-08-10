@@ -51,8 +51,8 @@ const ShelterManagerDashboard = () => {
       // dogs, kennel hierarchy). The free-form /dashboards/shelter payload is
       // intentionally not trusted for counts or occupancy.
       const [facilitiesRes, dogsRes] = await Promise.all([
-        shelterService.getShelters({ page: 1, page_size: 200 }),
-        petService.getPets({ page: 1, page_size: 500 }),
+        shelterService.getShelters({ page: 1, page_size: 100 }),
+        petService.getPets({ page: 1, page_size: 100 }),
       ]);
 
       const facilities = unwrapList(facilitiesRes);

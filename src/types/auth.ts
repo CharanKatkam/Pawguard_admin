@@ -13,16 +13,21 @@ export type UserRole =
 
 export interface User {
   id?: string | number;
+  email: string;
+  full_name?: string;
   name?: string;
-  first_name?: string;
-  last_name?: string;
-  email?: string;
+  phone?: string | null;
+  is_active?: boolean;
+  is_verified?: boolean;
+  mfa_enabled?: boolean;
+  roles?: string[];
+  created_at?: string;
+  updated_at?: string;
   role?: string | UserRole | Record<string, unknown>;
   role_name?: string;
   user_type?: string;
   type?: string;
   avatar?: string;
-  phone?: string;
   department?: string;
 }
 

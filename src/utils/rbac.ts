@@ -178,6 +178,9 @@ export const hasPermission = (permission: string, role?: UserRole): boolean => {
   const currentRole = role || getCurrentUserRole();
   if (!currentRole) return false;
 
+  // Super Admin has unrestricted access to all permissions
+  if (currentRole === "super_admin") return true;
+
   const permissions = getPermissionsForRole(currentRole);
   return permissions.includes(permission);
 };

@@ -1,4 +1,5 @@
 import api from "../api/axios";
+import { getStoredUser } from "../utils/authStorage";
 
 export interface VolunteerApplicationPayload {
   full_name: string;
@@ -25,6 +26,31 @@ export interface ShiftPayload {
   capacity?: number;
   [key: string]: unknown;
 }
+
+export interface VolunteerProfile {
+  id: string;
+  email: string;
+  full_name?: string;
+  [key: string]: unknown;
+}
+
+/** Find the current user's volunteer profile by matching email. */
+const getCurrentVolunteerProfile = async (): Promise<VolunteerProfile | null> => {
+  const user = getStoredUser<{ email?: string }>();
+  if (!user?.email) return null;
+
+  try {
+    const response = await api.get("/volunteers");
+    const list = Array.isArray(response)
+      ? response
+      : Array.isArray(response?.data)
+      ? response.data
+      : [];
+    return list.find((v: VolunteerProfile) => v.email === user.email) ?? null;
+  } catch {
+    return null;
+  }
+};
 
 export const volunteerService = {
   // POST /volunteers/apply
@@ -56,9 +82,15 @@ export const volunteerService = {
     return response.data;
   },
 
-  // GET /volunteers/shifts
+  // GET /volunteers/{profile_id}/shifts
   getShifts: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/volunteers/shifts", { params });
+    const profile = await getCurrentVolunteerProfile();
+    if (!profile?.id) {
+      // Fallback to original endpoint for backward compatibility
+      const response = await api.get("/volunteers/shifts", { params });
+      return response.data;
+    }
+    const response = await api.get(`/volunteers/${profile.id}/shifts`, { params });
     return response.data;
   },
 

@@ -3,15 +3,20 @@ import { publishActionEvent } from "../utils/eventSystem";
 
 export interface UserPayload {
   id?: string;
+  email: string;
   full_name?: string;
   name?: string;
-  email: string;
-  role?: string;
+  phone?: string | null;
+  is_active?: boolean;
+  is_verified?: boolean;
+  mfa_enabled?: boolean;
   roles?: string[];
+  created_at?: string;
+  updated_at?: string;
+  role?: string;
   department?: string;
   status?: string;
   password?: string;
-  is_active?: boolean;
 }
 
 export interface RolePayload {

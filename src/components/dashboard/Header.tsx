@@ -4,7 +4,8 @@ import {
   FaUserCircle,
   FaCog,
   FaSignOutAlt,
-  FaBars,
+  FaChevronLeft,
+  FaChevronRight,
   FaUserCheck,
   FaShieldAlt,
   FaEnvelope,
@@ -72,7 +73,7 @@ const getPageTitle = (pathname: string): string => {
   return "Dashboard";
 };
 
-const Header = ({ onToggleSidebar }: HeaderProps) => {
+const Header = ({ onToggleSidebar, isSidebarCollapsed }: HeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const user = getCurrentUser();
@@ -80,7 +81,6 @@ const Header = ({ onToggleSidebar }: HeaderProps) => {
 
   const displayName =
     user?.name ||
-    (user?.first_name ? `${user.first_name} ${user.last_name || ""}`.trim() : null) ||
     user?.email?.split("@")[0] ||
     "Authenticated User";
 
@@ -133,9 +133,9 @@ const Header = ({ onToggleSidebar }: HeaderProps) => {
               cursor: "pointer",
               transition: "all 0.15s ease",
             }}
-            title="Toggle Navigation Sidebar"
+            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
-            <FaBars size={16} />
+            {isSidebarCollapsed ? <FaChevronLeft size={16} /> : <FaChevronRight size={16} />}
           </button>
 
           {/* Clean Page Title */}
