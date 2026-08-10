@@ -1,6 +1,19 @@
 import api from "../api/axios";
 import { publishActionEvent } from "../utils/eventSystem";
 
+/** Get current Indian financial year period (April 1 - March 31) */
+export const getCurrentFinancialYearPeriod = (): { period_start: string; period_end: string } => {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-indexed
+  // Indian financial year starts April (month 3)
+  const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+  const periodStart = new Date(fyStartYear, 3, 1); // April 1
+  const periodEnd = new Date(fyStartYear + 1, 2, 31, 23, 59, 59); // March 31
+  const toISODate = (d: Date) => d.toISOString().split("T")[0];
+  return { period_start: toISODate(periodStart), period_end: toISODate(periodEnd) };
+};
+
 export interface TransactionPayload {
   txId?: string;
   entity: string;
@@ -60,8 +73,9 @@ export const financeService = {
     return { ...body, data: rows, total: body?.meta?.total ?? rows.length };
   },
 
-  getFinanceSummary: async () => {
-    const response = await api.get("/finance/summary");
+  getFinanceSummary: async (params?: { period_start?: string; period_end?: string }) => {
+    const { period_start, period_end } = params ?? getCurrentFinancialYearPeriod();
+    const response = await api.get("/finance/summary", { params: { period_start, period_end } });
     return response.data;
   },
 
@@ -71,7 +85,7 @@ export const financeService = {
       transaction_type:
         data.transaction_type || toTransactionType(String(data.type || "donation")),
       amount: Number(data.amount),
-      currency: data.currency || "USD",
+      currency: data.currency || "INR",
     };
     if (data.description || data.entity || data.category) {
       payload.description = String(data.description || `${data.entity || ""}${data.category ? ` - ${data.category}` : ""}`).trim();

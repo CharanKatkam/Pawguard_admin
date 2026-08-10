@@ -14,7 +14,7 @@ const numericValue = (val: unknown): number => {
 };
 
 const formatCurrency = (val: unknown): string =>
-  `$${numericValue(val).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  `₹${numericValue(val).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const FinanceUserDashboard = () => {
   const navigate = useNavigate();
@@ -111,7 +111,7 @@ const FinanceUserDashboard = () => {
     { key: "txId", title: "Transaction ID" },
     { key: "entity", title: "Donor / Entity" },
     { key: "type", title: "Category" },
-    { key: "amount", title: "Amount ($)" },
+    { key: "amount", title: "Amount (₹)" },
     { key: "date", title: "Date" },
     { key: "status", title: "Status" },
   ];
@@ -120,7 +120,7 @@ const FinanceUserDashboard = () => {
     txId: tx.id ?? tx.transaction_id ?? tx.tx_id ?? "",
     entity: tx.entity ?? tx.donor ?? tx.name ?? tx.description ?? "",
     type: tx.category ?? tx.type ?? "",
-    amount: tx.amount !== undefined && tx.amount !== null ? `$${tx.amount}` : "",
+    amount: tx.amount !== undefined && tx.amount !== null ? `₹${tx.amount}` : "",
     date: tx.created_at ?? tx.date ?? "",
     status: tx.status ?? "",
   }));

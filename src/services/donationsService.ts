@@ -11,6 +11,12 @@ export interface DonationPayload {
   notes?: string;
   dog_id?: string;
   campaign_id?: string;
+  donor_name?: string;
+  donor_email?: string;
+  donor_phone?: string;
+  payment_method?: string;
+  transaction_id?: string;
+  purpose?: string;
 }
 
 export interface DonationFilters {
@@ -29,6 +35,7 @@ export interface DonationFilters {
 export const normalizeDonationRow = (d: any): any => ({
   id: d.id,
   donorId: d.donor_id,
+  donorName: d.donor_name,
   dogId: d.dog_id,
   campaignId: d.campaign_id,
   amount: d.amount,
@@ -63,17 +70,23 @@ export const donationsService = {
   createDonation: async (payload: DonationPayload) => {
     const response = await api.post("/donations", {
       amount: Number(payload.amount),
-      currency: payload.currency || "USD",
+      currency: payload.currency || "INR",
       donation_type: payload.donation_type || "one_time",
       notes: payload.notes || null,
       dog_id: payload.dog_id || null,
       campaign_id: payload.campaign_id || null,
+      donor_name: payload.donor_name || null,
+      donor_email: payload.donor_email || null,
+      donor_phone: payload.donor_phone || null,
+      payment_method: payload.payment_method || null,
+      transaction_id: payload.transaction_id || null,
+      purpose: payload.purpose || null,
     });
     await publishActionEvent({
       module: "finance",
       action: "create",
       title: "Donation Recorded",
-      message: `Donation of $${Number(payload.amount).toFixed(2)} logged.`,
+      message: `Donation of ₹${Number(payload.amount).toFixed(2)} logged.`,
       targetRoles: ["super_admin", "finance_user"],
     });
     return response.data?.data ?? response.data;

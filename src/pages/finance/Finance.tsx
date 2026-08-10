@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
@@ -6,8 +6,8 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaCoins, FaHandHoldingHeart, FaFileInvoiceDollar, FaChartLine, FaPlus, FaDownload, FaEdit, FaReceipt } from "react-icons/fa";
-import financeService from "../../services/financeService";
+import { FaCoins, FaHandHoldingHeart, FaFileInvoiceDollar, FaChartLine, FaPlus, FaDownload, FaEdit, FaReceipt, FaCheckCircle, FaTimesCircle, FaHourglassHalf } from "react-icons/fa";
+import financeService, { getCurrentFinancialYearPeriod } from "../../services/financeService";
 import donationsService, { type DonationType, type DonationStatus } from "../../services/donationsService";
 import reportsService from "../../services/reportsService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -34,6 +34,14 @@ const formatDate = (value: unknown): string => {
   return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString();
 };
 
+const numericValue = (val: unknown): number => {
+  const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatCurrency = (val: unknown): string =>
+  `₹${numericValue(val).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const Finance = () => {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
@@ -46,6 +54,10 @@ const Finance = () => {
   const [transactions, setTransactions] = useState<Record<string, unknown>[]>([]);
   const [txLoading, setTxLoading] = useState<boolean>(true);
   const [txError, setTxError] = useState<string | null>(null);
+
+  // Finance Summary (for dashboard stats)
+  const [financeSummary, setFinanceSummary] = useState<Record<string, unknown> | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
 
   // Donations
   const [donations, setDonations] = useState<Record<string, unknown>[]>([]);
@@ -60,15 +72,26 @@ const Finance = () => {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(() => searchParams.get("action") === "expense");
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  const [selectedDonation, setSelectedDonation] = useState<any | null>(null);
+  const [selectedDonation, setSelectedDonation] = useState<Record<string, unknown> | null>(null);
   const [donationStatusDraft, setDonationStatusDraft] = useState<DonationStatus>("success");
 
   // Form states (empty defaults - no sample data)
-  const [donationForm, setDonationForm] = useState({ amount: "", currency: "USD", donation_type: "one_time" as DonationType, notes: "" });
-  const [expenseForm, setExpenseForm] = useState({ entity: "", category: "Medical Expense", amount: "" });
+  const [donationForm, setDonationForm] = useState({
+    amount: "",
+    currency: "INR",
+    donation_type: "one_time" as DonationType,
+    notes: "",
+    donor_name: "",
+    donor_email: "",
+    donor_phone: "",
+    payment_method: "",
+    transaction_id: "",
+    purpose: "",
+  });
+  const [expenseForm, setExpenseForm] = useState({ entity: "", category: "Medical Expense", amount: "", date: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchFinance = async () => {
+  const fetchFinance = useCallback(async () => {
     try {
       setTxLoading(true);
       setTxError(null);
@@ -83,9 +106,22 @@ const Finance = () => {
     } finally {
       setTxLoading(false);
     }
-  };
+  }, []);
 
-  const fetchDonations = async () => {
+  const fetchFinanceSummary = useCallback(async () => {
+    try {
+      setSummaryLoading(true);
+      const response = await financeService.getFinanceSummary();
+      setFinanceSummary(response?.data ?? response ?? null);
+    } catch (err: any) {
+      // Error is handled via summaryLoading state and missing data
+      setFinanceSummary(null);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
+  const fetchDonations = useCallback(async () => {
     try {
       setDonationLoading(true);
       setDonationError(null);
@@ -107,12 +143,12 @@ const Finance = () => {
     } finally {
       setDonationLoading(false);
     }
-  };
+  }, [donationFilterStatus, donationFilterType]);
 
   useEffect(() => {
     fetchFinance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchFinanceSummary();
+  }, [fetchFinance, fetchFinanceSummary]);
 
   useEffect(() => {
     const action = searchParams.get("action");
@@ -123,8 +159,7 @@ const Finance = () => {
 
   useEffect(() => {
     fetchDonations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [donationFilterStatus, donationFilterType]);
+  }, [fetchDonations]);
 
   const handleRecordDonation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,19 +168,34 @@ const Finance = () => {
       addToast("Please enter a valid donation amount greater than zero.", "error");
       return;
     }
+    if (!donationForm.donor_name) {
+      addToast("Donor name is required.", "error");
+      return;
+    }
+    if (!donationForm.donor_email) {
+      addToast("Donor email/phone is required.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
       await donationsService.createDonation({
         amount,
-        currency: donationForm.currency || "USD",
+        currency: donationForm.currency || "INR",
         donation_type: donationForm.donation_type,
         notes: donationForm.notes || undefined,
+        donor_name: donationForm.donor_name || undefined,
+        donor_email: donationForm.donor_email || undefined,
+        donor_phone: donationForm.donor_phone || undefined,
+        payment_method: donationForm.payment_method || undefined,
+        transaction_id: donationForm.transaction_id || undefined,
+        purpose: donationForm.purpose || undefined,
       });
-      addToast(`Donation of $${amount.toFixed(2)} recorded!`, "success");
+      addToast(`Donation of ₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded!`, "success");
       setIsDonationModalOpen(false);
-      setDonationForm({ amount: "", currency: "USD", donation_type: "one_time", notes: "" });
+      setDonationForm({ amount: "", currency: "INR", donation_type: "one_time", notes: "", donor_name: "", donor_email: "", donor_phone: "", payment_method: "", transaction_id: "", purpose: "" });
       fetchDonations();
       fetchFinance();
+      fetchFinanceSummary();
       notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to record donation.", "error");
@@ -173,11 +223,13 @@ const Finance = () => {
         amount,
         type: "expense",
         status: "Completed",
+        date: expenseForm.date || undefined,
       });
-      addToast(`Expense bill of $${amount.toFixed(2)} logged for ${expenseForm.entity}!`, "success");
+      addToast(`Expense bill of ₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} logged for ${expenseForm.entity}!`, "success");
       setIsExpenseModalOpen(false);
-      setExpenseForm({ entity: "", category: "Medical Expense", amount: "" });
+      setExpenseForm({ entity: "", category: "Medical Expense", amount: "", date: "" });
       fetchFinance();
+      fetchFinanceSummary();
       notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to log expense.", "error");
@@ -188,9 +240,10 @@ const Finance = () => {
 
   const handleExportReport = async () => {
     try {
-      addToast("Generating quarterly financial balance report...", "info");
-      await reportsService.generateAndDownloadReport({ report_type: "finance", format: "pdf" });
-      addToast("Financial Report PDF downloaded!", "success");
+      addToast("Generating financial audit report...", "info");
+      const { period_start, period_end } = getCurrentFinancialYearPeriod();
+      await reportsService.generateAndDownloadReport({ report_type: "finance", format: "pdf", period_start, period_end });
+      addToast("Financial Audit Report PDF downloaded!", "success");
       setIsReportModalOpen(false);
     } catch (err: any) {
       addToast(err?.message || "Failed to generate financial report.", "error");
@@ -200,10 +253,16 @@ const Finance = () => {
   const handleExportDonationReport = async () => {
     try {
       addToast("Generating donation report PDF...", "info");
-      await reportsService.generateAndDownloadReport({ report_type: "donation", format: "pdf" });
+      const { period_start, period_end } = getCurrentFinancialYearPeriod();
+      await reportsService.generateAndDownloadReport({ report_type: "donation", format: "pdf", period_start, period_end });
       addToast("Donation Report PDF downloaded!", "success");
     } catch (err: any) {
-      addToast(err?.message || "Failed to generate donation report.", "error");
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to generate donation report.";
+      if (err?.response?.status === 403) {
+        addToast("Access denied: You may not have permission to export donation reports.", "error");
+      } else {
+        addToast(msg, "error");
+      }
     }
   };
 
@@ -215,11 +274,12 @@ const Finance = () => {
 
   const handleStatusUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDonation?.id) return;
+    const donationId = selectedDonation?.id ? String(selectedDonation.id) : "";
+    if (!donationId) return;
     try {
       setIsSubmitting(true);
-      await donationsService.updateDonationStatus(selectedDonation.id, donationStatusDraft);
-      addToast(`Donation ${selectedDonation.id} marked as ${donationStatusDraft}.`, "success");
+      await donationsService.updateDonationStatus(donationId, donationStatusDraft);
+      addToast(`Donation ${donationId} marked as ${donationStatusDraft}.`, "success");
       setIsStatusModalOpen(false);
       fetchDonations();
       notifyDataChanged();
@@ -250,34 +310,59 @@ const Finance = () => {
     }
   };
 
-  const numericFrom = (value: unknown): number => {
-    const n = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
-    return Number.isFinite(n) ? n : 0;
-  };
+  // Calculate stats from finance summary (preferred) or fallback to transactions/donations
+  const summaryRevenue = financeSummary?.total_donations ?? financeSummary?.totalRevenue ?? financeSummary?.total_revenue ?? financeSummary?.total_income;
+  const summaryExpenses = financeSummary?.expenses ?? financeSummary?.operationalExpenses ?? financeSummary?.total_expenses;
+  const summaryDonors = financeSummary?.donor_count ?? financeSummary?.totalDonors ?? financeSummary?.donorCount;
+  const summaryNet = financeSummary?.net_balance ?? financeSummary?.netBalance ?? financeSummary?.net;
+  const summarySuccessfulDonations = financeSummary?.successful_donations ?? financeSummary?.successfulDonations;
+  const summaryPendingDonations = financeSummary?.pending_donations ?? financeSummary?.pendingDonations;
+  const summaryFailedDonations = financeSummary?.failed_donations ?? financeSummary?.failedDonations;
 
+  // Fallback calculations from transactions
   const totalRevenue = transactions
     .filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase()))
-    .reduce((sum, t) => sum + numericFrom(t.amount), 0);
+    .reduce((sum, t) => sum + numericValue(t.amount), 0);
   const totalExpenses = transactions
     .filter((t) => /expense/.test(String(t.type || "").toLowerCase()))
-    .reduce((sum, t) => sum + Math.abs(numericFrom(t.amount)), 0);
-  const donorCount = donations.length;
+    .reduce((sum, t) => sum + Math.abs(numericValue(t.amount)), 0);
 
-  const currency = (n: number) =>
-    `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Unique donor count from donations (not just donation count)
+  const donorCount = donations
+    .filter((d) => /income|donation|revenue/.test(String(d.type || "one_time").toLowerCase()))
+    .reduce((set, d) => {
+      const entity = String(d.donorId ?? d.transactionId ?? d.notes ?? "").trim();
+      if (entity) set.add(entity);
+      return set;
+    }, new Set<string>()).size;
+
+  // Donation status counts
+  const successfulDonations = summarySuccessfulDonations !== undefined && summarySuccessfulDonations !== null
+    ? summarySuccessfulDonations
+    : donations.filter((d) => String(d.status) === "success").length;
+  const pendingDonations = summaryPendingDonations !== undefined && summaryPendingDonations !== null
+    ? summaryPendingDonations
+    : donations.filter((d) => String(d.status) === "pending").length;
+  const failedDonations = summaryFailedDonations !== undefined && summaryFailedDonations !== null
+    ? summaryFailedDonations
+    : donations.filter((d) => String(d.status) === "failed").length;
 
   const stats = [
-    { title: "Total Revenue / Donations", value: currency(totalRevenue), trend: "All Time", color: "#10B981", icon: <FaCoins /> },
-    { title: "Operational Expenses", value: currency(totalExpenses), trend: "All Time", color: "#2563EB", icon: <FaFileInvoiceDollar /> },
-    { title: "Donor Contributions", value: `${donorCount} Donations`, trend: "Recorded", color: "#6366F1", icon: <FaHandHoldingHeart /> },
-    { title: "Net Reserve Balance", value: currency(totalRevenue - totalExpenses), trend: "Net Position", color: "#F59E0B", icon: <FaChartLine /> },
+    { title: "Total Revenue / Donations", value: summaryLoading ? "..." : (summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue)), trend: summaryLoading ? "Loading..." : (summaryRevenue !== undefined && summaryRevenue !== null ? "Backend Summary" : "From Transactions"), color: "#10B981", icon: <FaCoins /> },
+    { title: "Operational Expenses", value: summaryLoading ? "..." : (summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses)), trend: summaryLoading ? "Loading..." : (summaryExpenses !== undefined && summaryExpenses !== null ? "Backend Summary" : "From Transactions"), color: "#2563EB", icon: <FaFileInvoiceDollar /> },
+    { title: "Donor Contributions", value: summaryLoading ? "..." : String(summaryDonors ?? donorCount), trend: summaryLoading ? "Loading..." : (summaryDonors !== undefined && summaryDonors !== null ? "Unique Donors (Backend)" : "Unique Donors"), color: "#6366F1", icon: <FaHandHoldingHeart /> },
+    { title: "Net Reserve Balance", value: summaryLoading ? "..." : (summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses)), trend: summaryLoading ? "Loading..." : (summaryNet !== undefined && summaryNet !== null ? "Backend Net Balance" : "Calculated"), color: "#F59E0B", icon: <FaChartLine /> },
+    { title: "Total Transactions", value: summaryLoading ? "..." : String(transactions.length), trend: "All Records", color: "#64748B", icon: <FaFileInvoiceDollar /> },
+    { title: "Successful Donations", value: summaryLoading ? "..." : String(successfulDonations), trend: "Completed", color: "#10B981", icon: <FaCheckCircle /> },
+    { title: "Pending Donations", value: summaryLoading ? "..." : String(pendingDonations), trend: "Awaiting", color: "#F59E0B", icon: <FaHourglassHalf /> },
+    { title: "Failed/Cancelled Donations", value: summaryLoading ? "..." : String(failedDonations), trend: "Failed", color: "#EF4444", icon: <FaTimesCircle /> },
   ];
 
   const txColumns = [
     { key: "txId", title: "Transaction ID" },
     { key: "entity", title: "Donor / Entity" },
     { key: "category", title: "Category" },
-    { key: "amount", title: "Amount ($)" },
+    { key: "amount", title: "Amount (₹)" },
     { key: "date", title: "Date" },
     { key: "status", title: "Status" },
   ];
@@ -424,7 +509,7 @@ const Finance = () => {
                     <tr key={idx} style={{ borderBottom: "1px solid #F1F5F9" }}>
                       <td style={{ padding: "14px 16px", color: "#0F172A", fontWeight: 600, whiteSpace: "nowrap" }}>{d.id || "—"}</td>
                       <td style={{ padding: "14px 16px", color: "#475569" }}>
-                        {d.transactionId || d.notes || (d.donorId ? `Donor ${String(d.donorId).slice(0, 8)}` : "Manual")}
+                        {d.donorName || d.transactionId || d.notes || (d.donorId ? `Donor ${String(d.donorId).slice(0, 8)}` : "Manual")}
                       </td>
                       <td style={{ padding: "14px 16px", color: "#0F172A", textTransform: "capitalize" }}>{String(d.type || "one_time").replace("_", " ")}</td>
                       <td style={{ padding: "14px 16px", color: "#10B981", fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -500,17 +585,61 @@ const Finance = () => {
       {/* Record Donation Modal */}
       <Modal isOpen={isDonationModalOpen} onClose={() => setIsDonationModalOpen(false)} title="Record Sponsor Donation">
         <form onSubmit={handleRecordDonation} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Amount (USD) *</label>
-            <input type="number" step="0.01" min="1" required placeholder="e.g. 50.00" value={donationForm.amount} onChange={(e) => setDonationForm({ ...donationForm, amount: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donor Name *</label>
+              <input type="text" required placeholder="e.g. John Doe" value={donationForm.donor_name} onChange={(e) => setDonationForm({ ...donationForm, donor_name: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donor Email/Phone *</label>
+              <input type="text" required placeholder="e.g. john@example.com or +91-9876543210" value={donationForm.donor_email} onChange={(e) => setDonationForm({ ...donationForm, donor_email: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+            </div>
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donation Type</label>
-            <select value={donationForm.donation_type} onChange={(e) => setDonationForm({ ...donationForm, donation_type: e.target.value as DonationType })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
-              <option value="one_time">One-Time</option>
-              <option value="recurring">Recurring</option>
-              <option value="sponsorship">Sponsorship</option>
-            </select>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Amount (INR) *</label>
+            <input type="number" step="0.01" min="1" required placeholder="e.g. 5000.00" value={donationForm.amount} onChange={(e) => setDonationForm({ ...donationForm, amount: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donation Type</label>
+              <select value={donationForm.donation_type} onChange={(e) => setDonationForm({ ...donationForm, donation_type: e.target.value as DonationType })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
+                <option value="one_time">One-Time</option>
+                <option value="recurring">Recurring</option>
+                <option value="sponsorship">Sponsorship</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Payment Method</label>
+              <select value={donationForm.payment_method} onChange={(e) => setDonationForm({ ...donationForm, payment_method: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
+                <option value="">Select Method</option>
+                <option value="upi">UPI</option>
+                <option value="net_banking">Net Banking</option>
+                <option value="card">Card</option>
+                <option value="cash">Cash</option>
+                <option value="cheque">Cheque</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Transaction/Reference ID</label>
+              <input type="text" placeholder="e.g. TXN123456789" value={donationForm.transaction_id} onChange={(e) => setDonationForm({ ...donationForm, transaction_id: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donation Purpose/Category</label>
+              <select value={donationForm.purpose} onChange={(e) => setDonationForm({ ...donationForm, purpose: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
+                <option value="">Select Purpose</option>
+                <option value="general">General Donation</option>
+                <option value="medical">Medical Care</option>
+                <option value="food">Food & Nutrition</option>
+                <option value="shelter">Shelter Maintenance</option>
+                <option value="rescue">Rescue Operations</option>
+                <option value="adoption">Adoption Support</option>
+                <option value="education">Education & Awareness</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
           </div>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Notes (optional)</label>
@@ -540,8 +669,12 @@ const Finance = () => {
             </select>
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Bill Amount (USD) *</label>
-            <input type="number" step="0.01" min="1" required placeholder="e.g. 250.00" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Bill Amount (INR) *</label>
+            <input type="number" step="0.01" min="1" required placeholder="e.g. 25000.00" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Bill Date</label>
+            <input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsExpenseModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", cursor: "pointer" }}>Cancel</button>
@@ -554,7 +687,7 @@ const Finance = () => {
       <Modal isOpen={isStatusModalOpen} onClose={() => setIsStatusModalOpen(false)} title="Update Donation Status">
         <form onSubmit={handleStatusUpdate} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ color: "#334155", margin: 0, fontSize: "14px" }}>
-            Update status for donation <strong>{selectedDonation?.id || "—"}</strong>:
+            Update status for donation <strong>{selectedDonation?.id ? String(selectedDonation.id) : "—"}</strong>:
           </p>
           <select value={donationStatusDraft} onChange={(e) => setDonationStatusDraft(e.target.value as DonationStatus)} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
             <option value="pending">Pending</option>
