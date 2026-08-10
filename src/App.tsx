@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Login from "./pages/auth/Login";
+import ResetPassword from "./pages/auth/ResetPassword";
 import Unauthorized from "./pages/auth/Unauthorized";
 import Dashboard from "./pages/dashboard/Dashboard";
 import Users from "./pages/users/Users";
@@ -48,6 +49,9 @@ function App() {
       <Routes>
         {/* Public Login */}
         <Route path="/" element={<Login />} />
+
+        {/* Public Password Reset (token comes via ?token=... from the email link) */}
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* 403 Unauthorized Error Page */}
         <Route path="/403" element={<Unauthorized />} />

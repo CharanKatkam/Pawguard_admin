@@ -20,6 +20,7 @@ import SystemAlerts from "../../../components/dashboard/SystemAlerts";
 import DashboardNotificationsPanel from "../../../components/dashboard/DashboardNotificationsPanel";
 import RecentActivitiesPanel from "../../../components/dashboard/RecentActivitiesPanel";
 import DashboardNavigationCards from "../../../components/dashboard/DashboardNavigationCards";
+import SuperAdminModuleNavigation from "../../../components/dashboard/SuperAdminModuleNavigation";
 import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../../utils/roleUtils";
 import { isPending } from "../../../utils/chartUtils";
 import type { AnyRecord, DashboardSummary } from "../../../types/dashboard";
@@ -213,6 +214,14 @@ const SuperAdminDashboard = () => {
         </div>
       )}
 
+      <div style={{ marginBottom: "28px" }}>
+        <DashboardSectionHeader
+          title="Operational Dashboards"
+          subtitle="Open any role dashboard. You remain authenticated as Super Admin throughout."
+        />
+        <SuperAdminModuleNavigation />
+      </div>
+
       <div
         style={{
           display: "grid",
@@ -296,7 +305,7 @@ const SuperAdminDashboard = () => {
       <div style={{ marginBottom: "28px" }}>
         <DashboardSectionHeader
           title="Explore Modules"
-          subtitle="Jump into any management module"
+          subtitle="Quick access shortcuts to frequently used operational areas"
         />
         <DashboardNavigationCards />
       </div>

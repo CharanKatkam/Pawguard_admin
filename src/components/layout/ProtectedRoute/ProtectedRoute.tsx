@@ -2,6 +2,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import type { UserRole } from "../../../types/auth";
 import { getCurrentUser, getCurrentUserRole, isInternalRole } from "../../../utils/roleUtils";
 import { hasPermission, hasAnyPermission } from "../../../utils/rbac";
+import { getAccessToken } from "../../../utils/authStorage";
 
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
@@ -11,7 +12,7 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
   const user = getCurrentUser();
-  const token = localStorage.getItem("access_token");
+  const token = getAccessToken();
 
   // If user is not authenticated or not an internal staff role, redirect to Login page
   if (!user || !token || !isInternalRole(user)) {

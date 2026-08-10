@@ -10,10 +10,6 @@ import {
   FaStethoscope,
   FaBoxesStacked,
   FaDollarSign,
-  FaUsers,
-  FaClipboardList,
-  FaAward,
-  FaChartPie,
 } from "react-icons/fa6";
 
 const modules: Array<{
@@ -31,10 +27,6 @@ const modules: Array<{
   { title: "Medical Records", description: "Exams, vaccinations & surgery", icon: <FaStethoscope />, color: "#06B6D4", path: "/medical-records" },
   { title: "Inventory", description: "Stock levels, alerts & purchases", icon: <FaBoxesStacked />, color: "#F97316", path: "/inventory" },
   { title: "Finance", description: "Transactions, donations & expenses", icon: <FaDollarSign />, color: "#14B8A6", path: "/finance" },
-  { title: "Users & Roles", description: "Accounts, roles & permissions", icon: <FaUsers />, color: "#2563EB", path: "/users" },
-  { title: "Audit Logs", description: "System-wide audit trail", icon: <FaClipboardList />, color: "#64748B", path: "/audit-logs" },
-  { title: "Certificates", description: "Adoption & vaccination records", icon: <FaAward />, color: "#F59E0B", path: "/certificates" },
-  { title: "Reports", description: "Analytics, exports & insights", icon: <FaChartPie />, color: "#0EA5E9", path: "/reports" },
 ];
 
 const DashboardNavigationCards = () => {

@@ -144,6 +144,30 @@ html, body {
   border-color: #CBD5E1;
 }
 
+/* Super Admin master dashboard — equal-sized operational dashboard cards.
+   Fixed row height + equal fractional columns keep every card exactly the
+   same width and height regardless of its text content, and 8 cards always
+   fill complete rows (Finance never sits alone). */
+.master-module-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 128px;
+  gap: 12px;
+}
+
+@media (max-width: 1023px) {
+  .master-module-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .master-module-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 /* Interactive elements */
 button, input, select, textarea {
   font-family: inherit;

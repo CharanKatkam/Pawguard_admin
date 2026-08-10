@@ -1,4 +1,5 @@
 import type { UserRole, User } from "../types/auth";
+import { getStoredUser } from "./authStorage";
 
 export const ALLOWED_INTERNAL_ROLES: UserRole[] = [
   "super_admin",
@@ -202,13 +203,7 @@ export const isInternalRole = (rawInput?: unknown): boolean => {
 };
 
 export const getCurrentUser = (): User | null => {
-  try {
-    const userJson = localStorage.getItem("user");
-    if (!userJson) return null;
-    return JSON.parse(userJson) as User;
-  } catch {
-    return null;
-  }
+  return getStoredUser<User>();
 };
 
 export const getCurrentUserRole = (): UserRole | null => {
@@ -246,6 +241,156 @@ export const getDashboardPathForRole = (role?: string | UserRole | null): string
       return "/dashboard/finance";
     default:
       return "/dashboard/super-admin";
+  }
+};
+
+export const ROLE_DASHBOARD_PATHS: Array<{ path: string; role: UserRole }> = [
+  { path: "/dashboard/super-admin", role: "super_admin" },
+  { path: "/dashboard/rescue-centre-admin", role: "rescue_centre_admin" },
+  { path: "/dashboard/rescue-coordinator", role: "rescue_coordinator" },
+  { path: "/dashboard/rescue-agent", role: "rescue_agent" },
+  { path: "/dashboard/veterinarian", role: "veterinarian" },
+  { path: "/dashboard/shelter-manager", role: "shelter_manager" },
+  { path: "/dashboard/adoption-coordinator", role: "adoption_coordinator" },
+  { path: "/dashboard/foster-coordinator", role: "foster_coordinator" },
+  { path: "/dashboard/volunteer-coordinator", role: "volunteer_coordinator" },
+  { path: "/dashboard/inventory-manager", role: "inventory_manager" },
+  { path: "/dashboard/finance", role: "finance_user" },
+];
+
+/**
+ * Resolve which role's dashboard the given route path belongs to.
+ * Returns null when the path is not a role dashboard route.
+ */
+export const getDashboardRoleFromPath = (pathname: string): UserRole | null => {
+  const normalized = pathname.split("?")[0].replace(/\/+$/, "");
+  const entry = ROLE_DASHBOARD_PATHS.find(
+    (item) => normalized === item.path || normalized.startsWith(`${item.path}/`)
+  );
+  return entry ? entry.role : null;
+};
+
+/**
+ * Determine which role's menus should render in the sidebar for a given
+ * authenticated role + current path.
+ *
+ * AUTHENTICATED ROLE ≠ ACTIVE DASHBOARD: when a Super Admin is viewing another
+ * role's dashboard, the sidebar switches to that role's menus so the dashboard
+ * "completely uses that role's existing layout" — but the authenticated role
+ * (and session) is never changed. Non-admin roles always keep their own menus.
+ */
+export const getSidebarRole = (
+  currentRole: UserRole | null,
+  pathname: string
+): UserRole | null => {
+  if (!currentRole || currentRole !== "super_admin") return currentRole;
+  const dashRole = getDashboardRoleFromPath(pathname);
+  return dashRole && dashRole !== "super_admin" ? dashRole : currentRole;
+};
+
+/**
+ * Session key tracking which master module the Super Admin is currently viewing.
+ * Kept in sessionStorage so it survives a browser refresh and is cleared when
+ * the tab/session closes.
+ */
+export const ACTIVE_MODULE_STORAGE_KEY = "pawguard:active-module";
+
+export interface MasterModuleChild {
+  key: string;
+  label: string;
+  description: string;
+  path: string;
+  color: string;
+}
+
+export interface MasterModuleDef {
+  key: string;
+  label: string;
+  description: string;
+  path: string;
+  iconType:
+    | "rescues"
+    | "medical"
+    | "shelters"
+    | "adoptions"
+    | "fosters"
+    | "volunteers"
+    | "inventory"
+    | "finance";
+  color: string;
+  /** Optional sub-entry points for a single role group (e.g. the three Rescue dashboards). */
+  children?: MasterModuleChild[];
+}
+
+/**
+ * Top-level module buttons shown on the Super Admin Dashboard.
+ * Every entry maps to an ACTUAL login-based role dashboard (reused as-is).
+ * Shared modules (Vehicles, Reports, ...) live in the Super Admin sidebar
+ * instead — they are pages, not dashboards.
+ */
+export const MASTER_MODULES: MasterModuleDef[] = [
+  {
+    key: "rescue",
+    label: "Rescue",
+    description: "Three rescue role dashboards",
+    path: "/dashboard/rescue-centre-admin",
+    iconType: "rescues",
+    color: "#EF4444",
+    children: [
+      { key: "rescue-centre-admin", label: "Rescue Centre Admin", description: "High-level rescue operations", path: "/dashboard/rescue-centre-admin", color: "#EF4444" },
+      { key: "rescue-coordinator", label: "Rescue Coordinator", description: "Dispatch & case coordination", path: "/dashboard/rescue-coordinator", color: "#F97316" },
+      { key: "rescue-agent", label: "Rescue Agent", description: "Field agent assignments", path: "/dashboard/rescue-agent", color: "#F59E0B" },
+    ],
+  },
+  { key: "medical", label: "Medical", description: "Veterinarian / Medical Officer view", path: "/dashboard/veterinarian", iconType: "medical", color: "#06B6D4" },
+  { key: "shelter", label: "Shelter", description: "Shelter Manager view", path: "/dashboard/shelter-manager", iconType: "shelters", color: "#8B5CF6" },
+  { key: "adoption", label: "Adoption", description: "Adoption Coordinator view", path: "/dashboard/adoption-coordinator", iconType: "adoptions", color: "#EC4899" },
+  { key: "foster", label: "Foster", description: "Foster Coordinator view", path: "/dashboard/foster-coordinator", iconType: "fosters", color: "#10B981" },
+  { key: "volunteer", label: "Volunteer", description: "Volunteer Coordinator view", path: "/dashboard/volunteer-coordinator", iconType: "volunteers", color: "#F59E0B" },
+  { key: "inventory", label: "Inventory", description: "Inventory Manager view", path: "/dashboard/inventory-manager", iconType: "inventory", color: "#F97316" },
+  { key: "finance", label: "Finance", description: "Finance User view", path: "/dashboard/finance", iconType: "finance", color: "#14B8A6" },
+];
+
+/** Map a route path to the master module key currently being viewed (if any). */
+export const getModuleKeyForPath = (pathname: string): string | null => {
+  const normalized = pathname.split("?")[0].replace(/\/+$/, "");
+  for (const mod of MASTER_MODULES) {
+    if (normalized === mod.path || normalized.startsWith(`${mod.path}/`)) return mod.key;
+    for (const child of mod.children ?? []) {
+      if (normalized === child.path || normalized.startsWith(`${child.path}/`)) return mod.key;
+    }
+  }
+  return null;
+};
+
+/** Map a route path to the specific master-module sub-entry currently viewed (if any). */
+export const getModuleChildKeyForPath = (pathname: string): string | null => {
+  const normalized = pathname.split("?")[0].replace(/\/+$/, "");
+  for (const mod of MASTER_MODULES) {
+    for (const child of mod.children ?? []) {
+      if (normalized === child.path || normalized.startsWith(`${child.path}/`)) return child.key;
+    }
+  }
+  return null;
+};
+
+export const getActiveModuleKey = (): string | null => {
+  try {
+    return sessionStorage.getItem(ACTIVE_MODULE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+export const setActiveModuleKey = (key: string | null): void => {
+  try {
+    if (key) {
+      sessionStorage.setItem(ACTIVE_MODULE_STORAGE_KEY, key);
+    } else {
+      sessionStorage.removeItem(ACTIVE_MODULE_STORAGE_KEY);
+    }
+  } catch {
+    // sessionStorage may be unavailable; highlighting is best-effort.
   }
 };
 
@@ -349,23 +494,15 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
 
   switch (normalized) {
     case "super_admin":
+      // Lean master sidebar: the Super Admin Dashboard body hosts the top-level
+      // module/dashboard buttons (see SuperAdminModuleNavigation + MASTER_MODULES).
+      // This list keeps only the Super Admin's own admin/utility pages.
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "User Management", path: "/users", iconType: "users" },
-        { name: "Rescue Management", path: "/rescues", iconType: "rescues" },
-        { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
-        { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
-        { name: "Dog Management", path: "/pets", iconType: "pets" },
-        { name: "Medical Management", path: "/medical-records", iconType: "medical" },
-        { name: "Shelter Management", path: "/shelters", iconType: "shelters" },
-        { name: "Adoption Management", path: "/adoptions", iconType: "adoptions" },
-        { name: "Foster Management", path: "/fosters", iconType: "fosters" },
-        { name: "Volunteer Management", path: "/volunteers", iconType: "volunteers" },
-        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
-        { name: "Inventory Mgmt", path: "/inventory", iconType: "inventory" },
-        { name: "Donations & Finance", path: "/finance", iconType: "finance" },
         { name: "Vehicle Management", path: "/vehicles", iconType: "vehicles" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
+        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
         { name: "Roles & Permissions", path: "/roles-permissions", iconType: "users" },
         { name: "Audit Logs", path: "/audit-logs", iconType: "audit" },
         { name: "Certificates", path: "/certificates", iconType: "certificates" },

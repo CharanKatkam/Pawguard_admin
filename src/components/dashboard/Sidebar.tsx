@@ -26,10 +26,12 @@ import {
   getCurrentUserRole,
   getMenusForRole,
   getMenuViewPermission,
+  getSidebarRole,
 } from "../../utils/roleUtils";
 import type { RoleMenuItem } from "../../utils/roleUtils";
 import { usePermissions } from "../../context/PermissionContext";
 import { notifyAuthChanged } from "../../utils/dataSync";
+import { clearAuthData } from "../../utils/authStorage";
 import PawGuardLogo from "../common/PawGuardLogo";
 
 interface SidebarProps {
@@ -89,19 +91,20 @@ const Sidebar = ({ collapsed = false }: SidebarProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const currentRole = getCurrentUserRole() || "super_admin";
+  // When a Super Admin is viewing another role's dashboard, the sidebar renders
+  // that role's own menus (authenticated role/session is never changed).
+  const sidebarRole = getSidebarRole(currentRole, location.pathname);
   const { has } = usePermissions();
   // Enforce permission-based visibility: menus for modules the user is not
   // allowed to view are hidden immediately when permissions change.
-  const menus = getMenusForRole(currentRole).filter((menu) => {
+  const menus = getMenusForRole(sidebarRole).filter((menu) => {
     const required = getMenuViewPermission(menu.path);
     return !required || has(required);
   });
 
   const handleLogout = (e: React.MouseEvent) => {
     e.preventDefault();
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("user");
+    clearAuthData();
     notifyAuthChanged();
     navigate("/");
   };

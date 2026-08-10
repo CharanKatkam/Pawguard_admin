@@ -1,5 +1,6 @@
 import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
+import { getAccessToken, clearAuthData } from "../utils/authStorage";
 
 // Base API configuration for production and development environment
 const API_BASE_URL = "https://pawguard-backend-mqri.onrender.com/api/v1";
@@ -15,7 +16,7 @@ const api = axios.create({
 // Request Interceptor: Attach JWT Bearer Token if available
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("access_token");
+    const token = getAccessToken();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -34,9 +35,7 @@ api.interceptors.response.use(
       const status = error.response.status;
 
       if (status === 401 && window.location.pathname !== "/") {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        localStorage.removeItem("user");
+        clearAuthData();
         notifyAuthChanged();
         window.location.href = "/";
       }

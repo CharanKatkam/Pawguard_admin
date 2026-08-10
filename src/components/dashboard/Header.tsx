@@ -12,6 +12,7 @@ import {
 import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../utils/roleUtils";
 import { canViewSettings } from "../../utils/rbac";
 import authService from "../../services/auth/authService";
+import { clearAuthData } from "../../utils/authStorage";
 import NotificationDropdown from "./NotificationDropdown";
 import Modal from "../common/Modal";
 
@@ -93,9 +94,7 @@ const Header = ({ onToggleSidebar }: HeaderProps) => {
     } catch {
       // Ignore network errors on logout
     } finally {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("user");
+      clearAuthData();
       navigate("/");
     }
   };

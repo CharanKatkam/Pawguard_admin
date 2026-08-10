@@ -3,18 +3,19 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 import PasswordInput from "./PasswordInput";
+import ForgotPasswordModal from "./ForgotPasswordModal";
 import authService from "../../services/auth/authService";
 import { getDashboardPathForRole, normalizeRole } from "../../utils/roleUtils";
 import { notifyAuthChanged } from "../../utils/dataSync";
-import { useToast } from "../../context/ToastContext";
+import { getRememberMe, getRememberedEmail, setAuthData, setRememberedEmail } from "../../utils/authStorage";
 
 const LoginForm = () => {
-  const { addToast } = useToast();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState<string>(() => getRememberedEmail());
   const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState<boolean>(() => getRememberMe());
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const navigate = useNavigate();
 
@@ -74,11 +75,6 @@ const LoginForm = () => {
       throw new Error("Authentication response did not include an access token.");
     }
 
-    localStorage.setItem("access_token", String(access_token));
-    if (refresh_token) {
-      localStorage.setItem("refresh_token", String(refresh_token));
-    }
-
     let userObj = await authorizeUser(authPayload);
 
     if (!userObj || (typeof userObj === "object" && !userObj.role && !userObj.roles && !userObj.role_name && !userObj.user_type && !userObj.type && !userObj.slug && !userObj.title && !userObj.name)) {
@@ -108,13 +104,20 @@ const LoginForm = () => {
     }
 
     userObj.role = userRole;
-    localStorage.setItem("user", JSON.stringify(userObj));
 
-    if (rememberMe) {
-      localStorage.setItem("remember_email", email.trim());
-    } else {
-      localStorage.removeItem("remember_email");
-    }
+    // Remember Me controls persistence:
+    // checked  -> localStorage (session survives browser restarts)
+    // unchecked -> sessionStorage (cleared when the browser/tab closes).
+    // Passwords are never stored; only the email is remembered for convenience.
+    setAuthData(
+      {
+        accessToken: String(access_token),
+        refreshToken: refresh_token ? String(refresh_token) : null,
+        user: userObj,
+      },
+      rememberMe
+    );
+    setRememberedEmail(rememberMe ? email.trim() : "");
 
     notifyAuthChanged();
     navigate(getDashboardPathForRole(userRole), { replace: true });
@@ -219,7 +222,7 @@ const LoginForm = () => {
           Remember me
         </label>
 
-        <a href="#forgot" onClick={(e) => { e.preventDefault(); addToast("Password reset instructions sent to system administrator.", "info"); }}>
+        <a href="#forgot" onClick={(e) => { e.preventDefault(); setForgotOpen(true); }}>
           Forgot Password?
         </a>
       </div>
@@ -231,6 +234,13 @@ const LoginForm = () => {
       >
         {loading ? "Signing In..." : "Sign In"}
       </button>
+
+      <ForgotPasswordModal
+        key={forgotOpen ? "forgot-open" : "forgot-closed"}
+        isOpen={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        initialEmail={email.trim()}
+      />
     </form>
   );
 };
