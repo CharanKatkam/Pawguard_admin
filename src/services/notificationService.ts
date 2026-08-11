@@ -47,6 +47,11 @@ const transformNotification = (notif: NotificationResponse): NotificationItem =>
  */
 export const notificationService = {
   // POST /api/v1/notifications/send
+  // The backend `NotificationSend` schema supports role-targeted delivery via
+  // `target_roles` (send to all active users holding any of those roles).
+  // When target roles are provided we omit `user_id` (it is only required
+  // "unless target_roles is provided"); otherwise we keep the previous
+  // actor-scoped behaviour.
   sendBroadcastNotification: async (payload: {
     title: string;
     message: string;
@@ -55,6 +60,17 @@ export const notificationService = {
   }): Promise<void> => {
     const user = getCurrentUser();
     const userId = (user as any)?.id;
+    if (payload.targetRoles && payload.targetRoles.length > 0) {
+      await api.post("/notifications/send", {
+        title: payload.title,
+        body: payload.message,
+        notification_type: payload.type || "general",
+        action_url: null,
+        send_email: false,
+        target_roles: payload.targetRoles,
+      });
+      return;
+    }
     if (!userId) {
       throw new Error("No active user session to deliver notification to.");
     }

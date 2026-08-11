@@ -450,6 +450,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Staff & Users", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
+        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
@@ -461,7 +462,6 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
         { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
         { name: "Vehicle Fleet", path: "/vehicles", iconType: "vehicles" },
-        { name: "Assign Agents", path: "/users", iconType: "users" },
         { name: "Reports", path: "/reports", iconType: "reports" },
       ];
 

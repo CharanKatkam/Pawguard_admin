@@ -73,6 +73,22 @@ export const rescueService = {
     return response.data;
   },
 
+  // POST /rescue/{request_id}/assign-coordinator - RescueAssignCoordinator
+  // Assigns a rescue coordinator to own/track this case (PRR 3.2).
+  assignCoordinator: async (requestId: string, coordinatorId: string, notes?: string) => {
+    const payload: Record<string, unknown> = { coordinator_id: coordinatorId };
+    if (notes) payload.notes = notes;
+    const response = await api.post(`/rescue/${requestId}/assign-coordinator`, payload);
+    await publishActionEvent({
+      module: "rescue",
+      action: "assign",
+      title: "Rescue Coordinator Assigned",
+      message: `Coordinator assigned to rescue case ${requestId}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator"],
+    });
+    return response.data;
+  },
+
   updateRescueStatus: async (requestId: string, status: string) => {
     const response = await api.post(`/rescue/${requestId}/verify`, { status });
     await publishActionEvent({
@@ -128,8 +144,11 @@ export const rescueService = {
   },
 
   rejectRescueRequest: async (requestId: string, reason?: string) => {
-    const payload = reason ? { rejection_rationale: reason } : {};
-    const response = await api.post(`/rescue/${requestId}/fail`, payload);
+    // POST /rescue/{request_id}/fail expects `failure_reason` as a required
+    // query parameter (no request body) per the backend OpenAPI spec.
+    const response = await api.post(`/rescue/${requestId}/fail`, null, {
+      params: { failure_reason: reason || "" },
+    });
     await publishActionEvent({
       module: "rescue",
       action: "reject",

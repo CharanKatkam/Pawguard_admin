@@ -17,6 +17,24 @@ import rescueService from "../../services/rescueService";
 import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { getCurrentUserRole } from "../../utils/roleUtils";
+
+// Backend enum values (RescueSeverity / RescuePhysicalCondition) per OpenAPI.
+const SEVERITY_OPTIONS = [
+  { value: "critical", label: "Critical" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
+const PHYSICAL_CONDITION_OPTIONS = [
+  { value: "critical_life_threatening", label: "Critical / Life Threatening" },
+  { value: "fractured_injured", label: "Fractured / Injured" },
+  { value: "contagious_sick", label: "Contagious / Sick" },
+  { value: "malnourished", label: "Malnourished" },
+  { value: "abandoned_stray", label: "Abandoned / Stray" },
+  { value: "unknown", label: "Unknown" },
+];
 
 const RescueManagement = () => {
   const [cases, setCases] = useState<any[]>([]);
@@ -31,15 +49,18 @@ const RescueManagement = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [selectedCase, setSelectedCase] = useState<any | null>(null);
+
+  const [assignForm, setAssignForm] = useState({ coordinator_id: "", notes: "" });
 
   const [formData, setFormData] = useState({
     location_address: "",
     location_landmark: "",
-    severity: "High",
+    severity: "high",
     is_urgent: true,
     animal_count: 1,
-    physical_condition: "Injured",
+    physical_condition: "unknown",
     reporter_name: "",
     reporter_phone: "",
     reporter_notes: "",
@@ -73,11 +94,20 @@ const RescueManagement = () => {
     }
   }, [searchParams]);
 
+  const coordinatorLabel = (id?: string | null) => {
+    if (!id) return "-";
+    const c = coordinators.find((x: any) => x.id === id);
+    return c ? c.full_name || c.email || id : id;
+  };
+
   const fetchRescueCases = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await rescueService.getRescueCases();
+      // Rescue agents should only ever see cases assigned to them, not every
+      // rescue in the system (backend `assigned_to_me` capability).
+      const isAgent = getCurrentUserRole() === "rescue_agent";
+      const response = await rescueService.getRescueCases(isAgent ? { assigned_to_me: true } : undefined);
       const list = Array.isArray(response)
         ? response
         : Array.isArray(response?.data)
@@ -104,6 +134,7 @@ const RescueManagement = () => {
           behavioral_indicators: item.behavioral_indicators ?? "-",
           severity: item.severity ?? item.urgency_level ?? item.urgency ?? "-",
           is_urgent: item.is_urgent !== undefined && item.is_urgent !== null ? (item.is_urgent ? "Yes" : "No") : "-",
+          coordinator_id: item.coordinator_id ?? null,
           media_evidence: Array.isArray(item.media_evidence)
             ? item.media_evidence.join(", ")
             : (item.media_evidence ?? item.media_urls ?? "-"),
@@ -168,10 +199,10 @@ const RescueManagement = () => {
       setFormData({
         location_address: "",
         location_landmark: "",
-        severity: "High",
+        severity: "high",
         is_urgent: true,
         animal_count: 1,
-        physical_condition: "Injured",
+        physical_condition: "unknown",
         reporter_name: "",
         reporter_phone: "",
         reporter_notes: "",
@@ -190,13 +221,13 @@ const RescueManagement = () => {
     if (!selectedCase) return;
     try {
       setIsSubmitting(true);
+      // POST /rescue/{id}/verify only accepts { status, rejection_rationale,
+      // severity, is_urgent, media_evidence }. Location/condition/reporter
+      // fields are NOT editable via this endpoint, so we only send the fields
+      // the backend can actually persist (no silent no-op).
       await rescueService.updateRescueCase(selectedCase.id, {
-        location_address: formData.location_address,
-        location_landmark: formData.location_landmark,
         severity: formData.severity,
         is_urgent: formData.is_urgent,
-        physical_condition: formData.physical_condition,
-        reporter_notes: formData.reporter_notes,
       });
       addToast("Rescue case updated successfully!", "success");
       setIsEditModalOpen(false);
@@ -222,6 +253,32 @@ const RescueManagement = () => {
       notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to delete rescue case", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAssignCoordinator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCase) return;
+    if (!assignForm.coordinator_id) {
+      addToast("Select a rescue coordinator to assign.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await rescueService.assignCoordinator(
+        selectedCase.id,
+        assignForm.coordinator_id,
+        assignForm.notes || undefined
+      );
+      addToast("Rescue coordinator assigned successfully!", "success");
+      setIsAssignModalOpen(false);
+      setAssignForm({ coordinator_id: "", notes: "" });
+      fetchRescueCases();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to assign coordinator", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -320,6 +377,11 @@ const RescueManagement = () => {
       render: rescueStatusBadge,
     },
     { key: "dispatch_agents", header: "Agents" },
+    {
+      key: "coordinator_id",
+      header: "Coordinator",
+      render: (_: any, row: any) => coordinatorLabel(row.coordinator_id),
+    },
     { key: "created_at", header: "Reported" },
   ];
 
@@ -386,13 +448,17 @@ const RescueManagement = () => {
           }}
           onEdit={(item: any) => {
             setSelectedCase(item);
+            const sevRaw = String(item.severity || "").toLowerCase();
+            const severity = SEVERITY_OPTIONS.some((s) => s.value === sevRaw) ? sevRaw : "high";
+            const condRaw = String(item.physical_condition || "").toLowerCase();
+            const physical_condition = PHYSICAL_CONDITION_OPTIONS.some((c) => c.value === condRaw) ? condRaw : "unknown";
             setFormData({
               location_address: item.location_address !== "-" ? String(item.location_address || "") : "",
               location_landmark: item.location_landmark !== "-" ? String(item.location_landmark || "") : "",
-              severity: item.severity !== "-" ? String(item.severity || "High") : "High",
+              severity,
               is_urgent: item.is_urgent === "Yes",
               animal_count: Number(item.animal_count !== "-" ? item.animal_count : 1),
-              physical_condition: item.physical_condition !== "-" ? String(item.physical_condition || "Injured") : "Injured",
+              physical_condition,
               reporter_name: item.reporter_name !== "-" ? String(item.reporter_name || "") : "",
               reporter_phone: item.reporter_phone !== "-" ? String(item.reporter_phone || "") : "",
               reporter_notes: item.reporter_notes !== "-" ? String(item.reporter_notes || "") : "",
@@ -474,10 +540,9 @@ const RescueManagement = () => {
                 onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
                 style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
               >
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Critical">Critical</option>
+                {SEVERITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -493,28 +558,32 @@ const RescueManagement = () => {
           </div>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Physical Condition</label>
-            <input
-              type="text"
-              placeholder="e.g. Fractured leg, dehydrated"
+            <select
               value={formData.physical_condition}
               onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })}
               style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
+            >
+              {PHYSICAL_CONDITION_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Name</label>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Name *</label>
               <input
                 type="text"
+                required
                 value={formData.reporter_name}
                 onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })}
                 style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
               />
             </div>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Phone</label>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Phone *</label>
               <input
                 type="text"
+                required
                 value={formData.reporter_phone}
                 onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })}
                 style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
@@ -540,57 +609,29 @@ const RescueManagement = () => {
       {/* Edit Modal */}
       <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Update Rescue Case">
         <form onSubmit={handleUpdateCase} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#1E40AF" }}>
+            Location, physical condition and reporter fields are fixed at creation time and cannot be edited here.
+          </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Location Address</label>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Severity</label>
+            <select
+              value={formData.severity}
+              onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+            >
+              {SEVERITY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 600, color: "#334155" }}>
             <input
-              type="text"
-              value={formData.location_address}
-              onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+              type="checkbox"
+              checked={formData.is_urgent}
+              onChange={(e) => setFormData({ ...formData, is_urgent: e.target.checked })}
             />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Landmark</label>
-            <input
-              type="text"
-              value={formData.location_landmark}
-              onChange={(e) => setFormData({ ...formData, location_landmark: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Severity</label>
-              <select
-                value={formData.severity}
-                onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-              >
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Critical">Critical</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Physical Condition</label>
-              <input
-                type="text"
-                value={formData.physical_condition}
-                onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-              />
-            </div>
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Notes</label>
-            <textarea
-              rows={3}
-              value={formData.reporter_notes}
-              onChange={(e) => setFormData({ ...formData, reporter_notes: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
-          </div>
+            Urgent case
+          </label>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsEditModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
             <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Saving..." : "Save Changes"}</button>
@@ -601,6 +642,7 @@ const RescueManagement = () => {
       {/* View Modal */}
       <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Rescue Case Details">
         {selectedCase && (
+          <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", maxHeight: "70vh", overflowY: "auto" }}>
             <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Ticket Number</div>
@@ -702,6 +744,13 @@ const RescueManagement = () => {
             )}
 
             <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Assigned Coordinator</div>
+              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>
+                {selectedCase.coordinator_id ? coordinatorLabel(selectedCase.coordinator_id) : "Not assigned"}
+              </div>
+            </div>
+
+            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Created At</div>
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.created_at || "-"}</div>
             </div>
@@ -765,7 +814,63 @@ const RescueManagement = () => {
               </div>
             </div>
           </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+            <Can permission="edit_rescues">
+              <button
+                onClick={() => {
+                  setAssignForm({
+                    coordinator_id: selectedCase.coordinator_id || "",
+                    notes: "",
+                  });
+                  setIsAssignModalOpen(true);
+                }}
+                style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <FaPlus size={12} /> Assign Coordinator
+              </button>
+            </Can>
+            <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", cursor: "pointer" }}>Close</button>
+          </div>
+          </>
         )}
+      </Modal>
+
+      {/* Assign Coordinator Modal */}
+      <Modal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} title={`Assign Coordinator${selectedCase?.ticket_number ? ` — ${selectedCase.ticket_number}` : ""}`}>
+        <form onSubmit={handleAssignCoordinator} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {coordinators.length === 0 && (
+            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#92400E" }}>
+              No rescue coordinators found in the user directory. Add a user with the rescue coordinator role first.
+            </div>
+          )}
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Rescue Coordinator *</label>
+            <select
+              required
+              value={assignForm.coordinator_id}
+              onChange={(e) => setAssignForm({ ...assignForm, coordinator_id: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+            >
+              <option value="">Select a coordinator...</option>
+              {coordinators.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.full_name || c.email || c.id}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Notes (optional)</label>
+            <textarea
+              rows={3}
+              value={assignForm.notes}
+              onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
+          </div>
+        </form>
       </Modal>
 
       {/* Delete Modal */}

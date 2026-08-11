@@ -492,6 +492,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ...perm("medical", "view", "create", "edit"),
     ...perm("shelters", "view", "create", "edit", "manage"),
     ...perm("inventory", "view", "create", "edit", "export", "manage"),
+    ...perm("lost_found", "view", "create", "delete", "manage"),
     ...perm("reports", "view", "export"),
     ...perm("notifications", "view"),
     "view_shelter_data",

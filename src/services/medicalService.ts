@@ -118,6 +118,13 @@ export const medicalService = {
       decision_notes: pick(data, "decision_notes", "notes"),
     };
     const response = await api.post(`/medical/clearance/${dogId}`, payload);
+    await publishActionEvent({
+      module: "medical",
+      action: "approve",
+      title: "Medical Clearance Issued",
+      message: `Medical clearance (${String(payload.status)}) issued for dog ${dogId}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "veterinarian", "shelter_manager"],
+    });
     return response.data;
   },
 

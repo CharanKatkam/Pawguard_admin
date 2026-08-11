@@ -359,21 +359,33 @@ const RescueRequests = () => {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
               {selectedRequest.status === "reported" && (
                 <>
-                  <button onClick={() => { handleVerify(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Verify</button>
-                  <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Reject</button>
+                  <Can permission="approve_rescue_requests">
+                    <button onClick={() => { handleVerify(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Verify</button>
+                  </Can>
+                  <Can permission="edit_rescue_requests">
+                    <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Reject</button>
+                  </Can>
                 </>
               )}
               {["verified", "dispatched", "located"].includes(selectedRequest.status) && (
-                <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Escalate</button>
+                <Can permission="edit_rescue_requests">
+                  <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Escalate</button>
+                </Can>
               )}
               {selectedRequest.status === "dispatched" && (
-                <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Located</button>
+                <Can permission="edit_rescues">
+                  <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Located</button>
+                </Can>
               )}
               {selectedRequest.status === "located" && (
-                <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Secured</button>
+                <Can permission="edit_rescues">
+                  <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Secured</button>
+                </Can>
               )}
               {selectedRequest.status === "rescued" && (
-                <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Admit to Centre</button>
+                <Can permission="edit_rescues">
+                  <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Admit to Centre</button>
+                </Can>
               )}
               <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Close</button>
             </div>

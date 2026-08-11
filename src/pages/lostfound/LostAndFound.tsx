@@ -5,6 +5,7 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
+import { usePermissions } from "../../context/PermissionContext";
 import {
   FaSearchLocation,
   FaCheckCircle,
@@ -28,8 +29,10 @@ import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
 
 const PAGE_SIZE = 8;
 
-const SPECIES_OPTIONS: Species[] = ["dog", "cat", "bird", "rabbit", "other"];
+const SPECIES_OPTIONS: Species[] = ["dog"];
 const STATUS_OPTIONS = ["active", "resolved", "expired"];
+
+type CardFilter = "total" | "lost" | "found" | "resolved";
 
 const toNumOrNull = (v: string): number | null => {
   const t = v.trim();
@@ -153,6 +156,26 @@ const speciesChip = (species?: string) => {
   );
 };
 
+const kindBadge = (kind?: string) => {
+  const isLost = String(kind || "").toLowerCase() === "lost";
+  return (
+    <span
+      style={{
+        padding: "2px 8px",
+        borderRadius: "12px",
+        fontSize: "11px",
+        fontWeight: 700,
+        textTransform: "capitalize",
+        display: "inline-block",
+        background: isLost ? "#FEF2F2" : "#FFFBEB",
+        color: isLost ? "#EF4444" : "#B45309",
+      }}
+    >
+      {isLost ? "Lost" : "Found"}
+    </span>
+  );
+};
+
 interface DetailField {
   label: string;
   value: string;
@@ -195,11 +218,14 @@ interface RegistryMatch {
   claim_reviewed_at?: string | null;
   verification_notes?: string | null;
   match_reasons?: string[];
+  lost_report?: RegistryReport | null;
+  found_report?: RegistryReport | null;
   [key: string]: unknown;
 }
 
 const LostAndFound = () => {
   const { addToast } = useToast();
+  const { can, role } = usePermissions();
 
   const [activeTab, setActiveTab] = useState<ReportKind>("lost");
   const [reports, setReports] = useState<RegistryReport[]>([]);
@@ -211,7 +237,7 @@ const LostAndFound = () => {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [speciesFilter, setSpeciesFilter] = useState("");
+  const [cardFilter, setCardFilter] = useState<CardFilter>("total");
 
   const [stats, setStats] = useState({ total: 0, lost: 0, found: 0, resolved: 0 });
 
@@ -279,40 +305,68 @@ const LostAndFound = () => {
     setFormError(null);
   };
 
+  const combined = cardFilter === "total" || cardFilter === "resolved";
+  const effectiveStatus = cardFilter === "resolved" ? "resolved" : statusFilter;
+
   const fetchReports = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params: Record<string, unknown> = { page, page_size: PAGE_SIZE };
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
-      if (statusFilter) params.status = statusFilter;
-      if (speciesFilter) params.species = speciesFilter;
-      const res =
-        activeTab === "lost"
-          ? await lostFoundService.getLostReports(params)
-          : await lostFoundService.getFoundReports(params);
-      setReports((res.data || []) as RegistryReport[]);
-      setTotalCount(res.meta?.total ?? (res.data?.length || 0));
+      if (effectiveStatus) params.status = effectiveStatus;
+
+      let rows: RegistryReport[] = [];
+      let total = 0;
+      if (combined) {
+        const [lostRes, foundRes] = await Promise.all([
+          lostFoundService.getLostReports(params),
+          lostFoundService.getFoundReports(params),
+        ]);
+        const lostRows = (lostRes.data || []).map((r) => ({ ...r, _kind: "lost" as const }));
+        const foundRows = (foundRes.data || []).map((r) => ({ ...r, _kind: "found" as const }));
+        rows = [...lostRows, ...foundRows] as RegistryReport[];
+        total =
+          (lostRes.meta?.total ?? lostRows.length) + (foundRes.meta?.total ?? foundRows.length);
+      } else {
+        const res =
+          activeTab === "lost"
+            ? await lostFoundService.getLostReports(params)
+            : await lostFoundService.getFoundReports(params);
+        rows = ((res.data || []) as RegistryReport[]).map((r) => ({
+          ...r,
+          _kind: activeTab,
+        }));
+        total = res.meta?.total ?? rows.length;
+      }
+      const dogOnly = rows.filter((r) => r.species === "dog");
+      setReports(dogOnly as RegistryReport[]);
+      setTotalCount(total);
     } catch (err) {
       setError(extractError(err, "Failed to load lost & found listings."));
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, debouncedSearch, statusFilter, speciesFilter]);
+  }, [activeTab, page, debouncedSearch, effectiveStatus, combined]);
 
   const fetchStats = useCallback(async () => {
     try {
-      const [lostRes, foundRes] = await Promise.all([
-        lostFoundService.getLostReports({ page_size: 1000 }),
-        lostFoundService.getFoundReports({ page_size: 1000 }),
+      // The backend caps page_size at 100, so requesting 1000 records fails
+      // (422). Use a single row per call and read `meta.total`, plus a
+      // status-filtered call for the resolved count — all real backend data.
+      const [lostRes, foundRes, lostResolvedRes, foundResolvedRes] = await Promise.all([
+        lostFoundService.getLostReports({ page: 1, page_size: 1 }),
+        lostFoundService.getFoundReports({ page: 1, page_size: 1 }),
+        lostFoundService.getLostReports({ page: 1, page_size: 1, status: "resolved" }),
+        lostFoundService.getFoundReports({ page: 1, page_size: 1, status: "resolved" }),
       ]);
-      const lost = lostRes.data || [];
-      const found = foundRes.data || [];
+      const lost = lostRes.meta.total;
+      const found = foundRes.meta.total;
       setStats({
-        total: lost.length + found.length,
-        lost: lost.length,
-        found: found.length,
-        resolved: [...lost, ...found].filter((r) => r.status === "resolved").length,
+        total: lost + found,
+        lost,
+        found,
+        resolved: lostResolvedRes.meta.total + foundResolvedRes.meta.total,
       });
     } catch {
       // Statistics are best-effort; list errors surface through the table state.
@@ -346,12 +400,23 @@ const LostAndFound = () => {
 
   const handleTabChange = (tab: ReportKind) => {
     setActiveTab(tab);
+    setCardFilter(tab);
+    setPage(1);
+  };
+
+  const handleCardClick = (filter: CardFilter) => {
+    setCardFilter(filter);
+    if (filter === "lost" || filter === "found") setActiveTab(filter);
+    setStatusFilter(filter === "resolved" ? "resolved" : "");
     setPage(1);
   };
 
   const openDetails = (row: RegistryReport) => {
     setSelectedReport(row);
-    setSelectedReportKind(activeTab);
+    const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
+    setSelectedReportKind(
+      rowKind === "found" || rowKind === "lost" ? rowKind : activeTab
+    );
   };
 
   const closeDetails = () => {
@@ -456,8 +521,12 @@ const LostAndFound = () => {
     if (!selectedReport) return;
     try {
       setBroadcasting(true);
-      await lostFoundService.broadcastLostPetAlert(selectedReport.id);
-      addToast("Lost pet alert broadcast to nearby users.", "success");
+      const res = await lostFoundService.broadcastLostPetAlert(selectedReport.id);
+      const message =
+        (res && typeof res === "object"
+          ? (res as { message?: unknown }).message
+          : undefined) || "Lost pet alert broadcast successfully.";
+      addToast(String(message), "success");
     } catch (err) {
       addToast(extractError(err, "Failed to broadcast lost pet alert"), "error");
     } finally {
@@ -473,7 +542,13 @@ const LostAndFound = () => {
     setMatchesError(null);
     try {
       const res = await lostFoundService.getReportMatches(reportId, kind);
-      setMatches(res.data || []);
+      const allMatches = (res.data || []) as RegistryMatch[];
+      const dogOnly = allMatches.filter((m) => {
+        const linked = kind === "lost" ? m.found_report : m.lost_report;
+        if (!linked || !linked.species) return true;
+        return linked.species === "dog";
+      });
+      setMatches(dogOnly);
     } catch (err) {
       setMatchesError(extractError(err, "Failed to load matches."));
     } finally {
@@ -483,8 +558,10 @@ const LostAndFound = () => {
 
   const openMatches = (report: RegistryReport) => {
     setSelectedReport(report);
-    setSelectedReportKind(activeTab);
-    void refetchMatches(report.id, activeTab, true);
+    const rowKind = (report as RegistryReport & { _kind?: unknown })._kind;
+    const kind = rowKind === "found" || rowKind === "lost" ? rowKind : activeTab;
+    setSelectedReportKind(kind);
+    void refetchMatches(report.id, kind, true);
   };
 
   const closeMatches = () => {
@@ -537,8 +614,12 @@ const LostAndFound = () => {
     if (!resolveTarget) return;
     try {
       setActionBusy(true);
-      await lostFoundService.resolveMatch(resolveTarget.id);
-      addToast("Match resolved. Report marked as reunited.", "success");
+      const res = await lostFoundService.resolveMatch(resolveTarget.id, true);
+      const message =
+        (res && typeof res === "object"
+          ? (res as { message?: unknown }).message
+          : undefined) || "Match resolved. Report marked as resolved.";
+      addToast(String(message), "success");
       setResolveTarget(null);
       if (selectedReport) {
         await refetchMatches(selectedReport.id, selectedReportKind, false);
@@ -633,9 +714,73 @@ const LostAndFound = () => {
     { key: "status", header: "Status", render: (val) => statusBadge(val) },
   ];
 
-  const columns = activeTab === "lost" ? lostColumns : foundColumns;
+  const combinedColumns: Column[] = [
+    {
+      key: "id",
+      header: "Report #",
+      render: (_v, row) => (
+        <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#475569" }}>
+          {shortId(row.id)}
+        </span>
+      ),
+    },
+    {
+      key: "_kind",
+      header: "Type",
+      render: (_v, row) => kindBadge(row._kind),
+    },
+    {
+      key: "_name",
+      header: "Animal",
+      render: (_v, row) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>
+            {row.pet_name || row.breed_observed || "-"}
+          </div>
+          <div style={{ marginTop: "2px" }}>{speciesChip(row.species)}</div>
+        </div>
+      ),
+    },
+    {
+      key: "_breed",
+      header: "Breed",
+      render: (_v, row) => row.breed || row.breed_observed || "-",
+    },
+    {
+      key: "_color",
+      header: "Color",
+      render: (_v, row) => row.color || row.color_observed || "-",
+    },
+    { key: "location_address", header: "Location" },
+    {
+      key: "_date",
+      header: "Reported Date/Time",
+      render: (_v, row) => (
+        <span style={{ whiteSpace: "nowrap" }}>
+          {formatDate(row.lost_at || row.found_at)}
+        </span>
+      ),
+    },
+    {
+      key: "user",
+      header: "Reporter",
+      render: (_v, row) => (
+        <span>
+          {row.user?.full_name || row.user?.email || "Not available"}
+          {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
+        </span>
+      ),
+    },
+    { key: "status", header: "Status", render: (val) => statusBadge(val) },
+  ];
 
-  const hasActiveFilters = Boolean(search || statusFilter || speciesFilter);
+  const columns = combined
+    ? combinedColumns
+    : activeTab === "lost"
+      ? lostColumns
+      : foundColumns;
+
+  const hasActiveFilters = Boolean(search || statusFilter);
 
   const detailFields: DetailField[] = selectedReport
     ? (() => {
@@ -773,10 +918,38 @@ const LostAndFound = () => {
           marginBottom: "24px",
         }}
       >
-        <StatCard title="Total Listings" value={stats.total} icon={<FaSearchLocation />} color="#2563EB" />
-        <StatCard title="Lost Pet Reports" value={stats.lost} icon={<FaExclamationCircle />} color="#EF4444" />
-        <StatCard title="Found Pet Reports" value={stats.found} icon={<FaSearchLocation />} color="#F59E0B" />
-        <StatCard title="Resolved (Reunited)" value={stats.resolved} icon={<FaCheckCircle />} color="#10B981" />
+        <StatCard
+          title="Total Listings"
+          value={stats.total}
+          icon={<FaSearchLocation />}
+          color="#2563EB"
+          onClick={() => handleCardClick("total")}
+          selected={cardFilter === "total"}
+        />
+        <StatCard
+          title="Lost Pet Reports"
+          value={stats.lost}
+          icon={<FaExclamationCircle />}
+          color="#EF4444"
+          onClick={() => handleCardClick("lost")}
+          selected={cardFilter === "lost"}
+        />
+        <StatCard
+          title="Found Pet Reports"
+          value={stats.found}
+          icon={<FaSearchLocation />}
+          color="#F59E0B"
+          onClick={() => handleCardClick("found")}
+          selected={cardFilter === "found"}
+        />
+        <StatCard
+          title="Resolved (Reunited)"
+          value={stats.resolved}
+          icon={<FaCheckCircle />}
+          color="#10B981"
+          onClick={() => handleCardClick("resolved")}
+          selected={cardFilter === "resolved"}
+        />
       </div>
 
       <div
@@ -835,6 +1008,7 @@ const LostAndFound = () => {
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value);
+            if (cardFilter === "resolved") setCardFilter("total");
             setPage(1);
           }}
           style={{ ...commonInputStyle, width: "auto", minWidth: "150px" }}
@@ -847,28 +1021,12 @@ const LostAndFound = () => {
           ))}
         </select>
 
-        <select
-          value={speciesFilter}
-          onChange={(e) => {
-            setSpeciesFilter(e.target.value);
-            setPage(1);
-          }}
-          style={{ ...commonInputStyle, width: "auto", minWidth: "140px" }}
-        >
-          <option value="">All Species</option>
-          {SPECIES_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {titleCase(s)}
-            </option>
-          ))}
-        </select>
-
         {hasActiveFilters && (
           <button
             onClick={() => {
               setSearch("");
               setStatusFilter("");
-              setSpeciesFilter("");
+              setCardFilter("total");
               setPage(1);
             }}
             style={{
@@ -885,6 +1043,23 @@ const LostAndFound = () => {
             Clear Filters
           </button>
         )}
+      </div>
+
+      <div
+        style={{
+          fontSize: "13px",
+          fontWeight: 700,
+          color: "#64748B",
+          margin: "0 0 10px",
+        }}
+      >
+        {cardFilter === "resolved"
+          ? "Viewing: Resolved / reunited records"
+          : cardFilter === "lost"
+            ? "Viewing: Lost dog reports"
+            : cardFilter === "found"
+              ? "Viewing: Found dog reports"
+              : "Viewing: All lost & found records"}
       </div>
 
       <DataTable
@@ -925,7 +1100,7 @@ const LostAndFound = () => {
                 flexWrap: "wrap",
               }}
             >
-              <Can permission="manage_lost_found">
+              <Can permission="view_lost_found">
                 <button
                   onClick={() => openMatches(selectedReport)}
                   style={{
@@ -944,9 +1119,11 @@ const LostAndFound = () => {
                 >
                   <FaHandshake /> View Matches
                 </button>
+              </Can>
+              <Can permission="manage_lost_found">
                 {selectedReportKind === "lost" && (
                   <button
-                    onClick={handleBroadcast}
+                    onClick={() => void handleBroadcast()}
                     disabled={broadcasting}
                     style={{
                       background: "#2563EB",
@@ -1087,6 +1264,23 @@ const LostAndFound = () => {
             </div>
           }
         >
+          {role === "rescue_centre_admin" && (
+            <div
+              style={{
+                marginBottom: "12px",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                background: "#EFF6FF",
+                border: "1px solid #BFDBFE",
+                color: "#1E40AF",
+                fontSize: "12px",
+                fontWeight: 600,
+              }}
+            >
+              Review these matches against your rescue cases to identify animals that may relate
+              to ongoing rescue operations.
+            </div>
+          )}
           {matchesLoading ? (
             <div style={{ padding: "40px", textAlign: "center", color: "#2563EB" }}>
               <FaSpinner size={24} style={{ animation: "spin 1s linear infinite" }} />
@@ -1119,6 +1313,8 @@ const LostAndFound = () => {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {matches.map((match) => {
+                const canManageMatch = can("manage", "lost_found");
+                const reportResolved = selectedReport?.status === "resolved";
                 const canClaim =
                   match.status === "pending" && !match.claim_submitted_at;
                 const canReview =
@@ -1126,7 +1322,10 @@ const LostAndFound = () => {
                   Boolean(match.claim_submitted_at) &&
                   !match.claim_reviewed_at;
                 const canResolve =
-                  match.status === "confirmed" && !match.claim_reviewed_at;
+                  match.status === "confirmed" && Boolean(match.claim_reviewed_at);
+                const linkedReport = (
+                  selectedReportKind === "lost" ? match.found_report : match.lost_report
+                ) as RegistryReport | null | undefined;
                 return (
                   <div
                     key={match.id}
@@ -1209,7 +1408,78 @@ const LostAndFound = () => {
                       </div>
                     )}
 
-                    {canClaim || canReview || canResolve ? (
+                    {linkedReport && (
+                      <div
+                        style={{
+                          marginTop: "10px",
+                          fontSize: "12px",
+                          color: "#334155",
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          background: "#F8FAFC",
+                          border: "1px solid #E2E8F0",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            color: "#475569",
+                            textTransform: "uppercase",
+                            fontSize: "10px",
+                            letterSpacing: "0.04em",
+                            marginBottom: "6px",
+                          }}
+                        >
+                          {selectedReportKind === "lost" ? "Linked Found Report" : "Linked Lost Report"}
+                        </div>
+                        <div style={{ display: "grid", gap: "4px" }}>
+                          {selectedReportKind === "found" && (
+                            <>
+                              <div>
+                                <strong>Pet:</strong> {linkedReport.pet_name || "-"}
+                                {" \u00b7 "}
+                                {speciesChip(linkedReport.species)}
+                              </div>
+                              {linkedReport.microchip_id && (
+                                <div>
+                                  <strong>Microchip:</strong> {linkedReport.microchip_id}
+                                </div>
+                              )}
+                              <div>
+                                <strong>Breed:</strong> {linkedReport.breed || "-"} ·{" "}
+                                <strong>Color:</strong> {linkedReport.color || "-"}
+                              </div>
+                            </>
+                          )}
+                          {selectedReportKind === "lost" && (
+                            <>
+                              <div>
+                                <strong>Breed:</strong> {linkedReport.breed_observed || "-"} ·{" "}
+                                <strong>Color:</strong> {linkedReport.color_observed || "-"}
+                              </div>
+                            </>
+                          )}
+                          <div>
+                            <strong>Location:</strong> {linkedReport.location_address || "-"}
+                          </div>
+                          <div>
+                            <strong>Date/Time:</strong>{" "}
+                            {selectedReportKind === "lost"
+                              ? formatDate(linkedReport.found_at)
+                              : formatDate(linkedReport.lost_at)}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <strong>Status:</strong> {statusBadge(linkedReport.status)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {reportResolved ? (
+                      <div style={{ marginTop: "10px", fontSize: "12px", color: "#94A3B8" }}>
+                        Report is already resolved — no further actions available.
+                      </div>
+                    ) : canClaim || canReview || canResolve ? (
                       <div style={{ display: "flex", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
                         {canClaim && (
                           <button
@@ -1217,15 +1487,16 @@ const LostAndFound = () => {
                               setClaimNotes("");
                               setClaimTarget(match);
                             }}
+                            disabled={!canManageMatch}
                             style={{
                               padding: "7px 14px",
                               borderRadius: "8px",
-                              background: "#2563EB",
+                              background: canManageMatch ? "#2563EB" : "#94A3B8",
                               color: "#FFFFFF",
                               border: "none",
                               fontSize: "12px",
                               fontWeight: 600,
-                              cursor: "pointer",
+                              cursor: canManageMatch ? "pointer" : "not-allowed",
                             }}
                           >
                             Submit Claim
@@ -1237,15 +1508,16 @@ const LostAndFound = () => {
                               setReviewNotes("");
                               setReviewTarget(match);
                             }}
+                            disabled={!canManageMatch}
                             style={{
                               padding: "7px 14px",
                               borderRadius: "8px",
-                              background: "#7C3AED",
+                              background: canManageMatch ? "#7C3AED" : "#94A3B8",
                               color: "#FFFFFF",
                               border: "none",
                               fontSize: "12px",
                               fontWeight: 600,
-                              cursor: "pointer",
+                              cursor: canManageMatch ? "pointer" : "not-allowed",
                             }}
                           >
                             Review Claim
@@ -1254,15 +1526,16 @@ const LostAndFound = () => {
                         {canResolve && (
                           <button
                             onClick={() => setResolveTarget(match)}
+                            disabled={!canManageMatch}
                             style={{
                               padding: "7px 14px",
                               borderRadius: "8px",
-                              background: "#10B981",
+                              background: canManageMatch ? "#10B981" : "#94A3B8",
                               color: "#FFFFFF",
                               border: "none",
                               fontSize: "12px",
                               fontWeight: 600,
-                              cursor: "pointer",
+                              cursor: canManageMatch ? "pointer" : "not-allowed",
                             }}
                           >
                             Resolve Match
@@ -1485,7 +1758,7 @@ const LostAndFound = () => {
               Confirm resolve?
             </h4>
             <p style={{ margin: 0, fontSize: "14px", color: "#64748B", lineHeight: 1.5 }}>
-              Resolving this match marks it / the associated report as reunited and closes the
+              Resolving this match marks the associated report as resolved and closes the
               workflow.
             </p>
           </div>
@@ -1576,7 +1849,8 @@ const LostAndFound = () => {
                 onChange={(e) =>
                   setFormData({ ...formData, species: e.target.value as Species })
                 }
-                style={commonInputStyle}
+                disabled
+                style={{ ...commonInputStyle, background: "#F1F5F9", color: "#475569" }}
               >
                 {SPECIES_OPTIONS.map((s) => (
                   <option key={s} value={s}>

@@ -12,8 +12,11 @@ import {
   FaClipboardList,
   FaCheckCircle,
   FaExclamationTriangle,
+  FaClock,
+  FaTruck,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import rescueService from "../../../services/rescueService";
 import { useDataSync } from "../../../utils/dataSync";
 
 interface RescueDashboardData {
@@ -23,6 +26,20 @@ interface RescueDashboardData {
   rescued: number;
   recent_calls: any[];
 }
+
+const unwrapList = (v: any): any[] =>
+  Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
+
+const formatAssigned = (c: any) => ({
+  id: c.id || c.ticket_number || "",
+  ticket: c.ticket_number || c.id || "-",
+  reporter: c.reporter_name || c.reporter || "-",
+  animal_count: c.animal_count ?? "-",
+  status: c.status || "-",
+  location: c.location_address || c.location || "-",
+  severity: c.severity || "-",
+  created_at: c.created_at ? new Date(c.created_at).toLocaleString() : "-",
+});
 
 const RescueCoordinatorDashboard = () => {
   const navigate = useNavigate();
@@ -38,6 +55,18 @@ const RescueCoordinatorDashboard = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [assignedCases, setAssignedCases] = useState<any[]>([]);
+
+  // Cases where this coordinator is the assigned coordinator — only those are
+  // shown under "Assigned to You" (backend `assigned_to_me` capability).
+  const fetchAssignedCases = async () => {
+    try {
+      const response = await rescueService.getRescueCases({ assigned_to_me: true });
+      setAssignedCases(unwrapList(response).map(formatAssigned));
+    } catch {
+      setAssignedCases([]);
+    }
+  };
 
   const fetchDashboard = async () => {
     try {
@@ -68,9 +97,13 @@ const RescueCoordinatorDashboard = () => {
 
   useEffect(() => {
     fetchDashboard();
+    fetchAssignedCases();
   }, []);
 
-  useDataSync(fetchDashboard);
+  useDataSync(() => {
+    fetchDashboard();
+    fetchAssignedCases();
+  });
 
   const stats = [
     {
@@ -81,18 +114,18 @@ const RescueCoordinatorDashboard = () => {
       icon: <FaExclamationTriangle />,
     },
     {
+      title: "My Assigned Cases",
+      value: loading ? "..." : assignedCases.length,
+      trend: "Assigned to You",
+      color: "#2563EB",
+      icon: <FaClipboardList />,
+    },
+    {
       title: "Pending Cases",
       value: loading ? "..." : dashboardData.pending,
       trend: "Awaiting Dispatch",
       color: "#F59E0B",
-      icon: <FaClipboardList />,
-    },
-    {
-      title: "Agents Assigned",
-      value: loading ? "..." : dashboardData.dispatched,
-      trend: "Currently Assigned",
-      color: "#2563EB",
-      icon: <FaAmbulance />,
+      icon: <FaClock />,
     },
     {
       title: "Animals Rescued",
@@ -107,9 +140,48 @@ const RescueCoordinatorDashboard = () => {
     { key: "ticket", title: "Ticket" },
     { key: "reporter", title: "Reporter" },
     { key: "animal_count", title: "Animals" },
-    { key: "status", title: "Status" },
+    { key: "location", title: "Location" },
+    {
+      key: "severity",
+      title: "Priority",
+      render: (val: string) => (
+        <span style={{ textTransform: "uppercase", fontWeight: 600, fontSize: "12px", color: val === "critical" ? "#DC2626" : val === "high" ? "#EA580C" : val === "medium" ? "#F59E0B" : "#16A34A" }}>
+          {val || "-"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      title: "Status",
+      render: (val: string) => (
+        <span style={{ textTransform: "capitalize", fontWeight: 600, fontSize: "12px" }}>{val || "-"}</span>
+      ),
+    },
     { key: "created_at", title: "Reported At" },
   ];
+
+  const rowActions = (row: any) => (
+    <button
+      onClick={() => navigate(`/rescue-dispatch?case_id=${encodeURIComponent(row.id)}`)}
+      disabled={!["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase())}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 12px",
+        borderRadius: "6px",
+        border: "none",
+        background: "#2563EB",
+        color: "#FFF",
+        fontSize: "12px",
+        fontWeight: 600,
+        cursor: "pointer",
+        opacity: ["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase()) ? 1 : 0.45,
+      }}
+    >
+      <FaTruck /> Assign Team
+    </button>
+  );
 
   return (
     <div>
@@ -184,7 +256,7 @@ const RescueCoordinatorDashboard = () => {
           title="Assign Agent"
           subtitle="Dispatch Field Agent"
           color="#2563EB"
-          onClick={() => navigate("/users")}
+          onClick={() => navigate("/rescue-dispatch")}
         />
 
         <QuickActionCard
@@ -236,7 +308,7 @@ const RescueCoordinatorDashboard = () => {
               fontWeight: 700,
             }}
           >
-            Recent Rescue Requests
+            My Assigned Cases
           </h3>
 
           {loading && (
@@ -248,7 +320,15 @@ const RescueCoordinatorDashboard = () => {
 
         <DataTable
           columns={columns}
-          data={dashboardData.recent_calls}
+          data={assignedCases}
+          loading={loading}
+          error={error}
+          onRetry={() => {
+            fetchAssignedCases();
+            fetchDashboard();
+          }}
+          emptyMessage="No rescue cases are assigned to you yet."
+          renderRowActions={rowActions}
         />
       </div>
     </div>

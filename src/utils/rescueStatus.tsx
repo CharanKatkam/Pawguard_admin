@@ -67,7 +67,7 @@ export const dispatchStage = (req?: {
   }
   switch (status) {
     case "verified":
-      return { label: "Coordinator Assigned", bg: "#EFF6FF", color: "#2563EB" };
+      return { label: "Awaiting Dispatch", bg: "#EFF6FF", color: "#2563EB" };
     case "dispatched":
       return { label: "Dispatched", bg: "#F5F3FF", color: "#7C3AED" };
     case "located":

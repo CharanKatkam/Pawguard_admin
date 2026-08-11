@@ -12,12 +12,20 @@ import {
   FaCertificate,
   FaDollarSign,
   FaLock,
+  FaAmbulance,
 } from "react-icons/fa";
 import { useNotifications } from "../../hooks/useNotifications";
 import DashboardSkeleton from "./DashboardSkeleton";
 
 const typeIcon: Record<string, React.ReactNode> = {
   emergency: <FaExclamationTriangle />,
+  rescue: <FaAmbulance />,
+  shelter: <FaBuilding />,
+  shelter_transfer: <FaBuilding />,
+  transfer_requested: <FaBuilding />,
+  placement_requested: <FaBuilding />,
+  lost_found: <FaPaw />,
+  lost_pet_alert: <FaPaw />,
   medical: <FaStethoscope />,
   adoption: <FaHeart />,
   volunteer: <FaUsers />,
@@ -35,11 +43,13 @@ const typeIcon: Record<string, React.ReactNode> = {
 
 const typeColor = (type: string): string => {
   if (/emergency|rejected|deleted/.test(type)) return "#EF4444";
+  if (/rescue|located|dispatched|secured|admitted/.test(type)) return "#7C3AED";
   if (/medical|animal/.test(type)) return "#06B6D4";
   if (/adoption|approved|certificate/.test(type)) return "#EC4899";
   if (/volunteer/.test(type)) return "#F59E0B";
   if (/finance/.test(type)) return "#10B981";
-  if (/shelter|inventory|user|role/.test(type)) return "#2563EB";
+  if (/shelter|inventory|user|role|transfer|placement/.test(type)) return "#2563EB";
+  if (/lost/.test(type)) return "#F59E0B";
   return "#64748B";
 };
 

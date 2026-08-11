@@ -1,6 +1,7 @@
 import api from "../api/axios";
+import { publishActionEvent } from "../utils/eventSystem";
 
-export type Species = "dog" | "cat" | "bird" | "rabbit" | "other";
+export type Species = "dog";
 export type ReportStatus = "active" | "resolved" | "expired";
 export type MatchStatus = "pending" | "confirmed" | "rejected";
 export type ReportKind = "lost" | "found";
@@ -72,6 +73,8 @@ export interface LostFoundMatch {
   distance_km?: number | null;
   temporal_gap_days?: number | null;
   match_reasons?: string[];
+  lost_report?: LostReport | null;
+  found_report?: FoundReport | null;
   [key: string]: unknown;
 }
 
@@ -91,7 +94,6 @@ export interface PaginatedResponse<T> {
 export interface ListReportParams {
   search?: string;
   status?: string;
-  species?: string;
   page?: number;
   page_size?: number;
 }
@@ -170,12 +172,14 @@ const extractList = <T>(response: unknown): PaginatedResponse<T> => {
  */
 export const lostFoundService = {
   getLostReports: async (params?: ListReportParams): Promise<PaginatedResponse<LostReport>> => {
-    const response = await api.get("/lost-found/lost", { params });
+    // PawGuard is dog-only: always ask the backend for Dog records so any
+    // non-dog reports that exist are never surfaced.
+    const response = await api.get("/lost-found/lost", { params: { ...params, species: "dog" } });
     return extractList<LostReport>(response.data);
   },
 
   getFoundReports: async (params?: ListReportParams): Promise<PaginatedResponse<FoundReport>> => {
-    const response = await api.get("/lost-found/found", { params });
+    const response = await api.get("/lost-found/found", { params: { ...params, species: "dog" } });
     return extractList<FoundReport>(response.data);
   },
 
@@ -211,13 +215,24 @@ export const lostFoundService = {
     return response.data;
   },
 
-  resolveMatch: async (matchId: string) => {
-    const response = await api.post(`/lost-found/matches/${matchId}/resolve`);
+  resolveMatch: async (matchId: string, approve: boolean = true) => {
+    // The OpenAPI schema declares `approve` as a REQUIRED query parameter on
+    // POST /lost-found/matches/{match_id}/resolve. Omitting it returns 422.
+    const response = await api.post(`/lost-found/matches/${matchId}/resolve`, null, {
+      params: { approve },
+    });
     return response.data;
   },
 
   broadcastLostPetAlert: async (reportId: string) => {
     const response = await api.post(`/lost-found/lost/${reportId}/broadcast`);
+    await publishActionEvent({
+      module: "lost_found",
+      action: "create",
+      title: "Lost Pet Alert Broadcast",
+      message: `Lost pet alert ${reportId} broadcast across community channels.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager", "adoption_coordinator"],
+    });
     return response.data;
   },
 };

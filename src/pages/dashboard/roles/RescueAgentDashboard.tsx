@@ -11,6 +11,7 @@ import {
   FaClipboardCheck,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import rescueService from "../../../services/rescueService";
 import { useDataSync } from "../../../utils/dataSync";
 
 interface RescueDashboardData {
@@ -20,6 +21,25 @@ interface RescueDashboardData {
   rescued: number;
   recent_calls: any[];
 }
+
+const unwrapList = (v: any): any[] =>
+  Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
+
+const formatAssigned = (c: any) => ({
+  id: c.id || c.ticket_number || "",
+  ticket: c.ticket_number || c.id || "-",
+  reporter: c.reporter_name || c.reporter || "-",
+  animal_count: c.animal_count ?? "-",
+  status: c.status || "-",
+  location: c.location_address || c.location || "-",
+  severity: c.severity || "-",
+  driver: c.dispatch?.assigned_driver_id || "-",
+  vehicle: c.dispatch?.assigned_vehicle_id || c.dispatch?.vehicle_id || "-",
+  agents: Array.isArray(c.dispatch?.agents) && c.dispatch.agents.length > 0
+    ? c.dispatch.agents.map((a: any) => a.agent_id).join(", ")
+    : "-",
+  created_at: c.created_at ? new Date(c.created_at).toLocaleString() : "-",
+});
 
 const RescueAgentDashboard = () => {
   const navigate = useNavigate();
@@ -33,8 +53,21 @@ const RescueAgentDashboard = () => {
       recent_calls: [],
     });
 
+  const [assignedCases, setAssignedCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Only cases assigned to the current user (dispatch agents) — the shared
+  // /dashboards/rescue payload is NOT user-scoped and must not be presented
+  // as "Assigned to You".
+  const fetchAssignedCases = async () => {
+    try {
+      const response = await rescueService.getRescueCases({ assigned_to_me: true });
+      setAssignedCases(unwrapList(response).map(formatAssigned));
+    } catch {
+      setAssignedCases([]);
+    }
+  };
 
   const fetchDashboard = async () => {
     try {
@@ -65,14 +98,18 @@ const RescueAgentDashboard = () => {
 
   useEffect(() => {
     fetchDashboard();
+    fetchAssignedCases();
   }, []);
 
-  useDataSync(fetchDashboard);
+  useDataSync(() => {
+    fetchDashboard();
+    fetchAssignedCases();
+  });
 
   const stats = [
     {
       title: "Assigned Cases",
-      value: loading ? "..." : dashboardData.dispatched,
+      value: loading ? "..." : assignedCases.length,
       trend: "Assigned to You",
       color: "#2563EB",
       icon: <FaAmbulance />,
@@ -104,7 +141,25 @@ const RescueAgentDashboard = () => {
     { key: "ticket", title: "Ticket" },
     { key: "reporter", title: "Reporter" },
     { key: "animal_count", title: "Animals" },
-    { key: "status", title: "Status" },
+    { key: "location", title: "Location" },
+    {
+      key: "severity",
+      title: "Priority",
+      render: (val: string) => (
+        <span style={{ textTransform: "uppercase", fontWeight: 600, fontSize: "12px", color: val === "critical" ? "#DC2626" : val === "high" ? "#EA580C" : val === "medium" ? "#F59E0B" : "#16A34A" }}>
+          {val || "-"}
+        </span>
+      ),
+    },
+    { key: "driver", title: "Driver" },
+    { key: "vehicle", title: "Vehicle" },
+    {
+      key: "status",
+      title: "Status",
+      render: (val: string) => (
+        <span style={{ textTransform: "capitalize", fontWeight: 600, fontSize: "12px" }}>{val || "-"}</span>
+      ),
+    },
     { key: "created_at", title: "Reported At" },
   ];
 
@@ -245,7 +300,7 @@ const RescueAgentDashboard = () => {
 
         <DataTable
           columns={columns}
-          data={dashboardData.recent_calls}
+          data={assignedCases}
         />
       </div>
     </div>

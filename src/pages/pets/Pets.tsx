@@ -15,6 +15,7 @@ import {
   FaTrash,
 } from "react-icons/fa";
 import petService from "../../services/petService";
+import rescueService from "../../services/rescueService";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
@@ -30,6 +31,7 @@ const emptyPetForm = {
   weight: "",
   is_adoptable: false,
   status: "shelter",
+  rescue_case_id: "",
 };
 
 const cleanPayload = (data: Record<string, unknown>) => {
@@ -43,6 +45,7 @@ const cleanPayload = (data: Record<string, unknown>) => {
 const Pets = () => {
   const [dogs, setDogs] = useState<any[]>([]);
   const [allDogs, setAllDogs] = useState<any[]>([]);
+  const [rescueCases, setRescueCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -121,6 +124,21 @@ const Pets = () => {
     }
   };
 
+  // Rescue cases that produced a rescued/admitted animal, available to link
+  // to this dog's profile (backend DogProfile accepts nullable rescue_case_id).
+  const fetchRescueCases = async () => {
+    try {
+      const cases: any[] = [];
+      for (const status of ["rescued", "admitted"]) {
+        const response = await rescueService.getRescueCases({ status });
+        cases.push(...unwrapList(response));
+      }
+      setRescueCases(cases);
+    } catch {
+      setRescueCases([]);
+    }
+  };
+
   useEffect(() => {
     fetchDogs();
   }, [search, page]);
@@ -129,6 +147,10 @@ const Pets = () => {
     const t = setTimeout(() => fetchAllDogs(), 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    fetchRescueCases();
+  }, []);
 
   useEffect(() => {
     if (searchParams.get("action") === "register") {
@@ -153,6 +175,7 @@ const Pets = () => {
           age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
           weight: petForm.weight ? Number(petForm.weight) : undefined,
           is_adoptable: petForm.is_adoptable,
+          rescue_case_id: petForm.rescue_case_id || undefined,
         })
       );
       addToast(`Rescued pet "${petForm.name}" registered successfully!`, "success");
@@ -220,6 +243,7 @@ const Pets = () => {
       weight: dog.weight !== undefined && dog.weight !== "" ? String(dog.weight) : "",
       is_adoptable: !!dog.is_adoptable,
       status: DOG_STATUSES.includes(dog.status) ? dog.status : "shelter",
+      rescue_case_id: dog.rescue_case_id || "",
     });
     setIsEditModalOpen(true);
   };
@@ -601,6 +625,22 @@ const Pets = () => {
                 Ready for adoption
               </label>
             </div>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Linked Rescue Case</label>
+            <select
+              value={petForm.rescue_case_id}
+              onChange={(e) => setPetForm({ ...petForm, rescue_case_id: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            >
+              <option value="">No linked rescue case</option>
+              {rescueCases.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.ticket_number || c.id} — {c.animal_count ?? ""} {c.animal_count ? "animal(s)" : ""}{c.location_address ? ` @ ${c.location_address}` : ""}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>

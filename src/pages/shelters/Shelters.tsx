@@ -9,6 +9,7 @@ import Can from "../../components/rbac/Can";
 import { FaHome, FaBed, FaHospital, FaPlus, FaEdit, FaTrash } from "react-icons/fa";
 import shelterService from "../../services/shelterService";
 import petService from "../../services/petService";
+import ShelterTransfers from "../../components/shelters/ShelterTransfers";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const FACILITY_TYPES = ["shelter", "clinic", "foster_home", "partner"];
@@ -441,6 +442,8 @@ const Shelters = () => {
           }}
         />
       </div>
+
+      <ShelterTransfers />
 
       {/* Register New Facility Modal */}
       <Modal

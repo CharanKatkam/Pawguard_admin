@@ -220,6 +220,7 @@ function App() {
                   permission="view_lost_found"
                   allowedRoles={[
                     "super_admin",
+                    "rescue_centre_admin",
                     "shelter_manager",
                     "adoption_coordinator",
                   ]}

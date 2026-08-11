@@ -158,7 +158,20 @@ export const shelterService = {
       action: "approve",
       title: "Shelter Placement Approved",
       message: `Receiver facility confirmed placement ${transferId}.`,
-      targetRoles: ["super_admin", "shelter_manager"],
+      targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
+    });
+    return response.data;
+  },
+
+  // POST /shelter/transfers/{transfer_id}/confirm-sender
+  confirmTransferSender: async (transferId: string) => {
+    const response = await api.post(`/shelter/transfers/${transferId}/confirm-sender`);
+    await publishActionEvent({
+      module: "shelter",
+      action: "approve",
+      title: "Shelter Placement Confirmed",
+      message: `Sender facility confirmed handover for placement ${transferId}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager"],
     });
     return response.data;
   },

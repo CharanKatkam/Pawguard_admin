@@ -49,12 +49,15 @@ const RescueDispatch = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [formData, setFormData] = useState({
-    case_id: "",
-    driver_id: "",
-    agent_ids: [] as string[],
-    vehicle_id: "",
-    notes: "",
+  const [formData, setFormData] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return {
+      case_id: params.get("case_id") || "",
+      driver_id: "",
+      agent_ids: [] as string[],
+      vehicle_id: "",
+      notes: "",
+    };
   });
 
   const userIdLabel = (id?: string) => {

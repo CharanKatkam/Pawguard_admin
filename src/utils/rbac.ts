@@ -156,7 +156,41 @@ const NOTIFICATION_TYPE_ACCESS: Record<string, UserRole[]> = {
     "rescue_centre_admin",
   ],
 
-  // Volunteer notifications
+  // Rescue operations (module-level "rescue" type used by publishActionEvent)
+  rescue: [
+    "super_admin",
+    "rescue_centre_admin",
+    "rescue_coordinator",
+    "rescue_agent",
+  ],
+
+  // Shelter / placement notifications (module-level "shelter" type + transfer events)
+  shelter: ["super_admin", "rescue_centre_admin", "shelter_manager"],
+  shelter_transfer: ["super_admin", "rescue_centre_admin", "shelter_manager"],
+  transfer_requested: ["super_admin", "rescue_centre_admin", "shelter_manager"],
+  placement_requested: ["super_admin", "rescue_centre_admin", "shelter_manager"],
+
+  // Lost & Found alerts
+  lost_found: [
+    "super_admin",
+    "rescue_centre_admin",
+    "shelter_manager",
+    "adoption_coordinator",
+  ],
+  lost_pet_alert: [
+    "super_admin",
+    "rescue_centre_admin",
+    "shelter_manager",
+    "adoption_coordinator",
+  ],
+
+  // Fleet / settings / role governance
+  vehicle: ["super_admin", "rescue_centre_admin", "rescue_coordinator"],
+  settings: ["super_admin"],
+  role: ["super_admin"],
+  role_permission: ["super_admin"],
+
+  // Volunteer notifications (general)
   volunteer: ["super_admin", "volunteer_coordinator"],
 
   // Adoption notifications (general)
