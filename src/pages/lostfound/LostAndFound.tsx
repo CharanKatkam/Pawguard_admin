@@ -1,131 +1,738 @@
-import { useState, useEffect } from "react";
-import DataTable from "../../components/common/DataTable";
+import { useState, useEffect, useCallback } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
+import DataTable, { type Column } from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaSearchLocation, FaCheckCircle, FaExclamationCircle, FaPlus } from "react-icons/fa";
-import lostFoundService from "../../services/lostFoundService";
-import { notifyDataChanged } from "../../utils/dataSync";
+import {
+  FaSearchLocation,
+  FaCheckCircle,
+  FaExclamationCircle,
+  FaPlus,
+  FaBroadcastTower,
+  FaHandshake,
+  FaTrash,
+  FaMapMarkerAlt,
+  FaUser,
+  FaMicrochip,
+  FaClock,
+  FaSpinner,
+} from "react-icons/fa";
+import lostFoundService, {
+  type Species,
+  type ReportKind,
+  type ReporterProfile,
+} from "../../services/lostFoundService";
+import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
+
+const PAGE_SIZE = 8;
+
+const SPECIES_OPTIONS: Species[] = ["dog", "cat", "bird", "rabbit", "other"];
+const STATUS_OPTIONS = ["active", "resolved", "expired"];
+
+const toNumOrNull = (v: string): number | null => {
+  const t = v.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+
+const trimOrNull = (v: string): string | null => {
+  const t = v.trim();
+  return t === "" ? null : t;
+};
+
+const shortId = (id: string): string =>
+  id && id.length > 8 ? `${id.slice(0, 8)}\u2026` : id || "-";
+
+const formatDate = (iso?: string | null): string => {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+};
+
+const formatCoord = (v: number | null | undefined): string =>
+  typeof v === "number" && Number.isFinite(v) ? v.toFixed(5) : "-";
+
+const extractError = (err: unknown, fallback: string): string => {
+  if (err && typeof err === "object") {
+    const candidate = err as {
+      response?: { data?: { detail?: unknown } };
+      message?: unknown;
+    };
+    if (typeof candidate.response?.data?.detail === "string") {
+      return candidate.response.data.detail;
+    }
+    if (typeof candidate.message === "string") {
+      return candidate.message;
+    }
+  }
+  return fallback;
+};
+
+const titleCase = (s: string): string =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+
+const statusBadge = (status?: string) => {
+  const lower = String(status || "").toLowerCase();
+  const map: Record<string, { bg: string; color: string; label: string }> = {
+    active: { bg: "#EFF6FF", color: "#2563EB", label: "Active" },
+    resolved: { bg: "#ECFDF5", color: "#10B981", label: "Resolved" },
+    expired: { bg: "#F1F5F9", color: "#64748B", label: "Expired" },
+  };
+  const s = map[lower] || { bg: "#F1F5F9", color: "#475569", label: String(status || "Unknown") };
+  return (
+    <span
+      style={{
+        padding: "4px 10px",
+        borderRadius: "999px",
+        fontSize: "12px",
+        fontWeight: 700,
+        background: s.bg,
+        color: s.color,
+        display: "inline-block",
+        textTransform: "capitalize",
+      }}
+    >
+      {s.label}
+    </span>
+  );
+};
+
+const matchStatusBadge = (status?: string) => {
+  const lower = String(status || "").toLowerCase();
+  const map: Record<string, { bg: string; color: string }> = {
+    pending: { bg: "#FFFBEB", color: "#B45309" },
+    confirmed: { bg: "#ECFDF5", color: "#059669" },
+    rejected: { bg: "#FEF2F2", color: "#DC2626" },
+  };
+  const s = map[lower] || { bg: "#F1F5F9", color: "#64748B" };
+  return (
+    <span
+      style={{
+        padding: "3px 9px",
+        borderRadius: "999px",
+        fontSize: "12px",
+        fontWeight: 700,
+        background: s.bg,
+        color: s.color,
+        textTransform: "capitalize",
+      }}
+    >
+      {String(status || "pending")}
+    </span>
+  );
+};
+
+const speciesChip = (species?: string) => {
+  const s = String(species || "other").toLowerCase();
+  const colors: Record<string, string> = {
+    dog: "#2563EB",
+    cat: "#7C3AED",
+    bird: "#059669",
+    rabbit: "#DB2777",
+    other: "#64748B",
+  };
+  return (
+    <span
+      style={{
+        padding: "2px 8px",
+        borderRadius: "12px",
+        fontSize: "11px",
+        fontWeight: 700,
+        background: `${colors[s] || colors.other}15`,
+        color: colors[s] || colors.other,
+        textTransform: "capitalize",
+        display: "inline-block",
+      }}
+    >
+      {s}
+    </span>
+  );
+};
+
+interface DetailField {
+  label: string;
+  value: string;
+  badge?: ReactNode;
+  icon?: ReactNode;
+}
+
+interface RegistryReport {
+  id: string;
+  user_id?: string;
+  species?: Species;
+  status?: string;
+  photo_url?: string | null;
+  location_address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  created_at?: string;
+  user?: ReporterProfile | null;
+  pet_name?: string;
+  breed?: string;
+  color?: string;
+  microchip_id?: string | null;
+  lost_at?: string;
+  breed_observed?: string;
+  color_observed?: string;
+  found_at?: string;
+  collar_color?: string | null;
+  collar_description?: string | null;
+  marker_description?: string | null;
+  [key: string]: unknown;
+}
+
+interface RegistryMatch {
+  id: string;
+  status?: string;
+  confidence_score?: number;
+  distance_km?: number | null;
+  temporal_gap_days?: number | null;
+  claim_submitted_at?: string | null;
+  claim_reviewed_at?: string | null;
+  verification_notes?: string | null;
+  match_reasons?: string[];
+  [key: string]: unknown;
+}
 
 const LostAndFound = () => {
-  const [reports, setReports] = useState<any[]>([]);
+  const { addToast } = useToast();
+
+  const [activeTab, setActiveTab] = useState<ReportKind>("lost");
+  const [reports, setReports] = useState<RegistryReport[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { addToast } = useToast();
+
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [speciesFilter, setSpeciesFilter] = useState("");
+
+  const [stats, setStats] = useState({ total: 0, lost: 0, found: 0, resolved: 0 });
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [selectedReport, setSelectedReport] = useState<RegistryReport | null>(null);
+  const [selectedReportKind, setSelectedReportKind] = useState<ReportKind>("lost");
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false);
+
+  const [isMatchesOpen, setIsMatchesOpen] = useState(false);
+  const [matches, setMatches] = useState<RegistryMatch[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [matchesError, setMatchesError] = useState<string | null>(null);
+  const [claimTarget, setClaimTarget] = useState<RegistryMatch | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<RegistryMatch | null>(null);
+  const [resolveTarget, setResolveTarget] = useState<RegistryMatch | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [claimNotes, setClaimNotes] = useState("");
+  const [reviewNotes, setReviewNotes] = useState("");
 
   const [formData, setFormData] = useState({
-    type: "lost" as "lost" | "found",
+    report_type: "lost" as ReportKind,
+    species: "dog" as Species,
     pet_name: "",
-    description: "",
-    location: "",
-    contact_name: "",
-    contact_phone: "",
+    breed: "",
+    color: "",
+    microchip_id: "",
+    collar_color: "",
+    collar_description: "",
+    marker_description: "",
+    location_address: "",
+    latitude: "",
+    longitude: "",
+    lost_at: "",
+    found_at: "",
+    photo_url: "",
+    breed_observed: "",
+    color_observed: "",
   });
 
-  useEffect(() => {
-    fetchReports();
-  }, []);
+  const resetForm = () => {
+    setFormData((f) => ({
+      ...f,
+      species: "dog",
+      pet_name: "",
+      breed: "",
+      color: "",
+      microchip_id: "",
+      collar_color: "",
+      collar_description: "",
+      marker_description: "",
+      location_address: "",
+      latitude: "",
+      longitude: "",
+      lost_at: "",
+      found_at: "",
+      photo_url: "",
+      breed_observed: "",
+      color_observed: "",
+    }));
+    setFormError(null);
+  };
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      const response = await lostFoundService.getLostFoundList();
-      const list = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
-
-      const formatted = list.map((item: any) => ({
-        id: item.id || item.report_id || "",
-        type: item.type || item.category || "",
-        pet_name: item.pet_name || item.name || "",
-        description: item.description || "",
-        location: item.location || "",
-        contact: item.contact_name ? `${item.contact_name} (${item.contact_phone || ""})` : "",
-        status: item.status || "",
-        date: item.date_reported || item.created_at || item.date || "",
-      }));
-
-      setReports(formatted);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to load lost & found listings.");
+      const params: Record<string, unknown> = { page, page_size: PAGE_SIZE };
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+      if (statusFilter) params.status = statusFilter;
+      if (speciesFilter) params.species = speciesFilter;
+      const res =
+        activeTab === "lost"
+          ? await lostFoundService.getLostReports(params)
+          : await lostFoundService.getFoundReports(params);
+      setReports((res.data || []) as RegistryReport[]);
+      setTotalCount(res.meta?.total ?? (res.data?.length || 0));
+    } catch (err) {
+      setError(extractError(err, "Failed to load lost & found listings."));
     } finally {
       setLoading(false);
     }
+  }, [activeTab, page, debouncedSearch, statusFilter, speciesFilter]);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const [lostRes, foundRes] = await Promise.all([
+        lostFoundService.getLostReports({ page_size: 1000 }),
+        lostFoundService.getFoundReports({ page_size: 1000 }),
+      ]);
+      const lost = lostRes.data || [];
+      const found = foundRes.data || [];
+      setStats({
+        total: lost.length + found.length,
+        lost: lost.length,
+        found: found.length,
+        resolved: [...lost, ...found].filter((r) => r.status === "resolved").length,
+      });
+    } catch {
+      // Statistics are best-effort; list errors surface through the table state.
+    }
+  }, []);
+
+  const reloadAll = useCallback(() => {
+    void fetchReports();
+    void fetchStats();
+  }, [fetchReports, fetchStats]);
+
+  useDataSync(reloadAll);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchReports(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchReports]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchStats(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchStats]);
+
+  const handleTabChange = (tab: ReportKind) => {
+    setActiveTab(tab);
+    setPage(1);
   };
 
-  const handleCreateReport = async (e: React.FormEvent) => {
+  const openDetails = (row: RegistryReport) => {
+    setSelectedReport(row);
+    setSelectedReportKind(activeTab);
+  };
+
+  const closeDetails = () => {
+    setSelectedReport(null);
+  };
+
+  const handleCreateReport = async (e: FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+
+    if (formData.report_type === "lost") {
+      const missing = [
+        formData.pet_name.trim() ? "" : "Pet name",
+        formData.breed.trim() ? "" : "Breed",
+        formData.color.trim() ? "" : "Color",
+        formData.location_address.trim() ? "" : "Location address",
+        formData.lost_at ? "" : "Lost date/time",
+      ].filter(Boolean);
+      if (missing.length > 0) {
+        setFormError(`Please fill in: ${missing.join(", ")}`);
+        return;
+      }
+    } else {
+      const missing = [
+        formData.breed_observed.trim() ? "" : "Breed",
+        formData.color_observed.trim() ? "" : "Color",
+        formData.location_address.trim() ? "" : "Location address",
+        formData.found_at ? "" : "Found date/time",
+      ].filter(Boolean);
+      if (missing.length > 0) {
+        setFormError(`Please fill in: ${missing.join(", ")}`);
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
-      await lostFoundService.createReport(formData);
-      addToast("Lost/Found pet report created successfully!", "success");
+      if (formData.report_type === "lost") {
+        await lostFoundService.createLostReport({
+          species: formData.species,
+          pet_name: formData.pet_name.trim(),
+          breed: formData.breed.trim(),
+          color: formData.color.trim(),
+          microchip_id: trimOrNull(formData.microchip_id),
+          collar_color: trimOrNull(formData.collar_color),
+          collar_description: trimOrNull(formData.collar_description),
+          marker_description: trimOrNull(formData.marker_description),
+          location_address: formData.location_address.trim(),
+          latitude: toNumOrNull(formData.latitude),
+          longitude: toNumOrNull(formData.longitude),
+          lost_at: new Date(formData.lost_at).toISOString(),
+          photo_url: trimOrNull(formData.photo_url),
+        });
+        addToast("Lost pet report created successfully!", "success");
+      } else {
+        await lostFoundService.createFoundReport({
+          species: formData.species,
+          breed_observed: formData.breed_observed.trim(),
+          color_observed: formData.color_observed.trim(),
+          collar_color: trimOrNull(formData.collar_color),
+          collar_description: trimOrNull(formData.collar_description),
+          marker_description: trimOrNull(formData.marker_description),
+          location_address: formData.location_address.trim(),
+          latitude: toNumOrNull(formData.latitude),
+          longitude: toNumOrNull(formData.longitude),
+          found_at: new Date(formData.found_at).toISOString(),
+          photo_url: trimOrNull(formData.photo_url),
+        });
+        addToast("Found pet report created successfully!", "success");
+      }
       setIsAddModalOpen(false);
-fetchReports();
+      resetForm();
+      void fetchReports();
+      void fetchStats();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to create report", "error");
+    } catch (err) {
+      addToast(extractError(err, "Failed to create report"), "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const columns = [
-    { key: "id", header: "Report #" },
+  const handleDeleteConfirm = async () => {
+    if (!selectedReport) return;
+    try {
+      setDeleting(true);
+      await lostFoundService.deleteReport(selectedReport.id, selectedReportKind);
+      addToast("Report deleted successfully!", "success");
+      setIsDeleteConfirmOpen(false);
+      closeDetails();
+      void fetchReports();
+      void fetchStats();
+      notifyDataChanged();
+    } catch (err) {
+      addToast(extractError(err, "Failed to delete report"), "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleBroadcast = async () => {
+    if (!selectedReport) return;
+    try {
+      setBroadcasting(true);
+      await lostFoundService.broadcastLostPetAlert(selectedReport.id);
+      addToast("Lost pet alert broadcast to nearby users.", "success");
+    } catch (err) {
+      addToast(extractError(err, "Failed to broadcast lost pet alert"), "error");
+    } finally {
+      setBroadcasting(false);
+    }
+  };
+
+  const refetchMatches = async (reportId: string, kind: ReportKind, open: boolean) => {
+    if (open) {
+      setIsMatchesOpen(true);
+    }
+    setMatchesLoading(true);
+    setMatchesError(null);
+    try {
+      const res = await lostFoundService.getReportMatches(reportId, kind);
+      setMatches(res.data || []);
+    } catch (err) {
+      setMatchesError(extractError(err, "Failed to load matches."));
+    } finally {
+      setMatchesLoading(false);
+    }
+  };
+
+  const openMatches = (report: RegistryReport) => {
+    setSelectedReport(report);
+    setSelectedReportKind(activeTab);
+    void refetchMatches(report.id, activeTab, true);
+  };
+
+  const closeMatches = () => {
+    setIsMatchesOpen(false);
+    setMatches([]);
+  };
+
+  const handleSubmitClaim = async () => {
+    if (!claimTarget) return;
+    try {
+      setActionBusy(true);
+      await lostFoundService.submitClaim(claimTarget.id, {
+        verification_notes: trimOrNull(claimNotes),
+      });
+      addToast("Ownership claim submitted for review.", "success");
+      setClaimTarget(null);
+      setClaimNotes("");
+      if (selectedReport) {
+        await refetchMatches(selectedReport.id, selectedReportKind, false);
+      }
+    } catch (err) {
+      addToast(extractError(err, "Failed to submit claim"), "error");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleReviewClaim = async (approve: boolean) => {
+    if (!reviewTarget) return;
+    try {
+      setActionBusy(true);
+      await lostFoundService.reviewClaim(reviewTarget.id, {
+        approve,
+        verification_notes: trimOrNull(reviewNotes),
+      });
+      addToast(approve ? "Claim approved." : "Claim rejected.", "success");
+      setReviewTarget(null);
+      setReviewNotes("");
+      if (selectedReport) {
+        await refetchMatches(selectedReport.id, selectedReportKind, false);
+      }
+    } catch (err) {
+      addToast(extractError(err, "Failed to review claim"), "error");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleResolveMatch = async () => {
+    if (!resolveTarget) return;
+    try {
+      setActionBusy(true);
+      await lostFoundService.resolveMatch(resolveTarget.id);
+      addToast("Match resolved. Report marked as reunited.", "success");
+      setResolveTarget(null);
+      if (selectedReport) {
+        await refetchMatches(selectedReport.id, selectedReportKind, false);
+      }
+      void fetchReports();
+      void fetchStats();
+    } catch (err) {
+      addToast(extractError(err, "Failed to resolve match"), "error");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const lostColumns: Column[] = [
     {
-      key: "type",
-      header: "Category",
-      render: (val: string) => (
-        <span
-          style={{
-            padding: "2px 8px",
-            borderRadius: "12px",
-            fontSize: "12px",
-            fontWeight: 700,
-            background: val === "lost" ? "#FEF2F2" : "#EFF6FF",
-            color: val === "lost" ? "#EF4444" : "#2563EB",
-          }}
-        >
-          {val.toUpperCase()}
+      key: "id",
+      header: "Report #",
+      render: (_v, row) => (
+        <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#475569" }}>
+          {shortId(row.id)}
         </span>
       ),
     },
-    { key: "pet_name", header: "Pet Identification" },
-    { key: "location", header: "Last Seen Location" },
-    { key: "description", header: "Description & Markers" },
-    { key: "contact", header: "Contact Details" },
     {
-      key: "status",
-      header: "Status",
-      render: (val: string) => (
-        <span
-          style={{
-            padding: "2px 8px",
-            borderRadius: "12px",
-            fontSize: "12px",
-            fontWeight: 600,
-            background: val === "Reunited" ? "#ECFDF5" : "#FFFBEB",
-            color: val === "Reunited" ? "#10B981" : "#F59E0B",
-          }}
-        >
-          {val}
+      key: "pet_name",
+      header: "Lost Pet",
+      render: (val, row) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>{val || "-"}</div>
+          <div style={{ marginTop: "2px" }}>{speciesChip(row.species)}</div>
+        </div>
+      ),
+    },
+    { key: "breed", header: "Breed" },
+    { key: "color", header: "Color" },
+    { key: "location_address", header: "Last Seen Location" },
+    {
+      key: "lost_at",
+      header: "Lost Date/Time",
+      render: (val) => <span style={{ whiteSpace: "nowrap" }}>{formatDate(val)}</span>,
+    },
+    {
+      key: "user",
+      header: "Reporter",
+      render: (_v, row) => (
+        <span>
+          {row.user?.full_name || row.user?.email || "Not available"}
+          {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
         </span>
       ),
     },
+    { key: "status", header: "Status", render: (val) => statusBadge(val) },
   ];
+
+  const foundColumns: Column[] = [
+    {
+      key: "id",
+      header: "Report #",
+      render: (_v, row) => (
+        <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#475569" }}>
+          {shortId(row.id)}
+        </span>
+      ),
+    },
+    {
+      key: "breed_observed",
+      header: "Found Animal",
+      render: (val, row) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>{val || "-"}</div>
+          <div style={{ marginTop: "2px" }}>{speciesChip(row.species)}</div>
+        </div>
+      ),
+    },
+    { key: "color_observed", header: "Color" },
+    { key: "location_address", header: "Found Location" },
+    {
+      key: "found_at",
+      header: "Found Date/Time",
+      render: (val) => <span style={{ whiteSpace: "nowrap" }}>{formatDate(val)}</span>,
+    },
+    {
+      key: "user",
+      header: "Reporter",
+      render: (_v, row) => (
+        <span>
+          {row.user?.full_name || row.user?.email || "Not available"}
+          {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
+        </span>
+      ),
+    },
+    { key: "status", header: "Status", render: (val) => statusBadge(val) },
+  ];
+
+  const columns = activeTab === "lost" ? lostColumns : foundColumns;
+
+  const hasActiveFilters = Boolean(search || statusFilter || speciesFilter);
+
+  const detailFields: DetailField[] = selectedReport
+    ? (() => {
+        const report = selectedReport;
+        const kind = selectedReportKind;
+        const base: DetailField[] =
+          kind === "lost"
+            ? [
+                { label: "Pet Name", value: report.pet_name || "-" },
+                { label: "Species", value: titleCase(report.species || "other") },
+                { label: "Breed", value: report.breed || "-" },
+                { label: "Color", value: report.color || "-" },
+                {
+                  label: "Microchip ID",
+                  value: report.microchip_id || "Not available",
+                  icon: <FaMicrochip size={13} />,
+                },
+                {
+                  label: "Lost Date/Time",
+                  value: formatDate(report.lost_at),
+                  icon: <FaClock size={13} />,
+                },
+              ]
+            : [
+                { label: "Species", value: titleCase(report.species || "other") },
+                { label: "Breed Observed", value: report.breed_observed || "-" },
+                { label: "Color Observed", value: report.color_observed || "-" },
+                {
+                  label: "Found Date/Time",
+                  value: formatDate(report.found_at),
+                  icon: <FaClock size={13} />,
+                },
+              ];
+        return base.concat([
+          {
+            label: "Location",
+            value: report.location_address
+              ? `${report.location_address}${
+                  report.latitude != null
+                    ? ` (${formatCoord(report.latitude)}, ${formatCoord(report.longitude)})`
+                    : ""
+                }`
+              : "-",
+            icon: <FaMapMarkerAlt size={13} />,
+          },
+          {
+            label: "Collar",
+            value:
+              [report.collar_color, report.collar_description].filter(Boolean).join(" \u2014 ") ||
+              "Not specified",
+          },
+          {
+            label: "Markers / Description",
+            value: report.marker_description || "Not specified",
+          },
+          { label: "Reported", value: formatDate(report.created_at) },
+          {
+            label: "Reporter",
+            value: report.user?.full_name || report.user?.email || "Not available",
+            icon: <FaUser size={13} />,
+          },
+          {
+            label: "Reporter Contact",
+            value:
+              [report.user?.phone, report.user?.email].filter(Boolean).join(" \u00b7 ") ||
+              "Not available",
+          },
+          { label: "Status", value: "", badge: statusBadge(report.status) },
+        ]);
+      })()
+    : [];
+
+  const commonInputStyle: CSSProperties = {
+    width: "100%",
+    padding: "8px",
+    borderRadius: "6px",
+    border: "1px solid #CBD5E1",
+    fontSize: "13px",
+    boxSizing: "border-box",
+    outline: "none",
+  };
+
+  const labelStyle: CSSProperties = { fontSize: "13px", fontWeight: 600, color: "#334155" };
 
   return (
     <div style={{ padding: "24px", maxWidth: "1400px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "24px",
+        }}
+      >
         <div>
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#0F172A", margin: 0 }}>
-            Lost & Found Pet Registry
+            Lost &amp; Found Pet Registry
           </h1>
           <p style={{ color: "#64748B", margin: "4px 0 0 0", fontSize: "14px" }}>
             Match lost pet reports with rescued animals and reunite pets with owners.
@@ -134,7 +741,10 @@ fetchReports();
 
         <Can permission="create_lost_found">
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => {
+              resetForm();
+              setIsAddModalOpen(true);
+            }}
             style={{
               background: "#2563EB",
               color: "#FFFFFF",
@@ -155,11 +765,126 @@ fetchReports();
         </Can>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        <StatCard title="Total Listings" value={reports.length} icon={<FaSearchLocation />} color="#2563EB" />
-        <StatCard title="Lost Dog Reports" value={reports.filter((r) => r.type === "lost").length} icon={<FaExclamationCircle />} color="#EF4444" />
-        <StatCard title="Found Dog Reports" value={reports.filter((r) => r.type === "found").length} icon={<FaSearchLocation />} color="#F59E0B" />
-        <StatCard title="Pets Reunited" value={reports.filter((r) => r.status === "Reunited").length} icon={<FaCheckCircle />} color="#10B981" />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "16px",
+          marginBottom: "24px",
+        }}
+      >
+        <StatCard title="Total Listings" value={stats.total} icon={<FaSearchLocation />} color="#2563EB" />
+        <StatCard title="Lost Pet Reports" value={stats.lost} icon={<FaExclamationCircle />} color="#EF4444" />
+        <StatCard title="Found Pet Reports" value={stats.found} icon={<FaSearchLocation />} color="#F59E0B" />
+        <StatCard title="Resolved (Reunited)" value={stats.resolved} icon={<FaCheckCircle />} color="#10B981" />
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          marginBottom: "16px",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <div
+          style={{
+            display: "inline-flex",
+            background: "#F1F5F9",
+            borderRadius: "10px",
+            padding: "4px",
+            gap: "4px",
+          }}
+        >
+          <button
+            onClick={() => handleTabChange("lost")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: "8px",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 700,
+              cursor: "pointer",
+              background: activeTab === "lost" ? "#FFFFFF" : "transparent",
+              color: activeTab === "lost" ? "#2563EB" : "#475569",
+              boxShadow: activeTab === "lost" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+            }}
+          >
+            Lost Pet Reports
+          </button>
+          <button
+            onClick={() => handleTabChange("found")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: "8px",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 700,
+              cursor: "pointer",
+              background: activeTab === "found" ? "#FFFFFF" : "transparent",
+              color: activeTab === "found" ? "#2563EB" : "#475569",
+              boxShadow: activeTab === "found" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+            }}
+          >
+            Found Pet Reports
+          </button>
+        </div>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
+          style={{ ...commonInputStyle, width: "auto", minWidth: "150px" }}
+        >
+          <option value="">All Statuses</option>
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {titleCase(s)}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={speciesFilter}
+          onChange={(e) => {
+            setSpeciesFilter(e.target.value);
+            setPage(1);
+          }}
+          style={{ ...commonInputStyle, width: "auto", minWidth: "140px" }}
+        >
+          <option value="">All Species</option>
+          {SPECIES_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {titleCase(s)}
+            </option>
+          ))}
+        </select>
+
+        {hasActiveFilters && (
+          <button
+            onClick={() => {
+              setSearch("");
+              setStatusFilter("");
+              setSpeciesFilter("");
+              setPage(1);
+            }}
+            style={{
+              padding: "8px 14px",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
+              background: "#FFFFFF",
+              color: "#475569",
+              fontSize: "13px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Clear Filters
+          </button>
+        )}
       </div>
 
       <DataTable
@@ -167,49 +892,904 @@ fetchReports();
         columns={columns}
         loading={loading}
         error={error}
-        onRetry={fetchReports}
-        emptyMessage="No active lost or found pet reports."
+        onRetry={() => void fetchReports()}
+        emptyMessage={
+          hasActiveFilters
+            ? "No reports match the current filters."
+            : "No active lost or found pet reports."
+        }
         module="lost_found"
+        serverMode
+        totalCount={totalCount}
+        page={page}
+        onPageChange={setPage}
+        pageSize={PAGE_SIZE}
+        searchValue={search}
+        onSearchChange={setSearch}
+        onRowClick={openDetails}
       />
 
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Log Lost/Found Pet">
-        <form onSubmit={handleCreateReport} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Report Type</label>
-            <select
-              value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value as "lost" | "found" })}
-              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+      {selectedReport && (
+        <Modal
+          isOpen={true}
+          onClose={closeDetails}
+          title={`Report Details \u2014 ${selectedReport.pet_name || selectedReport.breed_observed || shortId(selectedReport.id)}`}
+          maxWidth="640px"
+          footer={
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                width: "100%",
+                justifyContent: "flex-end",
+                flexWrap: "wrap",
+              }}
             >
-              <option value="lost">Lost Pet (Missing)</option>
-              <option value="found">Found Pet (Spotted/Rescued)</option>
-            </select>
+              <Can permission="manage_lost_found">
+                <button
+                  onClick={() => openMatches(selectedReport)}
+                  style={{
+                    background: "#7C3AED",
+                    color: "#FFFFFF",
+                    border: "none",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaHandshake /> View Matches
+                </button>
+                {selectedReportKind === "lost" && (
+                  <button
+                    onClick={handleBroadcast}
+                    disabled={broadcasting}
+                    style={{
+                      background: "#2563EB",
+                      color: "#FFFFFF",
+                      border: "none",
+                      padding: "9px 18px",
+                      borderRadius: "8px",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: broadcasting ? "wait" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FaBroadcastTower /> {broadcasting ? "Broadcasting\u2026" : "Broadcast Alert"}
+                  </button>
+                )}
+              </Can>
+              <Can permission="delete_lost_found">
+                <button
+                  onClick={() => setIsDeleteConfirmOpen(true)}
+                  style={{
+                    background: "#EF4444",
+                    color: "#FFFFFF",
+                    border: "none",
+                    padding: "9px 18px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaTrash /> Delete
+                </button>
+              </Can>
+              <button
+                onClick={closeDetails}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          }
+        >
+          {selectedReport.photo_url && (
+            <div style={{ marginBottom: "16px", textAlign: "center" }}>
+              <img
+                src={selectedReport.photo_url}
+                alt="Reported pet"
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: "260px",
+                  borderRadius: "12px",
+                  border: "1px solid #E2E8F0",
+                  objectFit: "cover",
+                }}
+                onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+              />
+            </div>
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            {detailFields.map((f) => (
+              <div
+                key={f.label}
+                style={{
+                  background: "#F8FAFC",
+                  padding: "12px 14px",
+                  borderRadius: "10px",
+                  border: "1px solid #F1F5F9",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "#64748B",
+                    textTransform: "uppercase",
+                    marginBottom: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  {f.icon}
+                  {f.label}
+                </div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", wordBreak: "break-word" }}>
+                  {f.badge || f.value}
+                </div>
+              </div>
+            ))}
           </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Pet Name / Description *</label>
-            <input type="text" required value={formData.pet_name} onChange={(e) => setFormData({ ...formData, pet_name: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+        </Modal>
+      )}
+
+      {isMatchesOpen && selectedReport && (
+        <Modal
+          isOpen={true}
+          onClose={closeMatches}
+          title="Potential Matches"
+          maxWidth="760px"
+          footer={
+            <div style={{ display: "flex", justifyContent: "flex-end", width: "100%" }}>
+              <button
+                onClick={closeMatches}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          }
+        >
+          {matchesLoading ? (
+            <div style={{ padding: "40px", textAlign: "center", color: "#2563EB" }}>
+              <FaSpinner size={24} style={{ animation: "spin 1s linear infinite" }} />
+              <div style={{ marginTop: "10px", fontSize: "13px", color: "#64748B" }}>
+                Loading potential matches\u2026
+              </div>
+            </div>
+          ) : matchesError ? (
+            <div style={{ padding: "24px", textAlign: "center" }}>
+              <div
+                style={{
+                  background: "#FEF2F2",
+                  color: "#991B1B",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  display: "inline-block",
+                }}
+              >
+                {matchesError}
+              </div>
+            </div>
+          ) : matches.length === 0 ? (
+            <div style={{ padding: "40px", textAlign: "center", color: "#94A3B8" }}>
+              <FaHandshake size={26} style={{ opacity: 0.5, marginBottom: "10px" }} />
+              <p style={{ margin: 0, fontWeight: 600 }}>No potential matches found yet</p>
+              <p style={{ margin: "4px 0 0", fontSize: "12px" }}>
+                Matches are generated by the backend against other lost / found reports.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {matches.map((match) => {
+                const canClaim =
+                  match.status === "pending" && !match.claim_submitted_at;
+                const canReview =
+                  match.status === "pending" &&
+                  Boolean(match.claim_submitted_at) &&
+                  !match.claim_reviewed_at;
+                const canResolve =
+                  match.status === "confirmed" && !match.claim_reviewed_at;
+                return (
+                  <div
+                    key={match.id}
+                    style={{
+                      border: "1px solid #E2E8F0",
+                      borderRadius: "12px",
+                      padding: "14px 16px",
+                      background: "#FFFFFF",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "8px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#475569" }}>
+                          {shortId(match.id)}
+                        </span>
+                        {matchStatusBadge(match.status)}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#64748B", fontWeight: 600 }}>
+                        {typeof match.confidence_score === "number"
+                          ? `${Math.round(match.confidence_score * 100)}% match`
+                          : "Score n/a"}
+                        {typeof match.distance_km === "number" &&
+                          ` \u00b7 ${match.distance_km.toFixed(2)} km`}
+                        {typeof match.temporal_gap_days === "number" &&
+                          ` \u00b7 ${Math.round(match.temporal_gap_days)}d gap`}
+                      </div>
+                    </div>
+
+                    {Array.isArray(match.match_reasons) && match.match_reasons.length > 0 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                          marginTop: "10px",
+                        }}
+                      >
+                        {match.match_reasons.map((reason: string) => (
+                          <span
+                            key={reason}
+                            style={{
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              background: "#EFF6FF",
+                              color: "#2563EB",
+                            }}
+                          >
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {match.claim_submitted_at && (
+                      <div
+                        style={{
+                          marginTop: "10px",
+                          fontSize: "12px",
+                          color: "#475569",
+                          padding: "8px 10px",
+                          borderRadius: "8px",
+                          background: "#F8FAFC",
+                          border: "1px solid #F1F5F9",
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: "#334155", marginBottom: "2px" }}>
+                          Claim submitted {formatDate(match.claim_submitted_at)}
+                        </div>
+                        {match.verification_notes && <div>{match.verification_notes}</div>}
+                      </div>
+                    )}
+
+                    {canClaim || canReview || canResolve ? (
+                      <div style={{ display: "flex", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
+                        {canClaim && (
+                          <button
+                            onClick={() => {
+                              setClaimNotes("");
+                              setClaimTarget(match);
+                            }}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: "8px",
+                              background: "#2563EB",
+                              color: "#FFFFFF",
+                              border: "none",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Submit Claim
+                          </button>
+                        )}
+                        {canReview && (
+                          <button
+                            onClick={() => {
+                              setReviewNotes("");
+                              setReviewTarget(match);
+                            }}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: "8px",
+                              background: "#7C3AED",
+                              color: "#FFFFFF",
+                              border: "none",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Review Claim
+                          </button>
+                        )}
+                        {canResolve && (
+                          <button
+                            onClick={() => setResolveTarget(match)}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: "8px",
+                              background: "#10B981",
+                              color: "#FFFFFF",
+                              border: "none",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Resolve Match
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: "10px", fontSize: "12px", color: "#94A3B8" }}>
+                        No further actions available for this match.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {claimTarget && (
+        <Modal
+          isOpen={true}
+          onClose={() => setClaimTarget(null)}
+          title="Submit Ownership Claim"
+          maxWidth="480px"
+          footer={
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", width: "100%" }}>
+              <button
+                onClick={() => setClaimTarget(null)}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleSubmitClaim()}
+                disabled={actionBusy}
+                style={{
+                  background: "#2563EB",
+                  color: "#FFFFFF",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: actionBusy ? "wait" : "pointer",
+                }}
+              >
+                {actionBusy ? "Submitting\u2026" : "Submit Claim"}
+              </button>
+            </div>
+          }
+        >
+          <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748B", lineHeight: 1.5 }}>
+            Submitting a claim starts the ownership verification workflow for match{" "}
+            <strong style={{ fontFamily: "monospace" }}>{shortId(claimTarget.id)}</strong>. The
+            claim must then be reviewed and resolved.
+          </p>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>
+            Verification Notes (optional)
+          </label>
+          <textarea
+            value={claimNotes}
+            onChange={(e) => setClaimNotes(e.target.value)}
+            rows={3}
+            placeholder="Any notes or context supporting the ownership claim"
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              fontSize: "13px",
+              boxSizing: "border-box",
+              outline: "none",
+              resize: "vertical",
+              fontFamily: "inherit",
+            }}
+          />
+        </Modal>
+      )}
+
+      {reviewTarget && (
+        <Modal
+          isOpen={true}
+          onClose={() => setReviewTarget(null)}
+          title="Review Ownership Claim"
+          maxWidth="480px"
+          footer={
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", width: "100%" }}>
+              <button
+                onClick={() => setReviewTarget(null)}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleReviewClaim(false)}
+                disabled={actionBusy}
+                style={{
+                  background: "#EF4444",
+                  color: "#FFFFFF",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: actionBusy ? "wait" : "pointer",
+                }}
+              >
+                {actionBusy ? "Working\u2026" : "Reject Claim"}
+              </button>
+              <button
+                onClick={() => void handleReviewClaim(true)}
+                disabled={actionBusy}
+                style={{
+                  background: "#10B981",
+                  color: "#FFFFFF",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: actionBusy ? "wait" : "pointer",
+                }}
+              >
+                {actionBusy ? "Working\u2026" : "Approve Claim"}
+              </button>
+            </div>
+          }
+        >
+          <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748B", lineHeight: 1.5 }}>
+            Decide whether to approve or reject the ownership claim for match{" "}
+            <strong style={{ fontFamily: "monospace" }}>{shortId(reviewTarget.id)}</strong>.
+          </p>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>
+            Verification Notes (optional)
+          </label>
+          <textarea
+            value={reviewNotes}
+            onChange={(e) => setReviewNotes(e.target.value)}
+            rows={3}
+            placeholder="Reason or evidence supporting this decision"
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              fontSize: "13px",
+              boxSizing: "border-box",
+              outline: "none",
+              resize: "vertical",
+              fontFamily: "inherit",
+            }}
+          />
+        </Modal>
+      )}
+
+      {resolveTarget && (
+        <Modal
+          isOpen={true}
+          onClose={() => setResolveTarget(null)}
+          title="Resolve Match"
+          maxWidth="440px"
+          footer={
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", width: "100%" }}>
+              <button
+                onClick={() => setResolveTarget(null)}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleResolveMatch()}
+                disabled={actionBusy}
+                style={{
+                  background: "#10B981",
+                  color: "#FFFFFF",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: actionBusy ? "wait" : "pointer",
+                }}
+              >
+                {actionBusy ? "Resolving\u2026" : "Confirm Resolve"}
+              </button>
+            </div>
+          }
+        >
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <FaCheckCircle size={36} style={{ color: "#10B981", marginBottom: "12px" }} />
+            <h4 style={{ margin: "0 0 8px", fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
+              Confirm resolve?
+            </h4>
+            <p style={{ margin: 0, fontSize: "14px", color: "#64748B", lineHeight: 1.5 }}>
+              Resolving this match marks it / the associated report as reunited and closes the
+              workflow.
+            </p>
           </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Location</label>
-            <input type="text" value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+        </Modal>
+      )}
+
+      {isDeleteConfirmOpen && selectedReport && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsDeleteConfirmOpen(false)}
+          title="Delete Report"
+          maxWidth="450px"
+          footer={
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", width: "100%" }}>
+              <button
+                onClick={() => setIsDeleteConfirmOpen(false)}
+                style={{
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  border: "1px solid #CBD5E1",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleDeleteConfirm()}
+                disabled={deleting}
+                style={{
+                  background: "#EF4444",
+                  color: "#FFFFFF",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: deleting ? "wait" : "pointer",
+                }}
+              >
+                {deleting ? "Deleting\u2026" : "Delete Report"}
+              </button>
+            </div>
+          }
+        >
+          <div style={{ textAlign: "center", padding: "12px 0" }}>
+            <FaTrash size={36} style={{ color: "#EF4444", marginBottom: "12px" }} />
+            <h4 style={{ margin: "0 0 8px", fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
+              Delete this report?
+            </h4>
+            <p style={{ margin: 0, fontSize: "14px", color: "#64748B", lineHeight: 1.5 }}>
+              Are you sure you want to delete report{" "}
+              <strong style={{ fontFamily: "monospace" }}>{shortId(selectedReport.id)}</strong>?
+              This action cannot be undone.
+            </p>
           </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Distinctive Markers / Description</label>
-            <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
-          </div>
+        </Modal>
+      )}
+
+      <Modal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="Log Lost/Found Pet"
+        maxWidth="620px"
+      >
+        <form onSubmit={handleCreateReport} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Contact Name</label>
-              <input type="text" value={formData.contact_name} onChange={(e) => setFormData({ ...formData, contact_name: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+              <label style={labelStyle}>Report Type</label>
+              <select
+                value={formData.report_type}
+                onChange={(e) =>
+                  setFormData({ ...formData, report_type: e.target.value as ReportKind })
+                }
+                style={commonInputStyle}
+              >
+                <option value="lost">Lost Pet (Missing)</option>
+                <option value="found">Found Pet (Spotted/Rescued)</option>
+              </select>
             </div>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Contact Phone</label>
-              <input type="text" value={formData.contact_phone} onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+              <label style={labelStyle}>Species</label>
+              <select
+                value={formData.species}
+                onChange={(e) =>
+                  setFormData({ ...formData, species: e.target.value as Species })
+                }
+                style={commonInputStyle}
+              >
+                {SPECIES_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {titleCase(s)}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#2563EB", color: "#FFF", border: "none" }}>{isSubmitting ? "Submitting..." : "Save Listing"}</button>
+
+          {formData.report_type === "lost" ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div>
+                <label style={labelStyle}>Pet Name *</label>
+                <input
+                  type="text"
+                  value={formData.pet_name}
+                  onChange={(e) => setFormData({ ...formData, pet_name: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Breed *</label>
+                <input
+                  type="text"
+                  value={formData.breed}
+                  onChange={(e) => setFormData({ ...formData, breed: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Color *</label>
+                <input
+                  type="text"
+                  value={formData.color}
+                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Microchip ID</label>
+                <input
+                  type="text"
+                  value={formData.microchip_id}
+                  onChange={(e) => setFormData({ ...formData, microchip_id: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Lost Date/Time *</label>
+                <input
+                  type="datetime-local"
+                  value={formData.lost_at}
+                  onChange={(e) => setFormData({ ...formData, lost_at: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div>
+                <label style={labelStyle}>Breed Observed *</label>
+                <input
+                  type="text"
+                  value={formData.breed_observed}
+                  onChange={(e) => setFormData({ ...formData, breed_observed: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Color Observed *</label>
+                <input
+                  type="text"
+                  value={formData.color_observed}
+                  onChange={(e) => setFormData({ ...formData, color_observed: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Found Date/Time *</label>
+                <input
+                  type="datetime-local"
+                  value={formData.found_at}
+                  onChange={(e) => setFormData({ ...formData, found_at: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={labelStyle}>Location Address *</label>
+              <input
+                type="text"
+                value={formData.location_address}
+                onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
+                style={commonInputStyle}
+                placeholder="Street / area where the pet was last seen or found"
+              />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div>
+                <label style={labelStyle}>Latitude</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.latitude}
+                  onChange={(e) => setFormData({ ...formData, latitude: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Longitude</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.longitude}
+                  onChange={(e) => setFormData({ ...formData, longitude: e.target.value })}
+                  style={commonInputStyle}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={labelStyle}>Collar Color</label>
+              <input
+                type="text"
+                value={formData.collar_color}
+                onChange={(e) => setFormData({ ...formData, collar_color: e.target.value })}
+                style={commonInputStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Collar Description</label>
+              <input
+                type="text"
+                value={formData.collar_description}
+                onChange={(e) => setFormData({ ...formData, collar_description: e.target.value })}
+                style={commonInputStyle}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Distinctive Markers / Description</label>
+            <textarea
+              value={formData.marker_description}
+              onChange={(e) => setFormData({ ...formData, marker_description: e.target.value })}
+              rows={3}
+              style={{ ...commonInputStyle, resize: "vertical", fontFamily: "inherit" }}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Photo URL</label>
+            <input
+              type="url"
+              value={formData.photo_url}
+              onChange={(e) => setFormData({ ...formData, photo_url: e.target.value })}
+              style={commonInputStyle}
+              placeholder="https://..."
+            />
+          </div>
+
+          {formError && (
+            <div
+              style={{
+                background: "#FEF2F2",
+                color: "#991B1B",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: 600,
+              }}
+            >
+              {formError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button
+              type="button"
+              onClick={() => setIsAddModalOpen(false)}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #CBD5E1",
+                background: "#FFF",
+                color: "#475569",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                background: "#2563EB",
+                color: "#FFF",
+                border: "none",
+                cursor: isSubmitting ? "wait" : "pointer",
+                fontWeight: 600,
+              }}
+            >
+              {isSubmitting ? "Submitting..." : "Save Listing"}
+            </button>
           </div>
         </form>
       </Modal>

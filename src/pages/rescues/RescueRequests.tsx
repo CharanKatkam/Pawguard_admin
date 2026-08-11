@@ -4,8 +4,9 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus } from "react-icons/fa";
+import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
+import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const RescueRequests = () => {
@@ -20,11 +21,13 @@ const RescueRequests = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
-    animal_type: "Dog",
-    location: "",
-    description: "",
     reporter_name: "",
     reporter_phone: "",
+    location_address: "",
+    physical_condition: "visible_healthy",
+    severity: "medium",
+    is_urgent: false,
+    reporter_notes: "",
   });
 
   useEffect(() => {
@@ -42,16 +45,29 @@ const RescueRequests = () => {
         ? response.data
         : [];
 
-      const formatted = list.map((item: any) => ({
-        id: item.id || item.request_id || "",
-        animal_type: item.animal_type || item.animal || "",
-        location: item.location || "",
-        description: item.description || item.incident_description || "",
-        reporter: item.reporter_name || item.reporter || "",
-        phone: item.reporter_phone || item.phone || "",
-        status: item.status || "",
-        date: item.created_at || item.date || item.timestamp || "",
-      }));
+      const formatted = list.map((item: any) => {
+        const stage = dispatchStage({ status: item.status, dispatch: item.dispatch });
+        return {
+          id: item.id || item.request_id || "",
+          ticket_number: item.ticket_number || "",
+          reporter: item.reporter_name || item.reporter || "",
+          phone: item.reporter_phone || item.phone || "",
+          location: item.location_address || item.location || "",
+          condition: item.physical_condition || "",
+          severity: item.severity || "",
+          is_urgent: !!item.is_urgent,
+          status: String(item.status || "").toLowerCase(),
+          rejection_rationale: item.rejection_rationale || "",
+          dispatch: item.dispatch || null,
+          dispatch_status: stage.label,
+          dispatch_bg: stage.bg,
+          dispatch_color: stage.color,
+          reports: item.reports || [],
+          media_urls: item.media_urls || [],
+          date: item.created_at || item.date || item.timestamp || "",
+          raw: item,
+        };
+      });
 
       setRequests(formatted);
     } catch (err: any) {
@@ -68,7 +84,15 @@ const RescueRequests = () => {
       await rescueService.createRescueRequest(formData);
       addToast("Public rescue report recorded!", "success");
       setIsAddModalOpen(false);
-      setFormData({ animal_type: "Dog", location: "", description: "", reporter_name: "", reporter_phone: "" });
+      setFormData({
+        reporter_name: "",
+        reporter_phone: "",
+        location_address: "",
+        physical_condition: "visible_healthy",
+        severity: "medium",
+        is_urgent: false,
+        reporter_notes: "",
+      });
       fetchRequests();
       notifyDataChanged();
     } catch (err: any) {
@@ -78,20 +102,21 @@ const RescueRequests = () => {
     }
   };
 
-  const handleApprove = async (id: string) => {
+  const handleVerify = async (id: string) => {
     try {
       await rescueService.approveRescueRequest(id);
-      addToast("Request approved and escalated to active dispatch!", "success");
+      addToast("Request verified and moved to active triage!", "success");
       fetchRequests();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to approve request", "error");
+      addToast(err?.response?.data?.detail || "Failed to verify request", "error");
     }
   };
 
   const handleReject = async (id: string) => {
+    const reason = window.prompt("Rejection reason (optional):") || undefined;
     try {
-      await rescueService.rejectRescueRequest(id, "Rejected by coordinator");
+      await rescueService.rejectRescueRequest(id, reason);
       addToast("Request rejected.", "info");
       fetchRequests();
       notifyDataChanged();
@@ -100,26 +125,79 @@ const RescueRequests = () => {
     }
   };
 
+  const handleEscalate = async (id: string) => {
+    try {
+      await rescueService.escalateRescue(id, "backup_personnel");
+      addToast("Case escalated to backup personnel.", "success");
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to escalate case", "error");
+    }
+  };
+
+  const handleLocated = async (id: string) => {
+    try {
+      await rescueService.markRescueLocated(id);
+      addToast("Animal marked as located.", "success");
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to update case", "error");
+    }
+  };
+
+  const handleSecured = async (id: string) => {
+    try {
+      await rescueService.markRescueSecured(id);
+      addToast("Animal secured by field team.", "success");
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to update case", "error");
+    }
+  };
+
+  const handleAdmitted = async (id: string) => {
+    try {
+      await rescueService.markRescueAdmitted(id);
+      addToast("Animal admitted to the rescue centre.", "success");
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to admit animal", "error");
+    }
+  };
+
   const columns = [
-    { key: "id", header: "Request ID" },
-    { key: "animal_type", header: "Animal Type" },
-    { key: "location", header: "Location" },
-    { key: "description", header: "Incident Description" },
+    { key: "ticket_number", header: "Ticket No." },
     { key: "reporter", header: "Reporter Name" },
+    { key: "phone", header: "Phone" },
+    { key: "location", header: "Location" },
+    {
+      key: "severity",
+      header: "Severity",
+      render: (val: string) => (
+        <span style={{ textTransform: "uppercase", fontWeight: 600, fontSize: "12px", color: val === "critical" ? "#DC2626" : val === "high" ? "#EA580C" : val === "medium" ? "#F59E0B" : "#16A34A" }}>
+          {val || "-"}
+        </span>
+      ),
+    },
+    {
+      key: "is_urgent",
+      header: "Urgent",
+      render: (val: boolean) => (val ? <span style={{ color: "#DC2626", fontWeight: 700 }}>YES</span> : <span style={{ color: "#94A3B8" }}>-</span>),
+    },
     {
       key: "status",
       header: "Status",
-      render: (val: string) => (
-        <span
-          style={{
-            padding: "2px 8px",
-            borderRadius: "12px",
-            fontSize: "12px",
-            fontWeight: 600,
-            background: val === "Approved" ? "#ECFDF5" : val === "Rejected" ? "#FEF2F2" : "#FFFBEB",
-            color: val === "Approved" ? "#10B981" : val === "Rejected" ? "#EF4444" : "#F59E0B",
-          }}
-        >
+      render: rescueStatusBadge,
+    },
+    {
+      key: "dispatch_status",
+      header: "Dispatch Status",
+      render: (val: string, row: any) => (
+        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: row.dispatch_bg, color: row.dispatch_color }}>
           {val}
         </span>
       ),
@@ -161,11 +239,13 @@ const RescueRequests = () => {
         </Can>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         <StatCard title="Total Incoming" value={requests.length} icon={<FaAmbulance />} color="#2563EB" />
-        <StatCard title="Pending Triage" value={requests.filter((r) => r.status === "Pending").length} icon={<FaClock />} color="#F59E0B" />
-        <StatCard title="Approved & Escalated" value={requests.filter((r) => r.status === "Approved").length} icon={<FaCheck />} color="#10B981" />
-        <StatCard title="Rejected / Invalid" value={requests.filter((r) => r.status === "Rejected").length} icon={<FaTimes />} color="#EF4444" />
+        <StatCard title="Reported (Triage)" value={requests.filter((r) => r.status === "reported").length} icon={<FaClock />} color="#F59E0B" />
+        <StatCard title="Verified" value={requests.filter((r) => r.status === "verified").length} icon={<FaCheck />} color="#2563EB" />
+        <StatCard title="Dispatched" value={requests.filter((r) => r.status === "dispatched").length} icon={<FaMapMarkerAlt />} color="#7C3AED" />
+        <StatCard title="Rescued" value={requests.filter((r) => r.status === "rescued").length} icon={<FaCheck />} color="#10B981" />
+        <StatCard title="Rejected / Invalid" value={requests.filter((r) => r.status === "rejected").length} icon={<FaTimes />} color="#EF4444" />
       </div>
 
       <DataTable
@@ -174,7 +254,7 @@ const RescueRequests = () => {
         loading={loading}
         error={error}
         onRetry={fetchRequests}
-        emptyMessage="No pending public rescue requests."
+        emptyMessage="No public rescue requests."
         module="rescue_requests"
         onView={(item: any) => {
           setSelectedRequest(item);
@@ -185,22 +265,46 @@ const RescueRequests = () => {
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Log Emergency Rescue Call">
         <form onSubmit={handleCreateRequest} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Location *</label>
-            <input type="text" required value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Incident Description</label>
-            <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Location Address *</label>
+            <input type="text" required value={formData.location_address} onChange={(e) => setFormData({ ...formData, location_address: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Name</label>
-              <input type="text" value={formData.reporter_name} onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Name *</label>
+              <input type="text" required value={formData.reporter_name} onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
             </div>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Phone</label>
-              <input type="text" value={formData.reporter_phone} onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Phone *</label>
+              <input type="text" required value={formData.reporter_phone} onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
             </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Physical Condition *</label>
+              <select value={formData.physical_condition} onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+                <option value="visible_healthy">Visible / Healthy</option>
+                <option value="injured_visible">Injured (visible)</option>
+                <option value="fractured_injured">Fractured / Injured</option>
+                <option value="critical_condition">Critical Condition</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Severity</label>
+              <select value={formData.severity} onChange={(e) => setFormData({ ...formData, severity: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 600 }}>
+            <input type="checkbox" checked={formData.is_urgent} onChange={(e) => setFormData({ ...formData, is_urgent: e.target.checked })} />
+            Urgent case
+          </label>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Notes</label>
+            <textarea value={formData.reporter_notes} onChange={(e) => setFormData({ ...formData, reporter_notes: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
@@ -209,31 +313,67 @@ const RescueRequests = () => {
         </form>
       </Modal>
 
-      <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Rescue Request Details">
+      <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title={`Rescue Request Details${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}>
         {selectedRequest && (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div><strong>Request ID:</strong> {selectedRequest.id}</div>
-            <div><strong>Animal Type:</strong> {selectedRequest.animal_type}</div>
-            <div><strong>Location:</strong> {selectedRequest.location}</div>
-            <div><strong>Description:</strong> {selectedRequest.description}</div>
             <div><strong>Reporter:</strong> {selectedRequest.reporter} ({selectedRequest.phone})</div>
-            <div><strong>Status:</strong> {selectedRequest.status}</div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
-              {selectedRequest.status === "Pending" && (
+            <div><strong>Location:</strong> {selectedRequest.location}</div>
+            <div><strong>Physical Condition:</strong> <span style={{ textTransform: "capitalize" }}>{String(selectedRequest.condition || "").replace(/_/g, " ")}</span></div>
+            <div>
+              <strong>Severity:</strong>{" "}
+              <span style={{ textTransform: "uppercase", fontWeight: 600, color: selectedRequest.severity === "critical" ? "#DC2626" : selectedRequest.severity === "high" ? "#EA580C" : selectedRequest.severity === "medium" ? "#F59E0B" : "#16A34A" }}>
+                {selectedRequest.severity || "-"}
+              </span>
+              {selectedRequest.is_urgent && <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700 }}>URGENT</span>}
+            </div>
+            <div><strong>Status:</strong> {rescueStatusBadge(selectedRequest.status)}</div>
+            <div><strong>Reported:</strong> {selectedRequest.date ? new Date(selectedRequest.date).toLocaleString() : "-"}</div>
+            {selectedRequest.rejection_rationale && (
+              <div style={{ background: "#FEF2F2", padding: "10px", borderRadius: "8px" }}>
+                <strong style={{ color: "#DC2626" }}>Rejection rationale:</strong> {selectedRequest.rejection_rationale}
+              </div>
+            )}
+            {selectedRequest.dispatch && (
+              <div style={{ background: "#F5F3FF", padding: "10px", borderRadius: "8px" }}>
+                <strong style={{ color: "#7C3AED" }}>Dispatch Info</strong>
+                <div style={{ marginTop: "6px", fontSize: "14px" }}>
+                  {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id ? (
+                    <div>Vehicle: {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id}</div>
+                  ) : null}
+                  {selectedRequest.dispatch.assigned_driver_id ? <div>Driver: {selectedRequest.dispatch.assigned_driver_id}</div> : null}
+                  {selectedRequest.dispatch.agents && selectedRequest.dispatch.agents.length > 0 ? (
+                    <div>Agents: {selectedRequest.dispatch.agents.map((a: any) => a.agent_id).join(", ")}</div>
+                  ) : null}
+                  {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {new Date(selectedRequest.dispatch.dispatched_at).toLocaleString()}</div> : null}
+                </div>
+              </div>
+            )}
+            {selectedRequest.media_urls && selectedRequest.media_urls.length > 0 && (
+              <div>
+                <strong>Evidence:</strong>{" "}
+                {selectedRequest.media_urls.map((u: string, i: number) => (
+                  <a key={i} href={u} target="_blank" rel="noreferrer" style={{ marginRight: "8px", color: "#2563EB" }}>Media {i + 1}</a>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+              {selectedRequest.status === "reported" && (
                 <>
-                  <button
-                    onClick={() => { handleApprove(selectedRequest.id); setIsViewModalOpen(false); }}
-                    style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }}
-                    style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}
-                  >
-                    Reject
-                  </button>
+                  <button onClick={() => { handleVerify(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Verify</button>
+                  <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Reject</button>
                 </>
+              )}
+              {["verified", "dispatched", "located"].includes(selectedRequest.status) && (
+                <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Escalate</button>
+              )}
+              {selectedRequest.status === "dispatched" && (
+                <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Located</button>
+              )}
+              {selectedRequest.status === "located" && (
+                <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Secured</button>
+              )}
+              {selectedRequest.status === "rescued" && (
+                <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Admit to Centre</button>
               )}
               <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Close</button>
             </div>

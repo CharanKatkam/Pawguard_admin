@@ -125,6 +125,43 @@ export const shelterService = {
     const response = await api.put(`/shelter/kennels/${kennelId}/sanitation`);
     return response.data;
   },
+
+  // GET /shelter/transfers - FacilityTransferResponse list (shelter placement requests)
+  getTransfers: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/shelter/transfers", { params });
+    return response.data;
+  },
+
+  // POST /shelter/transfers - FacilityTransferCreate (request a dog's placement)
+  createTransfer: async (data: {
+    dog_id: string;
+    from_facility_id: string;
+    to_facility_id: string;
+    notes?: string;
+  }) => {
+    const response = await api.post("/shelter/transfers", data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "create",
+      title: "Shelter Placement Requested",
+      message: `Placement requested for dog ${data.dog_id} to facility ${data.to_facility_id}.`,
+      targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
+    });
+    return response.data;
+  },
+
+  // POST /shelter/transfers/{transfer_id}/confirm-receiver
+  confirmTransferReceiver: async (transferId: string) => {
+    const response = await api.post(`/shelter/transfers/${transferId}/confirm-receiver`);
+    await publishActionEvent({
+      module: "shelter",
+      action: "approve",
+      title: "Shelter Placement Approved",
+      message: `Receiver facility confirmed placement ${transferId}.`,
+      targetRoles: ["super_admin", "shelter_manager"],
+    });
+    return response.data;
+  },
 };
 
 export default shelterService;

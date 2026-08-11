@@ -160,6 +160,128 @@ export const modulePermissionKeys = (moduleKey: string): string[] =>
   PERMISSION_ACTIONS.map((a) => permissionKey(a.key, moduleKey));
 
 /**
+ * Backend permission codes use a different vocabulary than the frontend
+ * matrix. The backend API stores codes as `${module}:${action}` strings (e.g.
+ * `adoption:read`, `adoption:process`, `public:read`) while the frontend RBAC
+ * matrix uses `${action}_${module}` keys (e.g. `view_adoptions`). When a live
+ * role registry or an embedded user permission set is turned into an override,
+ * codes that do not match the frontend format silently fail every
+ * `hasPermission()` check — a `rescue_centre_admin` whose overrides carry
+ * backend codes loses `view_animals` / `view_medical` / `view_inventory` /
+ * `view_reports` and gets redirected to /403.
+ *
+ * `normalizePermissionCode` re-expresses any supported backend code as the
+ * canonical frontend matrix key so overrides loaded from the backend and the
+ * frontend checks agree. It never invents permissions: a code that has no
+ * frontend-equivalent action/module is dropped, and plain frontend-style keys
+ * (including legacy special permissions such as `report_rescue`) pass through
+ * untouched.
+ */
+
+/** Backend module keys → frontend `PERMISSION_MODULES` keys. */
+const MODULE_ALIASES: Record<string, string> = {
+  animal: "animals",
+  adoption: "adoptions",
+  foster: "foster_placements",
+  fosters: "foster_placements",
+  medical_record: "medical",
+  medical_records: "medical",
+  "medical-record": "medical",
+  "medical-records": "medical",
+  rescue: "rescues",
+  rescue_request: "rescue_requests",
+  rescue_requests: "rescue_requests",
+  "rescue-request": "rescue_requests",
+  "rescue-requests": "rescue_requests",
+  report: "reports",
+  "lost-found": "lost_found",
+  lost_and_found: "lost_found",
+  audit: "audit_logs",
+};
+
+/** Backend action keys → frontend `PERMISSION_ACTIONS` keys. */
+const ACTION_ALIASES: Record<string, string> = {
+  read: "view",
+  write: "create",
+  update: "edit",
+  process: "manage",
+};
+
+const toKnownModule = (raw: string): string | null => {
+  const key = raw.toLowerCase().trim();
+  if (PERMISSION_MODULES.some((m) => m.key === key)) return key;
+  return MODULE_ALIASES[key] ?? null;
+};
+
+const toKnownAction = (raw: string): string | null => {
+  const key = raw.toLowerCase().trim();
+  if (PERMISSION_ACTIONS.some((a) => a.key === key)) return key;
+  return ACTION_ALIASES[key] ?? null;
+};
+
+/** Resolve a (action, module) pair to a canonical frontend matrix key, or null. */
+const toMatrixKey = (a: string, m: string): string | null => {
+  const knownAction = toKnownAction(a);
+  const knownModule = toKnownModule(m);
+  if (!knownAction || !knownModule) return null;
+  return permissionKey(knownAction, knownModule);
+};
+
+export const normalizePermissionCode = (code: unknown): string | null => {
+  if (typeof code !== "string") return null;
+  const trimmed = code.trim();
+  if (!trimmed) return null;
+
+  // Already in canonical `${action}_${module}` matrix form.
+  if (parsePermissionKey(trimmed)) return trimmed;
+
+  const lower = trimmed.toLowerCase();
+
+  // `${module}:${action}` (e.g. `adoption:read`).
+  const colon = lower.split(":");
+  if (colon.length >= 2) {
+    const key = toMatrixKey(colon[1], colon[0]);
+    if (key) return key;
+  }
+
+  // `${module}.${action}` (e.g. `inventory.read`).
+  const dot = lower.split(".");
+  if (dot.length >= 2) {
+    const key = toMatrixKey(dot[1], dot[0]);
+    if (key) return key;
+  }
+
+  // `${action}-${module}` (e.g. `view-medical-records`).
+  const dash = lower.split("-");
+  if (dash.length >= 2) {
+    const key = toMatrixKey(dash[0], dash.slice(1).join("_"));
+    if (key) return key;
+  }
+
+  // `${action} ${module}` (e.g. `view reports`).
+  const space = lower.split(/\s+/);
+  if (space.length >= 2) {
+    const key = toMatrixKey(space[0], space.slice(1).join("_"));
+    if (key) return key;
+  }
+
+  // Canonical `${action}_${module}` in backend casing (e.g. `READ_ANIMALS`
+  // or `view_animals` written with different case).
+  const underscore = lower.split("_");
+  if (underscore.length >= 2) {
+    const key = toMatrixKey(underscore[0], underscore.slice(1).join("_"));
+    if (key) return key;
+  }
+
+  // Plain frontend-style key (letters, digits, underscores) that is not a
+  // matrix cell — e.g. legacy special permissions — passes through untouched.
+  if (/^[a-z][a-z0-9_]*$/.test(lower)) return trimmed;
+
+  // Unrecognized foreign code → drop.
+  return null;
+};
+
+/**
  * Normalize a Permissions API payload into a flat list of permission codes.
  * Accepts bare arrays, wrapped `{ data: [...] }` objects, string codes and
  * objects carrying a code/name/key/permission/permission_code field.
@@ -177,7 +299,8 @@ export const extractPermissionCodes = (payload: unknown): string[] => {
   const codes: string[] = [];
   for (const item of list) {
     if (typeof item === "string") {
-      codes.push(item);
+      const normalized = normalizePermissionCode(item);
+      if (normalized) codes.push(normalized);
     } else if (item && typeof item === "object") {
       const obj = item as Record<string, unknown>;
       const code =
@@ -188,7 +311,10 @@ export const extractPermissionCodes = (payload: unknown): string[] => {
         obj.name ??
         obj.permission ??
         obj.slug;
-      if (typeof code === "string") codes.push(code);
+      if (typeof code === "string") {
+        const normalized = normalizePermissionCode(code);
+        if (normalized) codes.push(normalized);
+      }
     }
   }
   return Array.from(new Set(codes));
@@ -297,11 +423,15 @@ export const normalizePermissionList = (list: unknown): string[] => {
   const out: string[] = [];
   for (const item of list) {
     if (typeof item === "string") {
-      out.push(item);
+      const normalized = normalizePermissionCode(item);
+      if (normalized) out.push(normalized);
     } else if (item && typeof item === "object") {
       const obj = item as Record<string, unknown>;
       const val = obj.name ?? obj.key ?? obj.code ?? obj.permission ?? obj.slug;
-      if (typeof val === "string") out.push(val);
+      if (typeof val === "string") {
+        const normalized = normalizePermissionCode(val);
+        if (normalized) out.push(normalized);
+      }
     }
   }
   return Array.from(new Set(out));
@@ -309,17 +439,28 @@ export const normalizePermissionList = (list: unknown): string[] => {
 
 /**
  * Build a role-name → permissions override map from the live roles payload.
+ * The backend `RoleResponse` carries the permission set on `permission_codes`
+ * (colon-format strings such as `adoption:read`), while other consumers pass
+ * pre-mapped `permissions`. Both are normalized to the frontend matrix format
+ * so the resulting overrides line up with `hasPermission()`.
  * Empty permission sets on known system roles are ignored so the static
  * defaults still apply as a fallback.
  */
 export const buildRolePermissionOverrides = (
-  roles: Array<{ name?: unknown; permissions?: unknown }>
+  roles: Array<{
+    name?: unknown;
+    permissions?: unknown;
+    permission_codes?: unknown;
+    permissionCodes?: unknown;
+  }>
 ): Record<string, string[]> => {
   const map: Record<string, string[]> = {};
   for (const role of roles) {
     const key = String(role.name || "").toLowerCase().trim();
     if (!key) continue;
-    const perms = normalizePermissionList(role.permissions);
+    const perms = normalizePermissionList(
+      role.permissions ?? role.permission_codes ?? role.permissionCodes
+    );
     if (perms.length === 0 && DEFAULT_ROLE_PERMISSIONS[key as UserRole]) {
       continue;
     }
@@ -348,18 +489,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ...perm("rescues", "view", "create", "edit", "delete", "approve", "export", "manage"),
     ...perm("rescue_requests", "view", "create", "edit", "approve", "manage"),
     ...perm("rescue_dispatch", "view", "create", "edit", "manage"),
-    ...perm("vehicles", "view", "edit"),
     ...perm("medical", "view", "create", "edit"),
     ...perm("shelters", "view", "create", "edit", "manage"),
-    ...perm("adoptions", "view", "create", "edit", "approve"),
-    ...perm("foster_placements", "view", "create", "edit"),
-    ...perm("volunteers", "view", "edit"),
-    ...perm("lost_found", "view", "edit"),
     ...perm("inventory", "view", "create", "edit", "export", "manage"),
-    ...perm("finance", "view"),
     ...perm("reports", "view", "export"),
     ...perm("notifications", "view"),
-    ...perm("certificates", "view"),
     "view_shelter_data",
     "view_emergency_alerts",
     "report_rescue",
@@ -404,6 +538,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ...perm("medical", "view"),
     ...perm("shelters", "view", "create", "edit", "manage"),
     ...perm("adoptions", "view"),
+    ...perm("lost_found", "view", "create", "delete", "manage"),
     ...perm("inventory", "view", "create", "edit"),
     ...perm("reports", "view", "export"),
     ...perm("notifications", "view"),
@@ -413,6 +548,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     "view_dashboard",
     ...perm("animals", "view"),
     ...perm("adoptions", "view", "create", "edit", "approve", "export"),
+    ...perm("lost_found", "view", "create", "delete", "manage"),
     ...perm("reports", "view", "export"),
     ...perm("notifications", "view"),
   ],

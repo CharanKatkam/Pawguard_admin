@@ -21,22 +21,15 @@ export interface DispatchPayload {
   vehicle_id?: string;
   driver_id?: string;
   agent_id?: string;
+  agent_ids?: string[];
+  assigned_vehicle_id?: string;
   dispatch_time?: string;
   status?: string;
   notes?: string;
   [key: string]: unknown;
 }
 
-/** Extract the list from a paginated GET /rescue response. */
-const unwrapList = (body: unknown): any[] => {
-  if (!body || typeof body !== "object") return [];
-  const obj = body as Record<string, unknown>;
-  const data = Array.isArray(body) ? body : obj.data;
-  return Array.isArray(data) ? data : [];
-};
-
 export const rescueService = {
-  // GET /rescue - list rescue requests/cases
   getRescueCases: async (params?: Record<string, unknown>) => {
     const response = await api.get("/rescue", { params });
     return response.data;
@@ -147,30 +140,16 @@ export const rescueService = {
     return response.data;
   },
 
-  // Rescue Dispatch
-  // There is no GET dispatch-list endpoint, so dispatches are derived from
-  // the nested `dispatch` object on each rescue request returned by GET /rescue.
+  // GET /rescue/dispatches - RescueDispatchResponse (real backend endpoint)
   getDispatches: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/rescue", { params });
-    const list = unwrapList(response.data);
-    const dispatches: any[] = [];
-    for (const req of list) {
-      if (req.dispatch) {
-        const d = req.dispatch;
-        dispatches.push({
-          id: d.id,
-          dispatch_id: d.id,
-          case_id: d.rescue_request_id || req.id,
-          vehicle_id: d.vehicle_id || d.assigned_vehicle_id,
-          driver_id: d.assigned_driver_id,
-          agent_id: Array.isArray(d.agents) && d.agents[0] ? d.agents[0].agent_id : undefined,
-          dispatch_time: d.dispatched_at,
-          status: req.status || "dispatched",
-          notes: d.notes,
-        });
-      }
-    }
-    return { data: dispatches, total: dispatches.length };
+    const response = await api.get("/rescue/dispatches", { params });
+    return response.data;
+  },
+
+  // GET /rescue/dispatches/{dispatch_id}
+  getRescueDispatchById: async (dispatchId: string) => {
+    const response = await api.get(`/rescue/dispatches/${dispatchId}`);
+    return response.data;
   },
 
   // POST /rescue/{request_id}/dispatch - RescueDispatchCreate
@@ -180,9 +159,11 @@ export const rescueService = {
       throw new Error("A target rescue case (case_id) is required to dispatch a team.");
     }
     const payload: Record<string, unknown> = {};
-    if (data.vehicle_id) payload.vehicle_id = data.vehicle_id;
+    if (data.assigned_vehicle_id) payload.assigned_vehicle_id = data.assigned_vehicle_id;
+    else if (data.vehicle_id) payload.assigned_vehicle_id = data.vehicle_id;
     if (data.driver_id) payload.assigned_driver_id = data.driver_id;
-    if (data.agent_id) payload.assigned_agent_ids = [data.agent_id];
+    const agentIds = data.agent_ids && data.agent_ids.length > 0 ? data.agent_ids : data.agent_id ? [data.agent_id] : [];
+    if (agentIds.length > 0) payload.assigned_agent_ids = agentIds;
     if (data.notes) payload.equipment_details = data.notes;
 
     const response = await api.post(`/rescue/${requestId}/dispatch`, payload);
@@ -207,6 +188,62 @@ export const rescueService = {
       title: "Dispatch Progress Updated",
       message: `Field agent confirmed status update for dispatch ${dispatchId}.`,
       targetRoles: ["super_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
+  // POST /rescue/{request_id}/escalate - RescueEscalateCreate (PRR 3.3)
+  escalateRescue: async (requestId: string, escalationType: string, notes?: string) => {
+    const payload: Record<string, unknown> = { escalation_type: escalationType };
+    if (notes) payload.escalation_notes = notes;
+    const response = await api.post(`/rescue/${requestId}/escalate`, payload);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "Rescue Case Escalated",
+      message: `Rescue case ${requestId} escalated (${escalationType}).`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
+  // POST /rescue/{request_id}/located
+  markRescueLocated: async (requestId: string) => {
+    const response = await api.post(`/rescue/${requestId}/located`);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "Animal Located",
+      message: `Rescue case ${requestId} marked as located by field team.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
+  // POST /rescue/{request_id}/secured
+  markRescueSecured: async (requestId: string) => {
+    const response = await api.post(`/rescue/${requestId}/secured`);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "Animal Secured",
+      message: `Rescue case ${requestId} marked as secured by field team.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
+  // POST /rescue/{request_id}/admitted - RescueReportCreate
+  markRescueAdmitted: async (requestId: string, notes?: string) => {
+    const payload: Record<string, unknown> = {};
+    if (notes) payload.notes = notes;
+    const response = await api.post(`/rescue/${requestId}/admitted`, payload);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "Animal Admitted",
+      message: `Rescue case ${requestId} admitted to the rescue centre.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });
     return response.data;
   },

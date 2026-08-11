@@ -451,6 +451,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
+        { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
 
     case "rescue_coordinator":
@@ -490,6 +491,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Shelter Staff", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
+        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
@@ -500,6 +502,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
         { name: "Adoptable Dogs", path: "/pets", iconType: "pets" },
+        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
         { name: "Adoption Reports", path: "/reports", iconType: "reports" },
       ];
 

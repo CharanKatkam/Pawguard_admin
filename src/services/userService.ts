@@ -11,6 +11,7 @@ export interface UserPayload {
   is_verified?: boolean;
   mfa_enabled?: boolean;
   roles?: string[];
+  role_names?: string[];
   created_at?: string;
   updated_at?: string;
   role?: string;
@@ -69,7 +70,18 @@ export const userService = {
   },
 
   createUser: async (data: UserPayload) => {
-    const response = await api.post("/admin/users", data);
+    const payload: Record<string, unknown> = {
+      email: data.email,
+      password: data.password,
+      full_name: data.full_name || data.name,
+      role_names: Array.isArray(data.role_names)
+        ? data.role_names
+        : data.role
+          ? [data.role]
+          : [],
+    };
+    if (data.phone !== undefined) payload.phone = data.phone;
+    const response = await api.post("/admin/users", payload);
     await publishActionEvent({
       module: "user",
       action: "create",
@@ -86,7 +98,21 @@ export const userService = {
   },
 
   updateUser: async (userId: string, data: Partial<UserPayload>) => {
-    const response = await api.put(`/admin/users/${userId}`, data);
+    const payload: Record<string, unknown> = {};
+    const fullName = data.full_name ?? data.name;
+    if (fullName !== undefined) payload.full_name = fullName;
+    if (data.phone !== undefined) payload.phone = data.phone;
+    if (data.is_active !== undefined) payload.is_active = data.is_active;
+    const roleNames =
+      data.role_names !== undefined
+        ? data.role_names
+        : Array.isArray(data.roles)
+          ? data.roles
+          : data.role
+            ? [data.role]
+            : undefined;
+    if (roleNames !== undefined) payload.role_names = roleNames;
+    const response = await api.put(`/admin/users/${userId}`, payload);
     await publishActionEvent({
       module: "user",
       action: "update",

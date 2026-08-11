@@ -12,6 +12,8 @@ import {
   FaBoxes,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import rescueService from "../../../services/rescueService";
+import { rescueStatusBadge, dispatchStage, dispatchAgentNames } from "../../../utils/rescueStatus.tsx";
 import { useDataSync } from "../../../utils/dataSync";
 
 interface RescueCall {
@@ -20,6 +22,9 @@ interface RescueCall {
   reporter: string;
   animal_count: number;
   status: string;
+  dispatch_status: string;
+  coordinator: string;
+  agent: string;
   created_at: string;
 }
 
@@ -49,15 +54,44 @@ const RescueCentreAdminDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const response = await dashboardService.getRescueCentreDashboard();
+      const [dashRes, callsRes] = await Promise.allSettled([
+        dashboardService.getRescueCentreDashboard(),
+        rescueService.getRescueCases({ page: 1, page_size: 5 }),
+      ]);
 
-      const data = response?.data || response || {};
+      const data =
+        dashRes.status === "fulfilled"
+          ? dashRes.value?.data || dashRes.value || {}
+          : {};
+      const callsResolved = callsRes.status === "fulfilled" ? callsRes.value : [];
+      const calls = Array.isArray(callsResolved)
+        ? callsResolved
+        : Array.isArray(callsResolved?.data)
+        ? callsResolved.data
+        : [];
+
+      const recent: RescueCall[] = calls.map((item: any) => {
+        const stage = dispatchStage({ status: item.status, dispatch: item.dispatch });
+        const agents = dispatchAgentNames(item.dispatch);
+        return {
+          id: item.id || "",
+          ticket: item.ticket_number || item.id || "-",
+          reporter: item.reporter_name || "-",
+          animal_count: item.animal_count ?? 0,
+          status: String(item.status || "").toLowerCase(),
+          dispatch_status: stage.label,
+          coordinator: "-",
+          agent: agents.agents.length > 0 ? agents.agents.join(", ") : "-",
+          created_at: item.created_at || "",
+        };
+      });
+
       setStatsData({
         total_calls: data.total_calls ?? data.totalCalls ?? 0,
         pending: data.pending ?? data.pendingCases ?? 0,
         dispatched: data.dispatched ?? data.dispatchedCases ?? 0,
         rescued: data.rescued ?? data.rescuedAnimals ?? 0,
-        recent_calls: Array.isArray(data.recent_calls) ? data.recent_calls : Array.isArray(data.recentCalls) ? data.recentCalls : [],
+        recent_calls: recent,
       });
     } catch (err: any) {
       console.error("Rescue Centre Dashboard Error:", err);
@@ -109,16 +143,34 @@ const RescueCentreAdminDashboard = () => {
   ];
 
   const columns = [
-    { key: "ticket", title: "Ticket" },
-    { key: "reporter", title: "Reporter" },
-    { key: "animal_count", title: "Animals" },
-    { key: "status", title: "Status" },
-    { key: "created_at", title: "Reported At" },
+    { key: "ticket", header: "Ticket" },
+    { key: "reporter", header: "Reporter" },
+    { key: "animal_count", header: "Animals" },
+    {
+      key: "status",
+      header: "Status",
+      render: rescueStatusBadge,
+    },
+    {
+      key: "dispatch_status",
+      header: "Dispatch Status",
+      render: (_val: string, row: any) => {
+        const stage = dispatchStage({ status: row.status });
+        return (
+          <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: stage.bg, color: stage.color }}>
+            {stage.label}
+          </span>
+        );
+      },
+    },
+    { key: "coordinator", header: "Coordinator" },
+    { key: "agent", header: "Agent" },
+    { key: "created_at", header: "Reported At" },
   ];
 
   const data = statsData.recent_calls.map((item) => ({
     ...item,
-    created_at: new Date(item.created_at).toLocaleString(),
+    created_at: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
   }));
 
   return (
@@ -189,7 +241,7 @@ const RescueCentreAdminDashboard = () => {
           title="Dispatch Rescue"
           subtitle="Assign Rescue Agent"
           color="#2563EB"
-          onClick={() => navigate("/pets")}
+          onClick={() => navigate("/rescue-dispatch")}
         />
 
         <QuickActionCard
@@ -253,17 +305,33 @@ const RescueCentreAdminDashboard = () => {
             Recent Rescue Calls
           </h3>
 
-          {loading && (
-            <span
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            {loading && (
+              <span
+                style={{
+                  fontSize: "12px",
+                  color: "#2563EB",
+                  fontWeight: 600,
+                }}
+              >
+                Loading...
+              </span>
+            )}
+            <button
+              onClick={() => navigate("/rescue-requests")}
               style={{
-                fontSize: "12px",
+                background: "none",
+                border: "none",
                 color: "#2563EB",
+                fontSize: "13px",
                 fontWeight: 600,
+                cursor: "pointer",
+                padding: 0,
               }}
             >
-              Loading...
-            </span>
-          )}
+              View All →
+            </button>
+          </div>
         </div>
 
         <DataTable columns={columns} data={data} />

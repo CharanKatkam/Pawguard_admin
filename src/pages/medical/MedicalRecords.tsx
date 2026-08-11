@@ -47,8 +47,8 @@ const MedicalRecords = () => {
 
   const fetchDogs = async () => {
     try {
-      const response = await dogService.getDogs({ page: 1, page_size: 200 });
-      const list = Array.isArray(response?.data?.data) ? response.data.data : Array.isArray(response?.data) ? response.data : [];
+      const response = await dogService.getAllDogs();
+      const list = Array.isArray(response?.data) ? response.data : [];
       setDogs(list);
       fetchCertificates(list);
     } catch {

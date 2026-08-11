@@ -68,10 +68,10 @@ export const notificationService = {
     });
   },
 
-  // GET /api/v1/notifications
-  getNotifications: async (limit: number = 50, offset: number = 0): Promise<NotificationItem[]> => {
+  // GET /api/v1/notifications (paginated: page + page_size)
+  getNotifications: async (page: number = 1, pageSize: number = 50): Promise<NotificationItem[]> => {
     const response = await api.get<NotificationsListResponse>("/notifications", {
-      params: { limit, offset },
+      params: { page, page_size: pageSize },
     });
 
     let notifications: NotificationResponse[] = [];
@@ -142,7 +142,7 @@ export const notificationService = {
 
     const poll = async () => {
       try {
-        const list = await notificationService.getNotifications(10);
+        const list = await notificationService.getNotifications(1, 10);
         const fresh = list.filter((n) => n.id && !seen.has(n.id));
         list.forEach((n) => n.id && seen.add(n.id));
         if (onNotification) {

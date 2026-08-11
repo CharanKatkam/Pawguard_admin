@@ -20,6 +20,23 @@ export const dogService = {
     return response.data;
   },
 
+  // GET /dogs — fetch every page (the backend clamps page_size to 100).
+  getAllDogs: async (params?: Record<string, unknown>) => {
+    const pageSize = 100;
+    const collected: any[] = [];
+    const first = await api.get("/dogs", { params: { ...params, page: 1, page_size: pageSize } });
+    const firstBody = first.data;
+    const firstList = Array.isArray(firstBody?.data) ? firstBody.data : Array.isArray(firstBody) ? firstBody : [];
+    collected.push(...firstList);
+    const totalPages = firstBody?.meta?.total_pages ?? 1;
+    for (let p = 2; p <= totalPages; p++) {
+      const page = await api.get("/dogs", { params: { ...params, page: p, page_size: pageSize } });
+      const list = Array.isArray(page.data?.data) ? page.data.data : [];
+      collected.push(...list);
+    }
+    return { success: true, data: collected, meta: firstBody?.meta };
+  },
+
   // POST /dogs
   createDog: async (data: DogPayload) => {
     const response = await api.post("/dogs", data);

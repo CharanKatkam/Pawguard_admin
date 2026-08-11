@@ -165,7 +165,9 @@ const DataTable: React.FC<DataTableProps> = ({
 
   const handleRowClick = (row: Record<string, any>) => {
     if (onRowClick) {
+      // Parent owns the row-click interaction (e.g. opens its own details view).
       onRowClick(row);
+      return;
     }
     setSelectedRow(row);
     setEditFormData({ ...row });

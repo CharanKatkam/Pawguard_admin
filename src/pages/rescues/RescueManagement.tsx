@@ -14,10 +14,13 @@ import {
   FaPlus,
 } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
+import userService from "../../services/userService";
+import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const RescueManagement = () => {
   const [cases, setCases] = useState<any[]>([]);
+  const [coordinators, setCoordinators] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
@@ -45,7 +48,24 @@ const RescueManagement = () => {
 
   useEffect(() => {
     fetchRescueCases();
+    fetchCoordinators();
   }, []);
+
+  const fetchCoordinators = async () => {
+    try {
+      const response = await userService.getUsers();
+      const list = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+      setCoordinators(
+        list.filter((u: any) => Array.isArray(u.roles) && u.roles.includes("rescue_coordinator"))
+      );
+    } catch {
+      setCoordinators([]);
+    }
+  };
 
   useEffect(() => {
     if (searchParams.get("action") === "add") {
@@ -64,34 +84,53 @@ const RescueManagement = () => {
         ? response.data
         : [];
 
-      const formatted = list.map((item: any) => ({
-        id: item.id || item.ticket_number || "",
-        ticket_number: item.ticket_number ?? item.case_number ?? item.id ?? "-",
-        reporter_name: item.reporter_name ?? item.reporter ?? "-",
-        reporter_phone: item.reporter_phone ?? "-",
-        reporter_alternate_phone: item.reporter_alternate_phone ?? "-",
-        reporter_email: item.reporter_email ?? "-",
-        is_anonymous: item.is_anonymous !== undefined && item.is_anonymous !== null ? (item.is_anonymous ? "Yes" : "No") : "-",
-        location_address: item.location_address ?? item.location ?? "-",
-        location_landmark: item.location_landmark ?? "-",
-        latitude: item.latitude !== undefined && item.latitude !== null ? String(item.latitude) : "-",
-        longitude: item.longitude !== undefined && item.longitude !== null ? String(item.longitude) : "-",
-        animal_count: item.animal_count !== undefined && item.animal_count !== null ? String(item.animal_count) : "-",
-        physical_condition: item.physical_condition ?? "-",
-        behavioral_indicators: item.behavioral_indicators ?? "-",
-        severity: item.severity ?? item.urgency_level ?? item.urgency ?? "-",
-        is_urgent: item.is_urgent !== undefined && item.is_urgent !== null ? (item.is_urgent ? "Yes" : "No") : "-",
-        media_evidence: Array.isArray(item.media_evidence)
-          ? item.media_evidence.join(", ")
-          : (item.media_evidence ?? item.media_urls ?? "-"),
-        environmental_factors: item.environmental_factors ?? "-",
-        reporter_notes: item.reporter_notes ?? item.notes ?? "-",
-        status: item.status ?? "-",
-        ...(item.rejection_reason ? { rejection_reason: item.rejection_reason } : {}),
-        created_at: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
-        updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : "-",
-        rawItem: item,
-      }));
+      const formatted = list.map((item: any) => {
+        const stage = dispatchStage({ status: item.status, dispatch: item.dispatch });
+        const d = item.dispatch || null;
+        return {
+          id: item.id || item.ticket_number || "",
+          ticket_number: item.ticket_number ?? item.case_number ?? item.id ?? "-",
+          reporter_name: item.reporter_name ?? item.reporter ?? "-",
+          reporter_phone: item.reporter_phone ?? "-",
+          reporter_alternate_phone: item.reporter_alternate_phone ?? "-",
+          reporter_email: item.reporter_email ?? "-",
+          is_anonymous: item.is_anonymous !== undefined && item.is_anonymous !== null ? (item.is_anonymous ? "Yes" : "No") : "-",
+          location_address: item.location_address ?? item.location ?? "-",
+          location_landmark: item.location_landmark ?? "-",
+          latitude: item.latitude !== undefined && item.latitude !== null ? String(item.latitude) : "-",
+          longitude: item.longitude !== undefined && item.longitude !== null ? String(item.longitude) : "-",
+          animal_count: item.animal_count !== undefined && item.animal_count !== null ? String(item.animal_count) : "-",
+          physical_condition: item.physical_condition ?? "-",
+          behavioral_indicators: item.behavioral_indicators ?? "-",
+          severity: item.severity ?? item.urgency_level ?? item.urgency ?? "-",
+          is_urgent: item.is_urgent !== undefined && item.is_urgent !== null ? (item.is_urgent ? "Yes" : "No") : "-",
+          media_evidence: Array.isArray(item.media_evidence)
+            ? item.media_evidence.join(", ")
+            : (item.media_evidence ?? item.media_urls ?? "-"),
+          environmental_factors: item.environmental_factors ?? "-",
+          reporter_notes: item.reporter_notes ?? item.notes ?? "-",
+          status: item.status ?? "-",
+          ...(item.rejection_rationale ? { rejection_reason: item.rejection_rationale } : {}),
+          created_at: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
+          updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : "-",
+          stage_label: stage.label,
+          stage_bg: stage.bg,
+          stage_color: stage.color,
+          dispatch_driver: d?.assigned_driver_id || "-",
+          dispatch_agents: d?.agents && d.agents.length > 0 ? d.agents.map((a: any) => a.agent_id).join(", ") : "-",
+          dispatch_vehicle: d?.assigned_vehicle_id || d?.vehicle_id || "-",
+          dispatch_equipment: d?.equipment_details || "-",
+          dispatched_at: d?.dispatched_at ? new Date(d.dispatched_at).toLocaleString() : "-",
+          located_at: d?.located_at ? new Date(d.located_at).toLocaleString() : "-",
+          rescued_at: d?.rescued_at ? new Date(d.rescued_at).toLocaleString() : "-",
+          admitted_at: d?.admitted_at ? new Date(d.admitted_at).toLocaleString() : "-",
+          escalation_type: d?.escalation_type || "-",
+          escalation_notes: d?.escalation_notes || "-",
+          has_dispatch: Boolean(d),
+          reports: Array.isArray(item.reports) ? item.reports : [],
+          rawItem: item,
+        };
+      });
 
       setCases(formatted);
     } catch (err: any) {
@@ -245,12 +284,7 @@ const RescueManagement = () => {
 
   const columns = [
     { key: "ticket_number", header: "Case #" },
-    { key: "reporter_name", header: "Reporter" },
-    { key: "reporter_phone", header: "Phone" },
     { key: "location_address", header: "Location" },
-    { key: "location_landmark", header: "Landmark" },
-    { key: "animal_count", header: "Animal Count" },
-    { key: "physical_condition", header: "Physical Condition" },
     {
       key: "severity",
       header: "Severity",
@@ -262,11 +296,31 @@ const RescueManagement = () => {
       render: (val: string) => renderBadge(val, "urgent"),
     },
     {
-      key: "status",
-      header: "Status",
-      render: (val: string) => renderBadge(val, "status"),
+      key: "stage_label",
+      header: "Dispatch Status",
+      render: (val: string, row: any) => (
+        <span
+          style={{
+            padding: "3px 10px",
+            borderRadius: "999px",
+            fontSize: "12px",
+            fontWeight: 700,
+            background: row.stage_bg,
+            color: row.stage_color,
+            display: "inline-block",
+          }}
+        >
+          {val}
+        </span>
+      ),
     },
-    { key: "created_at", header: "Created On" },
+    {
+      key: "status",
+      header: "Rescue Status",
+      render: rescueStatusBadge,
+    },
+    { key: "dispatch_agents", header: "Agents" },
+    { key: "created_at", header: "Reported" },
   ];
 
   return (
@@ -309,7 +363,7 @@ const RescueManagement = () => {
         <StatCard title="Total Rescues" value={cases.length} icon={<FaLifeRing />} color="#2563EB" />
         <StatCard title="Urgent Incidents" value={cases.filter((c) => c.is_urgent === "Yes").length} icon={<FaExclamationTriangle />} color="#EF4444" />
         <StatCard title="Critical Severity" value={cases.filter((c) => String(c.severity).toLowerCase().includes("critical") || String(c.severity).toLowerCase().includes("high")).length} icon={<FaAmbulance />} color="#F59E0B" />
-        <StatCard title="Completed Cases" value={cases.filter((c) => String(c.status).toLowerCase().includes("completed") || String(c.status).toLowerCase().includes("approved")).length} icon={<FaCheckCircle />} color="#10B981" />
+        <StatCard title="Completed Cases" value={cases.filter((c) => String(c.status).toLowerCase() === "admitted" || String(c.status).toLowerCase() === "rescued").length} icon={<FaCheckCircle />} color="#10B981" />
       </div>
 
       <QuickActionCard
@@ -350,6 +404,42 @@ const RescueManagement = () => {
             setIsDeleteModalOpen(true);
           }}
         />
+      </div>
+
+      {/* Rescue Coordinators */}
+      <div className="soft-card" style={{ padding: "20px", marginTop: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700 }}>Available Rescue Coordinators</h3>
+        </div>
+        {coordinators.length === 0 ? (
+          <p style={{ margin: 0, color: "#94A3B8", fontSize: "13px" }}>
+            No rescue coordinators found in the user directory.
+          </p>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+            {coordinators.map((c: any) => (
+              <div key={c.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "12px 14px" }}>
+                <div style={{ fontSize: "14px", fontWeight: 700, color: "#0F172A" }}>{c.full_name || c.email || c.id}</div>
+                {c.email && <div style={{ fontSize: "12px", color: "#64748B" }}>{c.email}</div>}
+                {c.phone && <div style={{ fontSize: "12px", color: "#64748B" }}>{c.phone}</div>}
+                <div style={{ marginTop: "8px" }}>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      background: c.is_active ? "#ECFDF5" : "#FEF2F2",
+                      color: c.is_active ? "#059669" : "#DC2626",
+                    }}
+                  >
+                    {c.is_active ? "Active" : "Inactive"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Add Modal */}
@@ -619,6 +709,60 @@ const RescueManagement = () => {
             <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Updated At</div>
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.updated_at || "-"}</div>
+            </div>
+
+            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", gridColumn: "1 / -1" }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "8px" }}>Dispatch & Lifecycle</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Dispatch Status</div>
+                  <span style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: selectedCase.stage_bg, color: selectedCase.stage_color, display: "inline-block", marginTop: "4px" }}>
+                    {selectedCase.stage_label}
+                  </span>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescue Status</div>
+                  <div style={{ marginTop: "4px" }}>{rescueStatusBadge(selectedCase.status)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Assigned Driver</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_driver || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Field Agents</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_agents || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Vehicle</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_vehicle || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Equipment</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_equipment || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Dispatched At</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatched_at || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Located At</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.located_at || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescued At</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.rescued_at || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Admitted At</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.admitted_at || "-"}</div>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Escalation</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>
+                    {selectedCase.escalation_type !== "-" ? `${selectedCase.escalation_type}${selectedCase.escalation_notes !== "-" ? ` — ${selectedCase.escalation_notes}` : ""}` : "None"}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

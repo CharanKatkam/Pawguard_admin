@@ -56,8 +56,8 @@ const Reports = () => {
       addToast("Exporting Finance Report (PDF)...", "info");
       await reportsService.generateAndDownloadReport({ report_type: "finance", format: "pdf" });
       addToast("Finance Report PDF downloaded successfully!", "success");
-    } catch {
-      addToast("Failed to export PDF report.", "error");
+    } catch (err: any) {
+      addToast(err?.message || "Failed to export PDF report.", "error");
     }
   };
 
@@ -66,8 +66,8 @@ const Reports = () => {
       addToast("Exporting Rescue Report (CSV)...", "info");
       await reportsService.generateAndDownloadReport({ report_type: "rescue", format: "csv" });
       addToast("Rescue Report CSV downloaded successfully!", "success");
-    } catch {
-      addToast("Failed to export CSV data.", "error");
+    } catch (err: any) {
+      addToast(err?.message || "Failed to export CSV data.", "error");
     }
   };
 
@@ -76,8 +76,8 @@ const Reports = () => {
       addToast("Exporting Donation Report (PDF)...", "info");
       await reportsService.generateAndDownloadReport({ report_type: "donation", format: "pdf" });
       addToast("Donation Report PDF downloaded successfully!", "success");
-    } catch {
-      addToast("Failed to export donation report.", "error");
+    } catch (err: any) {
+      addToast(err?.message || "Failed to export donation report.", "error");
     }
   };
 
@@ -85,7 +85,7 @@ const Reports = () => {
     denominator === 0 ? "0%" : `${Math.round((numerator / denominator) * 100)}%`;
 
   const successfulRescues = rescues.filter(
-    (r) => /completed|resolved|success|discharged/i.test(String(r.status ?? ""))
+    (r) => /admitted|rescued/i.test(String(r.status ?? ""))
   ).length;
   const approvedAdoptions = adoptions.filter(
     (a) => /approved|completed|adopted|finalized/i.test(String(a.status ?? ""))

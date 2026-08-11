@@ -109,6 +109,43 @@ const isAdminRole = (roles: string[]): boolean => {
   });
 };
 
+interface ApiErrorShape {
+  response?: { status?: number; data?: { detail?: string; message?: string } };
+  message?: string;
+}
+
+const getErrorMessage = (err: unknown, fallback: string): string => {
+  const e = err as ApiErrorShape;
+  if (e?.response?.data?.detail) return String(e.response.data.detail);
+  if (e?.response?.data?.message) return String(e.response.data.message);
+  const status = e?.response?.status;
+  if (status === 401) return "Your session has expired. Please sign in again.";
+  if (status === 403) {
+    return "You don't have permission to manage user accounts. Contact a Super Administrator to grant access.";
+  }
+  if (status === 404) return "User account endpoint not found. Please try again later.";
+  if (status !== undefined && status >= 500) {
+    return "The server encountered an error. Please try again later.";
+  }
+  if (!e?.response && e?.message) return `Network error: ${e.message}`;
+  return fallback;
+};
+
+const generatePassword = (): string => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz0123456789!@#$%^&*";
+  let password = "";
+  for (let i = 0; i < 14; i += 1) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+const parseRoleNames = (value: string): string[] =>
+  value
+    .split(",")
+    .map((role) => role.trim())
+    .filter(Boolean);
+
 const Users = () => {
   const [users, setUsers] = useState<UserTableRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,7 +169,6 @@ const Users = () => {
     name: "",
     email: "",
     role: "rescue_agent",
-    department: "Rescue Operations",
     password: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -144,10 +180,15 @@ const Users = () => {
       setError(null);
 
       const response = await userService.getUsers();
-      const userList = Array.isArray(response)
-        ? (response as UserPayload[])
-        : Array.isArray(response?.data)
-        ? (response.data as UserPayload[])
+      const rawBody = response as unknown;
+      const rawData = (rawBody as { data?: unknown })?.data;
+      const rawItems = (rawData as { items?: unknown })?.items;
+      const userList = Array.isArray(rawBody)
+        ? (rawBody as UserPayload[])
+        : Array.isArray(rawData)
+        ? (rawData as UserPayload[])
+        : Array.isArray(rawItems)
+        ? (rawItems as UserPayload[])
         : [];
 
       const formattedUsers = userList.map((user: UserPayload): UserTableRow => {
@@ -170,12 +211,7 @@ const Users = () => {
 
       setUsers(formattedUsers);
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      setError(
-        axiosError?.response?.data?.detail ||
-        axiosError?.response?.data?.message ||
-        "Failed to load registered users. Please check permissions."
-      );
+      setError(getErrorMessage(err, "Failed to load registered users. Please check permissions."));
     } finally {
       setLoading(false);
     }
@@ -199,22 +235,20 @@ const Users = () => {
     }
     try {
       setIsSubmitting(true);
+      const password = formData.password || generatePassword();
       await userService.createUser({
         full_name: formData.name,
         email: formData.email,
         role: formData.role,
-        department: formData.department,
-        password: formData.password || "Password123!",
+        password,
       });
       addToast(`User ${formData.name} provisioned successfully!`, "success");
       setIsAddModalOpen(false);
-      setFormData({ name: "", email: "", role: "rescue_agent", department: "Rescue Operations", password: "" });
+      setFormData({ name: "", email: "", role: "rescue_agent", password: "" });
       fetchUsers();
       notifyDataChanged();
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      const msg = axiosError?.response?.data?.detail || axiosError?.response?.data?.message || "Failed to provision user.";
-      addToast(msg, "error");
+      addToast(getErrorMessage(err, "Failed to provision user."), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -227,9 +261,7 @@ const Users = () => {
       setIsSubmitting(true);
       await userService.updateUser(selectedUser.id, {
         full_name: formData.name,
-        email: formData.email,
-        role: formData.role,
-        department: formData.department,
+        role_names: parseRoleNames(formData.role),
       });
       addToast(`User ${formData.name} updated successfully!`, "success");
       setIsEditModalOpen(false);
@@ -237,9 +269,7 @@ const Users = () => {
       fetchUsers();
       notifyDataChanged();
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      const msg = axiosError?.response?.data?.detail || axiosError?.response?.data?.message || "Failed to update user.";
-      addToast(msg, "error");
+      addToast(getErrorMessage(err, "Failed to update user."), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -256,9 +286,7 @@ const Users = () => {
       fetchUsers();
       notifyDataChanged();
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      const msg = axiosError?.response?.data?.detail || axiosError?.response?.data?.message || "Failed to delete user.";
-      addToast(msg, "error");
+      addToast(getErrorMessage(err, "Failed to delete user."), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -507,7 +535,7 @@ const Users = () => {
             subtitle="Onboard new staff member"
             color="#2563EB"
             onClick={() => {
-              setFormData({ name: "", email: "", role: "rescue_agent", department: "Rescue Operations", password: "" });
+              setFormData({ name: "", email: "", role: "rescue_agent", password: "" });
               setIsAddModalOpen(true);
             }}
           />
@@ -588,13 +616,20 @@ const Users = () => {
             totalCount={filteredUsers.length}
             searchValue={searchTerm}
             onSearchChange={setSearchTerm}
-            onEdit={async (row) => {
-              await userService.updateUser(row.id || "1", row);
-              fetchUsers();
+            onEdit={(row) => {
+              const target = row as UserTableRow;
+              setSelectedUser(target);
+              setFormData({
+                name: target.name || "",
+                email: target.email || "",
+                role: Array.isArray(target.roles) ? target.roles.join(", ") : target.role || "",
+                password: "",
+              });
+              setIsEditModalOpen(true);
             }}
-            onDelete={async (row) => {
-              await userService.deleteUser(row.id || "1");
-              fetchUsers();
+            onDelete={(row) => {
+              setSelectedUser(row as UserTableRow);
+              setIsDeleteModalOpen(true);
             }}
           />
         </div>
@@ -642,38 +677,25 @@ const Users = () => {
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role</label>
-              <select
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              >
-                <option value="super_admin">Super Admin</option>
-                <option value="rescue_centre_admin">Rescue Centre Admin</option>
-                <option value="rescue_coordinator">Rescue Coordinator</option>
-                <option value="rescue_agent">Rescue Agent</option>
-                <option value="veterinarian">Veterinarian</option>
-                <option value="shelter_manager">Shelter Manager</option>
-                <option value="adoption_coordinator">Adoption Coordinator</option>
-                <option value="foster_coordinator">Foster Coordinator</option>
-                <option value="volunteer_coordinator">Volunteer Coordinator</option>
-                <option value="inventory_manager">Inventory Manager</option>
-                <option value="finance_user">Finance User</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Department</label>
-              <input
-                type="text"
-                placeholder="e.g. Medical Care"
-                value={formData.department}
-                onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              />
-            </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role</label>
+            <select
+              value={formData.role}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            >
+              <option value="super_admin">Super Admin</option>
+              <option value="rescue_centre_admin">Rescue Centre Admin</option>
+              <option value="rescue_coordinator">Rescue Coordinator</option>
+              <option value="rescue_agent">Rescue Agent</option>
+              <option value="veterinarian">Veterinarian</option>
+              <option value="shelter_manager">Shelter Manager</option>
+              <option value="adoption_coordinator">Adoption Coordinator</option>
+              <option value="foster_coordinator">Foster Coordinator</option>
+              <option value="volunteer_coordinator">Volunteer Coordinator</option>
+              <option value="inventory_manager">Inventory Manager</option>
+              <option value="finance_user">Finance User</option>
+            </select>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
@@ -716,36 +738,26 @@ const Users = () => {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Email Address *</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Email Address</label>
             <input
               type="email"
-              required
+              disabled
               value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box", background: "#F1F5F9", color: "#64748B" }}
             />
+            <span style={{ fontSize: "11px", color: "#94A3B8" }}>Email address cannot be changed after creation.</span>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role</label>
-              <input
-                type="text"
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Department</label>
-              <input
-                type="text"
-                value={formData.department}
-                onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              />
-            </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role(s)</label>
+            <input
+              type="text"
+              value={formData.role}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              placeholder="e.g. veterinarian, rescue_agent"
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+            />
+            <span style={{ fontSize: "11px", color: "#94A3B8" }}>Separate multiple roles with a comma.</span>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
