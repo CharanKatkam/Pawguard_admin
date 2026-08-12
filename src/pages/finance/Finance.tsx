@@ -481,12 +481,12 @@ const Finance = () => {
             </div>
           )}
 
-          <div style={{ overflowX: "auto", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+          <div style={{ overflowX: "visible", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#FFFFFF", fontSize: "13px", textAlign: "left" }}>
-              <thead>
+              <thead style={{ position: "sticky", top: 0, zIndex: 10, background: "#F8FAFC" }}>
                 <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
                   {["Donation ID", "Donor / Reference", "Type", "Amount", "Status", "Date", "Actions"].map((h) => (
-                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap", background: "#F8FAFC" }}>{h}</th>
                   ))}
                 </tr>
               </thead>

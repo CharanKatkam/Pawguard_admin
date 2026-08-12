@@ -219,7 +219,7 @@ const DataTable: React.FC<DataTableProps> = ({
   };
 
   return (
-    <div style={{ width: "100%", overflow: "hidden" }}>
+    <div style={{ width: "100%", overflow: "visible" }}>
       {/* Search Header */}
       <div
         style={{
@@ -273,7 +273,7 @@ const DataTable: React.FC<DataTableProps> = ({
       </div>
 
       {/* Responsive Table Wrapper */}
-      <div style={{ overflowX: "auto", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+      <div style={{ overflowX: "visible", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
         <table
           style={{
             width: "100%",
@@ -283,7 +283,14 @@ const DataTable: React.FC<DataTableProps> = ({
             textAlign: "left",
           }}
         >
-          <thead>
+          <thead
+            style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 10,
+              background: "#F8FAFC",
+            }}
+          >
             <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
               {columns.map((col) => (
                 <th
@@ -295,6 +302,7 @@ const DataTable: React.FC<DataTableProps> = ({
                     cursor: "default",
                     userSelect: "none",
                     whiteSpace: "nowrap",
+                    background: "#F8FAFC",
                   }}
                 >
                   {col.title || col.header || col.key}
@@ -308,6 +316,7 @@ const DataTable: React.FC<DataTableProps> = ({
                     color: "#475569",
                     whiteSpace: "nowrap",
                     textAlign: "right",
+                    background: "#F8FAFC",
                   }}
                 >
                   Actions

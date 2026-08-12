@@ -26,9 +26,10 @@ const AdminLayout = () => {
     <div
       style={{
         background: "#F8FAFC",
-        minHeight: "100vh",
+        height: "100vh",
         display: "flex",
         width: "100%",
+        overflow: "hidden",
       }}
     >
       {/* Fixed Sidebar */}
@@ -38,10 +39,11 @@ const AdminLayout = () => {
       <div
         style={{
           marginLeft: `${sidebarWidth}px`,
-          minHeight: "100vh",
+          height: "100vh",
           width: `calc(100% - ${sidebarWidth}px)`,
           display: "flex",
           flexDirection: "column",
+          overflow: "hidden",
           transition: "margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
         }}
       >
@@ -116,6 +118,7 @@ const AdminLayout = () => {
             flex: 1,
             padding: "24px",
             overflowY: "auto",
+            overflowX: "auto",
             maxWidth: "1600px",
             width: "100%",
             boxSizing: "border-box",

@@ -717,9 +717,9 @@ const RolesPermissions = () => {
             </div>
           </div>
 
-          <div style={{ overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 12 }}>
+          <div style={{ overflowX: "visible", border: "1px solid #E2E8F0", borderRadius: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
+              <thead style={{ position: "sticky", top: 0, zIndex: 10, background: "#F8FAFC" }}>
                 <tr style={{ borderBottom: "1px solid #E2E8F0" }}>
                   <th style={thStyle}>Role</th>
                   <th style={thStyle}>Category</th>
@@ -855,9 +855,9 @@ const RolesPermissions = () => {
             </div>
           )}
 
-          <div style={{ overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 12 }}>
+          <div style={{ overflowX: "visible", border: "1px solid #E2E8F0", borderRadius: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 820 }}>
-              <thead>
+              <thead style={{ position: "sticky", top: 0, zIndex: 10, background: "#F8FAFC" }}>
                 <tr style={{ borderBottom: "1px solid #E2E8F0" }}>
                   <th style={thStyle}>User</th>
                   <th style={thStyle}>Email</th>
