@@ -11,6 +11,10 @@ import Adoptions from "./pages/adoptions/Adoptions";
 import Reports from "./pages/reports/Reports";
 import Settings from "./pages/settings/Settings";
 import MedicalRecords from "./pages/medical/MedicalRecords";
+import VaccinationReminders from "./pages/medical/VaccinationReminders";
+
+import VetAppointments from "./pages/medical/VetAppointments";
+
 import Inventory from "./pages/inventory/Inventory";
 import Finance from "./pages/finance/Finance";
 import AuditLogs from "./pages/audit/AuditLogs";
@@ -239,6 +243,10 @@ function App() {
               }
             >
               <Route path="/medical-records" element={<MedicalRecords />} />
+              <Route path="/vet-directory" element={<VetAppointments />} />
+              <Route path="/medical-reminders" element={<VaccinationReminders />} />
+
+
             </Route>
 
             <Route

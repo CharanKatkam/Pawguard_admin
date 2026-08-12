@@ -50,6 +50,8 @@ const getPageTitle = (pathname: string): string => {
   if (path.includes("/rescue-dispatch")) return "Rescue Dispatch";
   if (path.includes("/pets")) return "Dog & Animal Management";
   if (path.includes("/medical-records")) return "Medical Management";
+  if (path.includes("/medical-reminders")) return "Vaccination & Medication Reminders";
+
   if (path.includes("/shelters")) return "Shelter Management";
   if (path.includes("/adoptions")) return "Adoption Management";
   if (path.includes("/fosters")) return "Foster Management";

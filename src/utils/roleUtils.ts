@@ -390,6 +390,10 @@ export const MODULE_VIEW_PERMISSIONS: Record<string, string> = {
   "/rescue-dispatch": "view_rescue_dispatch",
   "/pets": "view_animals",
   "/medical-records": "view_medical",
+  "/vet-directory": "view_medical",
+  "/medical-reminders": "view_medical",
+
+
   "/shelters": "view_shelters",
   "/adoptions": "view_adoptions",
   "/fosters": "view_foster_placements",
@@ -428,6 +432,10 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Foster Care", path: "/fosters", iconType: "fosters" },
         { name: "Volunteers", path: "/volunteers", iconType: "volunteers" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
+        { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
+        { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
+
+
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
         { name: "Finance", path: "/finance", iconType: "finance" },
         { name: "Vehicle Fleet", path: "/vehicles", iconType: "vehicles" },
@@ -449,6 +457,10 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Shelter Management", path: "/shelters", iconType: "shelters" },
         { name: "Staff & Users", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
+        { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
+        { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
+
+
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
         { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
@@ -478,6 +490,10 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "Medical Suite", path: "/medical-records", iconType: "medical" },
+        { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
+        { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
+
+
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
         { name: "Vaccines & Certs", path: "/certificates", iconType: "certificates" },
         { name: "Medical Reports", path: "/reports", iconType: "reports" },
@@ -490,6 +506,10 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
         { name: "Shelter Staff", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
+        { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
+        { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
+
+
         { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
         { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
         { name: "Inventory", path: "/inventory", iconType: "inventory" },

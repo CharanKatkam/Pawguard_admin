@@ -106,6 +106,19 @@ export const petService = {
     });
     return response.data;
   },
+
+  // GET /dogs/{dog_id}/qr-image - staff-only dog profile QR image (image blob).
+  // The backend generates/caches the QR for the dog, so re-fetching simply
+  // returns the existing QR instead of creating a duplicate.
+  getDogQrImage: async (dogId: string): Promise<Blob> => {
+    const response = await api.get(`/dogs/${dogId}/qr-image`, {
+      responseType: "blob",
+    });
+    if (!(response.data instanceof Blob)) {
+      throw new Error("QR endpoint did not return a valid image.");
+    }
+    return response.data;
+  },
 };
 
 export default petService;
