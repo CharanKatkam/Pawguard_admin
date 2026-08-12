@@ -5,7 +5,7 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaStethoscope, FaSyringe, FaNotesMedical, FaFileMedical, FaTrash, FaUserMd } from "react-icons/fa";
+import { FaStethoscope, FaSyringe, FaNotesMedical, FaFileMedical, FaTrash, FaUserMd, FaEye, FaHeartbeat, FaClipboardList, FaCheckCircle } from "react-icons/fa";
 import medicalService from "../../services/medicalService";
 import dogService from "../../services/dogService";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -31,7 +31,12 @@ const MedicalRecords = () => {
   const [isSurgeryModalOpen, setIsSurgeryModalOpen] = useState(false);
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [selectedDogProfile, setSelectedDogProfile] = useState<any | null>(null);
+  const [dogHistory, setDogHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   // Form states
   const [examForm, setExamForm] = useState({ dogId: "", diagnosis: "", treatment: "" });
@@ -204,6 +209,31 @@ const MedicalRecords = () => {
     }
   };
 
+  const openMedicalProfile = async (record: any) => {
+    const dog = dogs.find((d) => d.id === record.petId || d.id === record.pet_id) || {
+      id: record.petId || record.pet_id || "DOG-REC",
+      name: record.petName || "Patient Dog",
+      breed: "Canine",
+      status: record.status || "Under Care",
+    };
+    setSelectedDogProfile({
+      ...dog,
+      recordContext: record,
+    });
+    setIsProfileModalOpen(true);
+    if (dog.id) {
+      try {
+        setHistoryLoading(true);
+        const res = await medicalService.getMedicalHistory(dog.id);
+        setDogHistory(Array.isArray(res?.data) ? res.data : []);
+      } catch {
+        setDogHistory([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+  };
+
   const countRecordsWith = (...needles: string[]): number =>
     medicalRecords.filter((r) => {
       const hay = [
@@ -269,20 +299,54 @@ const MedicalRecords = () => {
       </div>
 
       <div className="soft-card" style={{ padding: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
           <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
             Patient Clinical Directory
           </h3>
-          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading medical records...</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="all">All Medical Categories</option>
+              <option value="exams">Clinical Exams</option>
+              <option value="vaccinations">Vaccinations</option>
+              <option value="treatments">Treatments &amp; Surgeries</option>
+            </select>
+            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading records...</span>}
+          </div>
         </div>
         <DataTable
           columns={columns}
-          data={medicalRecords}
+          data={categoryFilter === "all" ? medicalRecords : medicalRecords.filter((r: any) => r.type === categoryFilter)}
           module="medical"
           onDelete={(row) => {
             setSelectedRecord(row);
             setIsDeleteModalOpen(true);
           }}
+          renderRowActions={(row: any) => (
+            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => void openMedicalProfile(row)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #93C5FD",
+                  background: "#EFF6FF",
+                  color: "#1D4ED8",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <FaEye /> Medical Profile
+              </button>
+            </div>
+          )}
         />
       </div>
 
@@ -405,6 +469,103 @@ const MedicalRecords = () => {
             <button type="button" disabled={isSubmitting} onClick={handleDelete} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}><FaTrash /> Delete</button>
           </div>
         </div>
+      </Modal>
+
+      {/* Comprehensive Dog Medical Profile Modal */}
+      <Modal
+        isOpen={isProfileModalOpen}
+        onClose={() => {
+          setIsProfileModalOpen(false);
+          setSelectedDogProfile(null);
+        }}
+        title={`Dog Medical Profile — ${selectedDogProfile?.name || selectedDogProfile?.petName || "Patient"}`}
+        maxWidth="720px"
+      >
+        {selectedDogProfile && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Header Badge & Basic Info */}
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
+                  {selectedDogProfile.name || selectedDogProfile.petName || "Unnamed Patient"}
+                </h2>
+                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
+                  Dog ID: <strong style={{ fontFamily: "monospace" }}>{selectedDogProfile.id || selectedDogProfile.registration_number}</strong> &bull; Breed: {selectedDogProfile.breed || "Canine"}
+                </div>
+              </div>
+              <span style={{ padding: "6px 14px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: "#ECFDF5", color: "#059669", display: "flex", alignItems: "center", gap: "6px" }}>
+                <FaHeartbeat /> {selectedDogProfile.status || "Stable / Under Care"}
+              </span>
+            </div>
+
+            {/* Health Status & Clinical Summary */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Primary Diagnosis</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  {selectedDogProfile.recordContext?.diagnosis || "Intake Clinical Exam Complete"}
+                </div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Attending Veterinarian</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  {selectedDogProfile.recordContext?.vetName || "Staff Veterinarian"}
+                </div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Treatment / Procedure</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  {selectedDogProfile.recordContext?.treatment || "Standard Supportive Care"}
+                </div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Veterinary Clearance Status</div>
+                <div style={{ fontSize: "14px", fontWeight: 700, color: selectedDogProfile.vet_clearance === false ? "#DC2626" : "#059669", marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FaCheckCircle /> {selectedDogProfile.vet_clearance === false ? "Pending Clearance" : "Cleared for Placement"}
+                </div>
+              </div>
+            </div>
+
+            {/* Chronological Medical Timeline */}
+            <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <FaClipboardList color="#2563EB" /> Chronological Medical History &amp; Audit Trail
+              </div>
+              {historyLoading ? (
+                <div style={{ textAlign: "center", padding: "20px", color: "#64748B", fontSize: "13px" }}>Loading medical timeline...</div>
+              ) : dogHistory.length === 0 ? (
+                <div style={{ background: "#FFFFFF", padding: "12px", borderRadius: "8px", color: "#64748B", fontSize: "13px", textAlign: "center" }}>
+                  Clinical history logged under patient profile. Active records attached to Dog Master File.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
+                  {dogHistory.map((item: any, idx: number) => (
+                    <div key={idx} style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", fontSize: "12px" }}>
+                      <div style={{ fontWeight: 700, color: "#0F172A" }}>{item.event_type || item.type || "Medical Activity"} &bull; {item.date || item.created_at || "Recent"}</div>
+                      <div style={{ color: "#475569", marginTop: "2px" }}>{item.description || item.notes || "Recorded in clinical logs."}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsProfileModalOpen(false);
+                  setSelectedDogProfile(null);
+                }}
+                style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
+              >
+                Close Profile
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

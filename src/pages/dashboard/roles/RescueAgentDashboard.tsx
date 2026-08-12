@@ -140,7 +140,7 @@ const RescueAgentDashboard = () => {
   const columns = [
     { key: "ticket", title: "Ticket" },
     { key: "reporter", title: "Reporter" },
-    { key: "animal_count", title: "Animals" },
+    { key: "animal_count", title: "Dogs" },
     { key: "location", title: "Location" },
     {
       key: "severity",

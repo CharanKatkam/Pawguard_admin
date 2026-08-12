@@ -119,7 +119,7 @@ export const adoptionService = {
     await triggerAdoptionWorkflow(
       "Submitted",
       (data.applicantName as string) || "Adopter",
-      (data.petName as string) || "Rescue Animal",
+      (data.petName as string) || "Rescue Dog",
       false
     );
     return response.data;
@@ -133,7 +133,7 @@ export const adoptionService = {
     await triggerAdoptionWorkflow(
       "Decision",
       "Applicant",
-      `Animal #${id}`,
+      `Dog #${id}`,
       toAdoptionStatus(status) === "approved"
     );
     return response.data;

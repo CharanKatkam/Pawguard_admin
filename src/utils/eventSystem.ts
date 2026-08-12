@@ -145,7 +145,7 @@ export function triggerRescueCompletionWorkflow(requestId: string, petName: stri
     module: "rescue",
     action: "approve",
     title: `Rescue Completed: #${requestId}`,
-    message: `Animal ${petName} successfully admitted to ${facilityName}.`,
+    message: `Dog ${petName} successfully admitted to ${facilityName}.`,
     targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager", "veterinarian"],
   });
 }

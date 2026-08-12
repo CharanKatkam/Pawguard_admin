@@ -129,7 +129,7 @@ const ShelterManagerDashboard = () => {
 
   const stats = [
     {
-      title: "Shelter Animals",
+      title: "Shelter Dogs",
       value: loading ? "..." : dashboardData.total_dogs,
       trend: `${dashboardData.adoptable_dogs} Adoptable`,
       color: "#2563EB",
@@ -236,7 +236,7 @@ const ShelterManagerDashboard = () => {
         <QuickActionCard
           icon={<FaPaw />}
           title="Register Dog"
-          subtitle="New animal intake"
+          subtitle="New dog intake"
           color="#10B981"
           onClick={() => navigate("/pets?action=register")}
         />

@@ -736,7 +736,7 @@ const Shelters = () => {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Animal to Assign *</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog to Assign *</label>
             <select
               required
               value={cageSel.dogId}

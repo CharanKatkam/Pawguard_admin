@@ -16,6 +16,8 @@ import {
   FaQrcode,
   FaDownload,
   FaPrint,
+  FaEye,
+  FaStethoscope,
 } from "react-icons/fa";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
@@ -100,7 +102,9 @@ const Pets = () => {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedDog, setSelectedDog] = useState<any | null>(null);
+  const [selectedViewDog, setSelectedViewDog] = useState<any | null>(null);
 
   // QR modal state
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -267,6 +271,19 @@ const Pets = () => {
       addToast("Could not determine the dog record to update.", "error");
       return;
     }
+    // Enforce business rule: A dog cannot become adoptable without veterinary clearance
+    if (
+      dog.vet_clearance === false ||
+      dog.vet_clearance_status === "pending" ||
+      dog.vet_clearance_status === "rejected" ||
+      dog.medical_status === "quarantine"
+    ) {
+      addToast(
+        `Cannot clear ${dog.name} for adoption: Veterinary clearance is required before listing a dog as adoptable.`,
+        "error"
+      );
+      return;
+    }
     try {
       await petService.markDogAdoptable(id);
       addToast(`${dog.name} is now marked Ready for Adoption!`, "success");
@@ -277,6 +294,11 @@ const Pets = () => {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update status.";
       addToast(msg, "error");
     }
+  };
+
+  const openViewMasterFile = (dog: any) => {
+    setSelectedViewDog(dog);
+    setIsViewModalOpen(true);
   };
 
   const openEdit = (dog: any) => {
@@ -499,27 +521,43 @@ const Pets = () => {
 
   const rowActions = (row: any) => (
     <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-      <Can permission="edit_animals">
+      <Can permission="view_animals">
         <button
-          onClick={() => openQrModal(row)}
-          disabled={!row.rescue_case_id}
-          title={
-            row.rescue_case_id
-              ? "Generate / view this rescued dog's QR code"
-              : "QR is available only for rescued dogs. Link a rescue case to this dog first."
-          }
+          onClick={() => openViewMasterFile(row)}
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: "6px",
             padding: "6px 12px",
             borderRadius: "6px",
-            border: row.rescue_case_id ? "1px solid #C4B5FD" : "1px solid #E2E8F0",
-            background: row.rescue_case_id ? "#FFFFFF" : "#F1F5F9",
-            color: row.rescue_case_id ? "#6D28D9" : "#94A3B8",
+            border: "1px solid #93C5FD",
+            background: "#EFF6FF",
+            color: "#1D4ED8",
             fontSize: "12px",
             fontWeight: 600,
-            cursor: row.rescue_case_id ? "pointer" : "not-allowed",
+            cursor: "pointer",
+          }}
+        >
+          <FaEye /> Master File
+        </button>
+      </Can>
+      <Can permission="edit_animals">
+        <button
+          onClick={() => openQrModal(row)}
+          disabled={!dogId(row)}
+          title="Generate / view this dog's unique QR code tag"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 12px",
+            borderRadius: "6px",
+            border: dogId(row) ? "1px solid #C4B5FD" : "1px solid #E2E8F0",
+            background: dogId(row) ? "#FFFFFF" : "#F1F5F9",
+            color: dogId(row) ? "#6D28D9" : "#94A3B8",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: dogId(row) ? "pointer" : "not-allowed",
           }}
         >
           <FaQrcode /> Generate QR
@@ -580,7 +618,7 @@ const Pets = () => {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>
-          Animal & Rescue Case Directory
+          Dog & Rescue Case Directory
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
           Comprehensive dog tracking, intake records, shelter management and adoption monitoring.
@@ -807,7 +845,7 @@ const Pets = () => {
               <option value="">No linked rescue case</option>
               {rescueCases.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.ticket_number || c.id} — {c.animal_count ?? ""} {c.animal_count ? "animal(s)" : ""}{c.location_address ? ` @ ${c.location_address}` : ""}
+                  {c.ticket_number || c.id} — {c.animal_count ?? ""} {c.animal_count ? "dog(s)" : ""}{c.location_address ? ` @ ${c.location_address}` : ""}
                 </option>
               ))}
             </select>
@@ -836,7 +874,7 @@ const Pets = () => {
       <Modal
         isOpen={isStatusModalOpen}
         onClose={() => setIsStatusModalOpen(false)}
-        title="Update Rescue Animal Status"
+        title="Update Rescue Dog Status"
       >
         <form onSubmit={handleUpdateStatus} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
@@ -893,11 +931,11 @@ const Pets = () => {
       <Modal
         isOpen={isAdoptableModalOpen}
         onClose={() => setIsAdoptableModalOpen(false)}
-        title="Mark Animal Ready for Adoption"
+        title="Mark Dog Ready for Adoption"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <p style={{ color: "#334155", margin: 0 }}>
-            Select an animal to clear for adoption listing:
+            Select a dog to clear for adoption listing:
           </p>
           <div style={{ maxHeight: "250px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
             {allDogs.map((d) => (
@@ -946,7 +984,7 @@ const Pets = () => {
           setIsEditModalOpen(false);
           setSelectedDog(null);
         }}
-        title="Edit Animal Record"
+        title="Edit Dog Record"
       >
         <form onSubmit={handleEditDogSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
@@ -1063,7 +1101,7 @@ const Pets = () => {
           setIsDeleteModalOpen(false);
           setSelectedDog(null);
         }}
-        title="Confirm Animal Record Deletion"
+        title="Confirm Dog Record Deletion"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ color: "#334155", margin: 0 }}>
@@ -1251,6 +1289,157 @@ const Pets = () => {
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* Dog Master File View Modal */}
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => {
+          setIsViewModalOpen(false);
+          setSelectedViewDog(null);
+        }}
+        title={`Dog Master Profile — ${selectedViewDog?.name || "Record"}`}
+        maxWidth="680px"
+      >
+        {selectedViewDog && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                background: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+                borderRadius: "10px",
+                padding: "16px",
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
+                  {selectedViewDog.name || "Unnamed Dog"}
+                </h2>
+                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
+                  Registration ID: <strong style={{ fontFamily: "monospace" }}>{selectedViewDog.registration_number || selectedViewDog.id}</strong>
+                </div>
+              </div>
+              <span
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "999px",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  background: selectedViewDog.is_adoptable ? "#ECFDF5" : "#EFF6FF",
+                  color: selectedViewDog.is_adoptable ? "#059669" : "#2563EB",
+                }}
+              >
+                {selectedViewDog.is_adoptable ? "Ready for Adoption" : String(selectedViewDog.status || "Admitted").toUpperCase()}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Breed</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedViewDog.breed || "-"}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Gender</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px", textTransform: "capitalize" }}>{selectedViewDog.gender || "-"}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Estimated Age</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedViewDog.estimated_age || (selectedViewDog.age_months ? `${selectedViewDog.age_months} months` : "-")}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Weight</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedViewDog.weight ? `${selectedViewDog.weight} kg` : "-"}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Color / Markings</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedViewDog.color || selectedViewDog.distinguishing_marks || "-"}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Microchip ID</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px", fontFamily: "monospace" }}>{selectedViewDog.microchip_id || "Not Microchipped"}</div>
+              </div>
+            </div>
+
+            <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>
+                <FaStethoscope color="#2563EB" /> Veterinary &amp; Operational Clearance
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+                <div>
+                  <span style={{ color: "#64748B" }}>Vet Clearance Status:</span>{" "}
+                  <strong style={{ color: selectedViewDog.vet_clearance === false ? "#DC2626" : "#059669" }}>
+                    {selectedViewDog.vet_clearance_status || (selectedViewDog.vet_clearance === false ? "Pending Clearance" : "Cleared")}
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Linked Rescue Ticket:</span>{" "}
+                  <strong>{selectedViewDog.rescue_case_id ? `Case #${selectedViewDog.rescue_case_id.slice(0, 8)}` : "None Linked"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Current Facility / Shelter:</span>{" "}
+                  <strong>{selectedViewDog.shelter_name || selectedViewDog.current_facility || "Central Shelter"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>QR Tag Identifier:</span>{" "}
+                  <strong style={{ color: "#6D28D9" }}>{selectedViewDog.registration_number ? `QR-${selectedViewDog.registration_number.slice(0, 8)}` : "Active"}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const dog = selectedViewDog;
+                  setIsViewModalOpen(false);
+                  openQrModal(dog);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#6D28D9",
+                  color: "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                <FaQrcode /> View QR Code
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsViewModalOpen(false);
+                  setSelectedViewDog(null);
+                }}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  color: "#334155",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

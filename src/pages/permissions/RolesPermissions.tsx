@@ -562,11 +562,16 @@ const RolesPermissions = () => {
     textAlign: "left",
     whiteSpace: "nowrap",
     background: "#F8FAFC",
+    position: "sticky",
+    top: 0,
+    zIndex: 10,
+    borderBottom: "1px solid #E2E8F0",
   };
   const tdStyle: React.CSSProperties = {
     padding: "12px 14px",
     verticalAlign: "middle",
     color: "#0F172A",
+    borderBottom: "1px solid #F1F5F9",
   };
   const actionButtonStyle = (color: string, bg: string): React.CSSProperties => ({
     display: "inline-flex",
@@ -717,7 +722,7 @@ const RolesPermissions = () => {
             </div>
           </div>
 
-          <div style={{ overflowX: "visible", border: "1px solid #E2E8F0", borderRadius: 12 }}>
+          <div style={{ overflowX: "auto", width: "100%", border: "1px solid #E2E8F0", borderRadius: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead style={{ position: "sticky", top: 0, zIndex: 10, background: "#F8FAFC" }}>
                 <tr style={{ borderBottom: "1px solid #E2E8F0" }}>
@@ -855,7 +860,7 @@ const RolesPermissions = () => {
             </div>
           )}
 
-          <div style={{ overflowX: "visible", border: "1px solid #E2E8F0", borderRadius: 12 }}>
+          <div style={{ overflowX: "auto", width: "100%", border: "1px solid #E2E8F0", borderRadius: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 820 }}>
               <thead style={{ position: "sticky", top: 0, zIndex: 10, background: "#F8FAFC" }}>
                 <tr style={{ borderBottom: "1px solid #E2E8F0" }}>

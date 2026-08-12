@@ -76,6 +76,23 @@ export const vetService = {
     });
     return unwrapData(response);
   },
+  // GET /companion-pets/clinics/{clinic_id}/veterinarians - list veterinarians for a clinic
+  getClinicVeterinarians: async (clinicId: string) => {
+    const response = await api.get(`/companion-pets/clinics/${clinicId}/veterinarians`);
+    return {
+      data: unwrapList(response),
+      meta: asRecord(response).meta,
+    };
+  },
+
+  // GET /portal/admin/veterinary-network - list partner veterinary network clinics/doctors
+  getPartnerVeterinaryNetwork: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/portal/admin/veterinary-network", { params });
+    return {
+      data: unwrapList(response),
+      meta: asRecord(response).meta,
+    };
+  },
 };
 
 export default vetService;

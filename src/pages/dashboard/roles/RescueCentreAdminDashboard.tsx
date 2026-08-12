@@ -145,7 +145,7 @@ const RescueCentreAdminDashboard = () => {
   const columns = [
     { key: "ticket", header: "Ticket" },
     { key: "reporter", header: "Reporter" },
-    { key: "animal_count", header: "Animals" },
+    { key: "animal_count", header: "Dogs" },
     {
       key: "status",
       header: "Status",
@@ -247,7 +247,7 @@ const RescueCentreAdminDashboard = () => {
         <QuickActionCard
           icon={<FaStethoscope />}
           title="Medical Intake"
-          subtitle="Register Animal"
+          subtitle="Register Dog"
           color="#10B981"
           onClick={() => navigate("/medical-records")}
         />

@@ -128,7 +128,7 @@ const RescueCoordinatorDashboard = () => {
       icon: <FaClock />,
     },
     {
-      title: "Animals Rescued",
+      title: "Dogs Rescued",
       value: loading ? "..." : dashboardData.rescued,
       trend: "Successfully Completed",
       color: "#10B981",
@@ -139,7 +139,7 @@ const RescueCoordinatorDashboard = () => {
   const columns = [
     { key: "ticket", title: "Ticket" },
     { key: "reporter", title: "Reporter" },
-    { key: "animal_count", title: "Animals" },
+    { key: "animal_count", title: "Dogs" },
     { key: "location", title: "Location" },
     {
       key: "severity",

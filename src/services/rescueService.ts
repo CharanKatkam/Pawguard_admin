@@ -47,7 +47,7 @@ export const rescueService = {
       module: "rescue",
       action: "create",
       title: "New Rescue Incident Reported",
-      message: `Rescue incident reported for ${data.dog_name || "animal"} at ${data.location || "field location"}.`,
+      message: `Rescue incident reported for ${data.dog_name || "dog"} at ${data.location || "field location"}.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });
     return response.data;
@@ -232,7 +232,7 @@ export const rescueService = {
     await publishActionEvent({
       module: "rescue",
       action: "update",
-      title: "Animal Located",
+      title: "Dog Located",
       message: `Rescue case ${requestId} marked as located by field team.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });
@@ -245,7 +245,7 @@ export const rescueService = {
     await publishActionEvent({
       module: "rescue",
       action: "update",
-      title: "Animal Secured",
+      title: "Dog Secured",
       message: `Rescue case ${requestId} marked as secured by field team.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });
@@ -260,7 +260,7 @@ export const rescueService = {
     await publishActionEvent({
       module: "rescue",
       action: "update",
-      title: "Animal Admitted",
+      title: "Dog Admitted",
       message: `Rescue case ${requestId} admitted to the rescue centre.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });

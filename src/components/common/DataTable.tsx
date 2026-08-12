@@ -156,6 +156,7 @@ const DataTable: React.FC<DataTableProps> = ({
           fontWeight: 700,
           display: "inline-block",
           textTransform: "capitalize",
+          whiteSpace: "nowrap",
         }}
       >
         {val}
@@ -272,15 +273,23 @@ const DataTable: React.FC<DataTableProps> = ({
         </div>
       </div>
 
-      {/* Responsive Table Wrapper */}
-      <div style={{ overflowX: "visible", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+      {/* Responsive Table */}
+      {/* Horizontal overflow is handled by AdminLayout <main> (overflowX: auto).
+          This wrapper ensures the table can expand beyond viewport width while
+          the sticky header stays aligned with body columns during horizontal scroll. */}
+      <div style={{ overflowX: "auto", width: "100%" }}>
         <table
           style={{
             width: "100%",
-            borderCollapse: "collapse",
+            minWidth: "max-content",
+            tableLayout: "auto",
+            borderCollapse: "separate",
+            borderSpacing: 0,
             background: "#FFFFFF",
             fontSize: "13px",
             textAlign: "left",
+            border: "1px solid #E2E8F0",
+            borderRadius: "12px",
           }}
         >
           <thead
@@ -288,11 +297,10 @@ const DataTable: React.FC<DataTableProps> = ({
               position: "sticky",
               top: 0,
               zIndex: 10,
-              background: "#F8FAFC",
             }}
           >
-            <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
-              {columns.map((col) => (
+            <tr style={{ background: "#F8FAFC" }}>
+              {columns.map((col, ci) => (
                 <th
                   key={col.key}
                   style={{
@@ -303,6 +311,11 @@ const DataTable: React.FC<DataTableProps> = ({
                     userSelect: "none",
                     whiteSpace: "nowrap",
                     background: "#F8FAFC",
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 10,
+                    borderBottom: "1px solid #E2E8F0",
+                    borderTopLeftRadius: ci === 0 ? "11px" : 0,
                   }}
                 >
                   {col.title || col.header || col.key}
@@ -317,6 +330,11 @@ const DataTable: React.FC<DataTableProps> = ({
                     whiteSpace: "nowrap",
                     textAlign: "right",
                     background: "#F8FAFC",
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 10,
+                    borderBottom: "1px solid #E2E8F0",
+                    borderTopRightRadius: "11px",
                   }}
                 >
                   Actions
@@ -395,7 +413,9 @@ const DataTable: React.FC<DataTableProps> = ({
                 </td>
               </tr>
             ) : (
-              pageData.map((row, idx) => (
+              pageData.map((row, idx) => {
+                const isLastRow = idx === pageData.length - 1;
+                return (
                 <tr
                   key={idx}
                   onClick={() => handleRowClick(row)}
@@ -407,7 +427,7 @@ const DataTable: React.FC<DataTableProps> = ({
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#F8FAFC")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "#FFFFFF")}
                 >
-                  {columns.map((col) => {
+                  {columns.map((col, ci) => {
                     const rawVal = row[col.key];
                     let content: React.ReactNode = String(rawVal ?? "");
 
@@ -417,19 +437,45 @@ const DataTable: React.FC<DataTableProps> = ({
                       content = renderStatusBadge(String(rawVal ?? ""));
                     }
 
+                    const rawText = String(rawVal ?? "");
+                    const keepNaturalWidth = rawText.length > 0 && rawText.length <= 32;
+
                     return (
-                      <td key={col.key} style={{ padding: "14px 16px", color: "#0F172A", verticalAlign: "middle" }}>
+                      <td
+                        key={col.key}
+                        style={{
+                          padding: "14px 16px",
+                          color: "#0F172A",
+                          verticalAlign: "middle",
+                          borderBottom: "1px solid #F1F5F9",
+                          whiteSpace: keepNaturalWidth ? "nowrap" : "normal",
+                          borderBottomLeftRadius: isLastRow && ci === 0 ? "11px" : 0,
+                          borderBottomRightRadius:
+                            isLastRow && !showRowActions && ci === columns.length - 1
+                              ? "11px"
+                              : 0,
+                        }}
+                      >
                         {content}
                       </td>
                     );
                   })}
                   {showRowActions && (
-                    <td style={{ padding: "14px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: "14px 16px",
+                        textAlign: "right",
+                        whiteSpace: "nowrap",
+                        borderBottom: "1px solid #F1F5F9",
+                        borderBottomRightRadius: isLastRow ? "11px" : 0,
+                      }}
+                    >
                       {renderRowActions && renderRowActions(row)}
                     </td>
                   )}
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

@@ -481,12 +481,12 @@ const Finance = () => {
             </div>
           )}
 
-          <div style={{ overflowX: "visible", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", background: "#FFFFFF", fontSize: "13px", textAlign: "left" }}>
-              <thead style={{ position: "sticky", top: 0, zIndex: 10, background: "#F8FAFC" }}>
-                <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
-                  {["Donation ID", "Donor / Reference", "Type", "Amount", "Status", "Date", "Actions"].map((h) => (
-                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap", background: "#F8FAFC" }}>{h}</th>
+          <div style={{ overflowX: "auto", width: "100%" }}>
+            <table style={{ width: "100%", minWidth: "max-content", borderCollapse: "separate", borderSpacing: 0, background: "#FFFFFF", fontSize: "13px", textAlign: "left", border: "1px solid #E2E8F0", borderRadius: "12px" }}>
+              <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
+                <tr style={{ background: "#F8FAFC" }}>
+                  {["Donation ID", "Donor / Reference", "Type", "Amount", "Status", "Date", "Actions"].map((h, hi) => (
+                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap", background: "#F8FAFC", position: "sticky", top: 0, zIndex: 10, borderBottom: "1px solid #E2E8F0", borderTopLeftRadius: hi === 0 ? "11px" : 0, borderTopRightRadius: hi === 6 ? "11px" : 0, textAlign: hi === 6 ? "right" : "left" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -505,27 +505,29 @@ const Finance = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredDonations.map((d: any, idx) => (
+                  filteredDonations.map((d: any, idx) => {
+                    const isLastRow = idx === filteredDonations.length - 1;
+                    return (
                     <tr key={idx} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                      <td style={{ padding: "14px 16px", color: "#0F172A", fontWeight: 600, whiteSpace: "nowrap" }}>{d.id || "—"}</td>
-                      <td style={{ padding: "14px 16px", color: "#475569" }}>
+                      <td style={{ padding: "14px 16px", color: "#0F172A", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9", borderBottomLeftRadius: isLastRow ? "11px" : 0 }}>{d.id || "—"}</td>
+                      <td style={{ padding: "14px 16px", color: "#475569", borderBottom: "1px solid #F1F5F9" }}>
                         {d.donorName || d.transactionId || d.notes || (d.donorId ? `Donor ${String(d.donorId).slice(0, 8)}` : "Manual")}
                       </td>
-                      <td style={{ padding: "14px 16px", color: "#0F172A", textTransform: "capitalize" }}>{String(d.type || "one_time").replace("_", " ")}</td>
-                      <td style={{ padding: "14px 16px", color: "#10B981", fontWeight: 700, whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "14px 16px", color: "#0F172A", textTransform: "capitalize", borderBottom: "1px solid #F1F5F9" }}>{String(d.type || "one_time").replace("_", " ")}</td>
+                      <td style={{ padding: "14px 16px", color: "#10B981", fontWeight: 700, whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9" }}>
                         {(d.currency || "USD")} {Number(d.amount ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td style={{ padding: "14px 16px" }}>
+                      <td style={{ padding: "14px 16px", borderBottom: "1px solid #F1F5F9" }}>
                         <span style={{
                           background: String(d.status) === "success" ? "#ECFDF5" : String(d.status) === "failed" ? "#FEF2F2" : "#FFFBEB",
                           color: String(d.status) === "success" ? "#10B981" : String(d.status) === "failed" ? "#EF4444" : "#F59E0B",
-                          padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, textTransform: "capitalize", display: "inline-block",
+                          padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, textTransform: "capitalize", display: "inline-block", whiteSpace: "nowrap",
                         }}>
                           {d.status || "pending"}
                         </span>
                       </td>
-                      <td style={{ padding: "14px 16px", color: "#64748B", whiteSpace: "nowrap" }}>{formatDate(d.date)}</td>
-                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "14px 16px", color: "#64748B", whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9" }}>{formatDate(d.date)}</td>
+                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9", borderBottomRightRadius: isLastRow ? "11px" : 0 }}>
                         <Can permission="edit_finance">
                           <button
                             onClick={() => openStatusModal(d)}
@@ -544,7 +546,8 @@ const Finance = () => {
                         </button>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>

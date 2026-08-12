@@ -139,7 +139,7 @@ const RescueRequests = () => {
   const handleLocated = async (id: string) => {
     try {
       await rescueService.markRescueLocated(id);
-      addToast("Animal marked as located.", "success");
+      addToast("Dog marked as located.", "success");
       fetchRequests();
       notifyDataChanged();
     } catch (err: any) {
@@ -150,7 +150,7 @@ const RescueRequests = () => {
   const handleSecured = async (id: string) => {
     try {
       await rescueService.markRescueSecured(id);
-      addToast("Animal secured by field team.", "success");
+      addToast("Dog secured by field team.", "success");
       fetchRequests();
       notifyDataChanged();
     } catch (err: any) {
@@ -161,11 +161,11 @@ const RescueRequests = () => {
   const handleAdmitted = async (id: string) => {
     try {
       await rescueService.markRescueAdmitted(id);
-      addToast("Animal admitted to the rescue centre.", "success");
+      addToast("Dog admitted to the rescue centre.", "success");
       fetchRequests();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to admit animal", "error");
+      addToast(err?.response?.data?.detail || "Failed to admit dog", "error");
     }
   };
 

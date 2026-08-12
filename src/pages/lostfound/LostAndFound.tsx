@@ -664,12 +664,18 @@ const LostAndFound = () => {
     {
       key: "user",
       header: "Reporter",
-      render: (_v, row) => (
-        <span>
-          {row.user?.full_name || row.user?.email || "Not available"}
-          {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
-        </span>
-      ),
+      render: (_v, row) => {
+        const canSeeContact = role === "super_admin" || role === "rescue_centre_admin" || row.status === "resolved";
+        if (!canSeeContact) {
+          return <span style={{ color: "#64748B", fontSize: "12px" }}>🔒 Protected Contact</span>;
+        }
+        return (
+          <span>
+            {row.user?.full_name || row.user?.email || "Reporter Profile"}
+            {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
+          </span>
+        );
+      },
     },
     { key: "status", header: "Status", render: (val) => statusBadge(val) },
   ];
@@ -704,12 +710,18 @@ const LostAndFound = () => {
     {
       key: "user",
       header: "Reporter",
-      render: (_v, row) => (
-        <span>
-          {row.user?.full_name || row.user?.email || "Not available"}
-          {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
-        </span>
-      ),
+      render: (_v, row) => {
+        const canSeeContact = role === "super_admin" || role === "rescue_centre_admin" || row.status === "resolved";
+        if (!canSeeContact) {
+          return <span style={{ color: "#64748B", fontSize: "12px" }}>🔒 Protected Contact</span>;
+        }
+        return (
+          <span>
+            {row.user?.full_name || row.user?.email || "Reporter Profile"}
+            {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
+          </span>
+        );
+      },
     },
     { key: "status", header: "Status", render: (val) => statusBadge(val) },
   ];
@@ -764,12 +776,18 @@ const LostAndFound = () => {
     {
       key: "user",
       header: "Reporter",
-      render: (_v, row) => (
-        <span>
-          {row.user?.full_name || row.user?.email || "Not available"}
-          {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
-        </span>
-      ),
+      render: (_v, row) => {
+        const canSeeContact = role === "super_admin" || role === "rescue_centre_admin" || row.status === "resolved";
+        if (!canSeeContact) {
+          return <span style={{ color: "#64748B", fontSize: "12px" }}>🔒 Protected Contact</span>;
+        }
+        return (
+          <span>
+            {row.user?.full_name || row.user?.email || "Reporter Profile"}
+            {row.user?.phone ? ` \u00b7 ${row.user.phone}` : ""}
+          </span>
+        );
+      },
     },
     { key: "status", header: "Status", render: (val) => statusBadge(val) },
   ];
@@ -839,14 +857,18 @@ const LostAndFound = () => {
           { label: "Reported", value: formatDate(report.created_at) },
           {
             label: "Reporter",
-            value: report.user?.full_name || report.user?.email || "Not available",
+            value:
+              role === "super_admin" || role === "rescue_centre_admin" || report.status === "resolved"
+                ? report.user?.full_name || report.user?.email || "Reporter Profile"
+                : "🔒 Protected (Pending Verification)",
             icon: <FaUser size={13} />,
           },
           {
             label: "Reporter Contact",
             value:
-              [report.user?.phone, report.user?.email].filter(Boolean).join(" \u00b7 ") ||
-              "Not available",
+              role === "super_admin" || role === "rescue_centre_admin" || report.status === "resolved"
+                ? [report.user?.phone, report.user?.email].filter(Boolean).join(" \u00b7 ") || "Not available"
+                : "🔒 Protected (Released after ownership match verification)",
           },
           { label: "Status", value: "", badge: statusBadge(report.status) },
         ]);

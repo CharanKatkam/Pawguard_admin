@@ -393,7 +393,7 @@ const RescueManagement = () => {
             Rescue Management
           </h1>
           <p style={{ color: "#64748B", margin: "4px 0 0 0", fontSize: "14px" }}>
-            Monitor and coordinate live animal rescue requests from the field.
+            Monitor and coordinate live dog rescue requests from the field.
           </p>
         </div>
 
@@ -546,7 +546,7 @@ const RescueManagement = () => {
               </select>
             </div>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Animal Count</label>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Dog Count</label>
               <input
                 type="number"
                 min="1"
@@ -692,7 +692,7 @@ const RescueManagement = () => {
             </div>
 
             <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Animal Count</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Dog Count</div>
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.animal_count || "-"}</div>
             </div>
 

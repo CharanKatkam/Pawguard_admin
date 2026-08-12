@@ -69,9 +69,9 @@ const SuperAdminDashboard = () => {
       path: "/users",
     },
     {
-      title: "Rescued Animals",
+      title: "Rescued Dogs",
       value: pickCount(summary, dogs, ["total_dogs", "dogs_count"]),
-      subtitle: `${dogs.length} registered animals`,
+      subtitle: `${dogs.length} registered dogs`,
       icon: <FaPaw />,
       color: "#EF4444",
       path: "/pets",

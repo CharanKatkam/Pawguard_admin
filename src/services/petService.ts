@@ -36,8 +36,8 @@ export const petService = {
     await publishActionEvent({
       module: "shelter",
       action: "create",
-      title: "New Animal Intake Registered",
-      message: `Animal ${data.name || ""} (${data.breed || "Dog"}) registered in facility database.`,
+      title: "New Dog Intake Registered",
+      message: `Dog ${data.name || ""} (${data.breed || "Dog"}) registered in facility database.`,
       targetRoles: [
         "super_admin",
         "rescue_centre_admin",
@@ -54,8 +54,8 @@ export const petService = {
     await publishActionEvent({
       module: "shelter",
       action: "update",
-      title: "Animal Record Updated",
-      message: `Profile details for animal ${data.name || dogId} updated.`,
+      title: "Dog Record Updated",
+      message: `Profile details for dog ${data.name || dogId} updated.`,
       targetRoles: ["super_admin", "shelter_manager", "veterinarian"],
     });
     return response.data;
@@ -66,8 +66,8 @@ export const petService = {
     await publishActionEvent({
       module: "shelter",
       action: "update",
-      title: "Animal Status Changed",
-      message: `Status for animal ${dogId} changed to ${status}.`,
+      title: "Dog Status Changed",
+      message: `Status for dog ${dogId} changed to ${status}.`,
       targetRoles: [
         "super_admin",
         "shelter_manager",
@@ -83,8 +83,8 @@ export const petService = {
     await publishActionEvent({
       module: "shelter",
       action: "update",
-      title: "Animal Marked Ready for Adoption",
-      message: `Animal ${dogId} cleared for adoption listing.`,
+      title: "Dog Marked Ready for Adoption",
+      message: `Dog ${dogId} cleared for adoption listing.`,
       targetRoles: [
         "super_admin",
         "shelter_manager",
@@ -100,8 +100,8 @@ export const petService = {
     await publishActionEvent({
       module: "shelter",
       action: "delete",
-      title: "Animal Record Archived",
-      message: `Animal record ${dogId} archived from active shelter count.`,
+      title: "Dog Record Archived",
+      message: `Dog record ${dogId} archived from active shelter count.`,
       targetRoles: ["super_admin", "shelter_manager"],
     });
     return response.data;

@@ -23,7 +23,7 @@ const actions: Array<{
   path: string;
 }> = [
   {
-    title: "Register New Animal",
+    title: "Register New Dog",
     subtitle: "Add a dog to the database",
     icon: <FaPaw />,
     color: "#10B981",
