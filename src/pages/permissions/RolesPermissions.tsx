@@ -527,6 +527,10 @@ const RolesPermissions = () => {
       trend: `${roles.filter((r) => r.isSystem).length} System · ${roles.filter((r) => !r.isSystem).length} Custom`,
       color: "#2563EB",
       icon: <FaUserShield />,
+      onClick: () => {
+        setActiveTab("roles");
+        document.getElementById("roles-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "Permission Matrix",
@@ -534,6 +538,10 @@ const RolesPermissions = () => {
       trend: `${PERMISSION_COUNT_PER_MODULE} per module`,
       color: "#EF4444",
       icon: <FaLock />,
+      onClick: () => {
+        setActiveTab("roles");
+        document.getElementById("roles-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "Personnel Coverage",
@@ -541,6 +549,10 @@ const RolesPermissions = () => {
       trend: `${users.length} Registered Accounts`,
       color: "#10B981",
       icon: <FaUsers />,
+      onClick: () => {
+        setActiveTab("users");
+        document.getElementById("users-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
     },
   ];
 
@@ -678,7 +690,7 @@ const RolesPermissions = () => {
       </div>
 
       {activeTab === "roles" ? (
-        <div className="soft-card" style={{ padding: "20px" }}>
+        <div id="roles-tab-section" className="soft-card" style={{ padding: "20px" }}>
           <div
             style={{
               display: "flex",
@@ -799,7 +811,7 @@ const RolesPermissions = () => {
           </div>
         </div>
       ) : (
-        <div className="soft-card" style={{ padding: "20px" }}>
+        <div id="users-tab-section" className="soft-card" style={{ padding: "20px" }}>
           <div
             style={{
               display: "flex",

@@ -118,6 +118,7 @@ const VaccinationReminders = () => {
 
   const [administrations, setAdministrations] = useState<Row[]>([]);
 
+  const [activeTab, setActiveTab] = useState<"vaccination" | "medication" | "reminders">("vaccination");
   const [reminders, setReminders] = useState<Row[]>([]);
   const [remLoading, setRemLoading] = useState(false);
   const [remError, setRemError] = useState<string | null>(null);
@@ -317,10 +318,50 @@ const VaccinationReminders = () => {
   const activeReminders = reminders.filter((r) => Boolean(pick(r, "is_active"))).length;
 
   const stats = [
-    { title: "Upcoming Vaccinations", value: `${upcomingVaccinations}`, trend: "Due in future", color: "#2563EB", icon: <FaBell /> },
-    { title: "Overdue Vaccinations", value: `${overdueVaccinations}`, trend: "Action required", color: "#EF4444", icon: <FaExclamationTriangle /> },
-    { title: "Active Medication Plans", value: `${activePrescriptions}`, trend: "Prescriptions", color: "#F59E0B", icon: <FaPills /> },
-    { title: "Active Reminders", value: `${activeReminders}`, trend: "Pet reminders", color: "#10B981", icon: <FaSyringe /> },
+    {
+      title: "Upcoming Vaccinations",
+      value: `${upcomingVaccinations}`,
+      trend: "Due in future",
+      color: "#2563EB",
+      icon: <FaBell />,
+      onClick: () => {
+        setActiveTab("vaccination");
+        document.getElementById("vaccination-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Overdue Vaccinations",
+      value: `${overdueVaccinations}`,
+      trend: "Action required",
+      color: "#EF4444",
+      icon: <FaExclamationTriangle />,
+      onClick: () => {
+        setActiveTab("vaccination");
+        document.getElementById("vaccination-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Active Medication Plans",
+      value: `${activePrescriptions}`,
+      trend: "Prescriptions",
+      color: "#F59E0B",
+      icon: <FaPills />,
+      onClick: () => {
+        setActiveTab("medication");
+        document.getElementById("medication-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Active Reminders",
+      value: `${activeReminders}`,
+      trend: "Pet reminders",
+      color: "#10B981",
+      icon: <FaSyringe />,
+      onClick: () => {
+        setActiveTab("reminders");
+        document.getElementById("reminders-tab-section")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
   ];
 
   // ---- Tables ----
@@ -466,112 +507,175 @@ const VaccinationReminders = () => {
             </div>
           ) : null}
 
-          <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
-            {sectionTitle("Vaccination Schedule", `Booster due dates derived from administered vaccines for ${dogLabel}.`)}
-            <DataTable
-              columns={vaccinationColumns}
-              data={vaccinations}
-              module="medical"
-              loading={vaccLoading}
-              emptyMessage="No vaccination records for this dog yet."
-              renderRowActions={(row) => (
-                <Can permission="create_medical">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openReminderModal("vaccination", row, dogId);
-                    }}
-                    style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#2563EB", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
-                  >
-                    <FaPlus size={11} /> Create reminder
-                  </button>
-                </Can>
-              )}
-            />
+          <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+            <button
+              onClick={() => setActiveTab("vaccination")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "9px 18px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: activeTab === "vaccination" ? "#2563EB" : "#FFFFFF",
+                color: activeTab === "vaccination" ? "#FFFFFF" : "#475569",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              <FaSyringe /> Vaccination Schedule
+            </button>
+            <button
+              onClick={() => setActiveTab("medication")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "9px 18px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: activeTab === "medication" ? "#2563EB" : "#FFFFFF",
+                color: activeTab === "medication" ? "#FFFFFF" : "#475569",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              <FaPills /> Medication Schedule
+            </button>
+            <button
+              onClick={() => setActiveTab("reminders")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "9px 18px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: activeTab === "reminders" ? "#2563EB" : "#FFFFFF",
+                color: activeTab === "reminders" ? "#FFFFFF" : "#475569",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              <FaBell /> Pet Reminders
+            </button>
           </div>
 
-          <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
-            {sectionTitle("Medication Schedule", `Prescription windows (start/end) and administration log for ${dogLabel}.`)}
-            <DataTable
-              columns={prescriptionColumns}
-              data={prescriptions}
-              module="medical"
-              loading={rxLoading}
-              emptyMessage="No medication prescriptions for this dog."
-              renderRowActions={(row) => (
-                <>
+          {activeTab === "vaccination" && (
+            <div id="vaccination-tab-section" className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+              {sectionTitle("Vaccination Schedule", `Booster due dates derived from administered vaccines for ${dogLabel}.`)}
+              <DataTable
+                columns={vaccinationColumns}
+                data={vaccinations}
+                module="medical"
+                loading={vaccLoading}
+                emptyMessage="No vaccination records for this dog yet."
+                renderRowActions={(row) => (
                   <Can permission="create_medical">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        openReminderModal("medication", row, dogId);
+                        openReminderModal("vaccination", row, dogId);
                       }}
                       style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#2563EB", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
                     >
                       <FaPlus size={11} /> Create reminder
                     </button>
                   </Can>
-                  <Can permission="edit_medical">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleTogglePrescription(row);
-                      }}
-                      disabled={togglingRxId === str(pick(row, "id"))}
-                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#475569", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
-                    >
-                      {Boolean(pick(row, "is_active")) ? "Mark Inactive" : "Mark Active"}
-                    </button>
-                  </Can>
-                </>
-              )}
-            />
-            {administrations.length > 0 ? (
-              <div style={{ marginTop: "20px" }}>
-                <p style={{ margin: "0 0 10px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>
-                  Administration Log ({administrations.length})
-                </p>
-                <DataTable columns={administrationColumns} data={administrations} emptyMessage="No administrations logged." />
-              </div>
-            ) : null}
-          </div>
+                )}
+              />
+            </div>
+          )}
 
-          <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
-            {sectionTitle("Pet Reminders", `Active vaccination / medication reminders for ${dogLabel}.`)}
-            <DataTable
-              columns={reminderColumns}
-              data={reminders}
-              module="medical"
-              loading={remLoading}
-              emptyMessage="No reminders created for this dog."
-              renderRowActions={(row) => (
-                <>
-                  <Can permission="create_medical">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNotifyTarget(row);
-                      }}
-                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#2563EB", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
-                    >
-                      <FaPaperPlane size={11} /> Send reminder
-                    </button>
-                  </Can>
-                  <Can permission="delete_medical">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget(row);
-                      }}
-                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #FECACA", background: "#FEF2F2", color: "#EF4444", fontWeight: 600, fontSize: "12px", cursor: "pointer" }}
-                    >
-                      <FaTrash size={11} /> Delete
-                    </button>
-                  </Can>
-                </>
-              )}
-            />
-          </div>
+          {activeTab === "medication" && (
+            <div id="medication-tab-section" className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+              {sectionTitle("Medication Schedule", `Prescription windows (start/end) and administration log for ${dogLabel}.`)}
+              <DataTable
+                columns={prescriptionColumns}
+                data={prescriptions}
+                module="medical"
+                loading={rxLoading}
+                emptyMessage="No medication prescriptions for this dog."
+                renderRowActions={(row) => (
+                  <>
+                    <Can permission="create_medical">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReminderModal("medication", row, dogId);
+                        }}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#2563EB", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
+                      >
+                        <FaPlus size={11} /> Create reminder
+                      </button>
+                    </Can>
+                    <Can permission="edit_medical">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleTogglePrescription(row);
+                        }}
+                        disabled={togglingRxId === str(pick(row, "id"))}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#475569", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
+                      >
+                        {Boolean(pick(row, "is_active")) ? "Mark Inactive" : "Mark Active"}
+                      </button>
+                    </Can>
+                  </>
+                )}
+              />
+              {administrations.length > 0 ? (
+                <div style={{ marginTop: "20px" }}>
+                  <p style={{ margin: "0 0 10px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>
+                    Administration Log ({administrations.length})
+                  </p>
+                  <DataTable columns={administrationColumns} data={administrations} emptyMessage="No administrations logged." />
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {activeTab === "reminders" && (
+            <div id="reminders-tab-section" className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+              {sectionTitle("Pet Reminders", `Active vaccination / medication reminders for ${dogLabel}.`)}
+              <DataTable
+                columns={reminderColumns}
+                data={reminders}
+                module="medical"
+                loading={remLoading}
+                emptyMessage="No reminders created for this dog."
+                renderRowActions={(row) => (
+                  <>
+                    <Can permission="create_medical">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNotifyTarget(row);
+                        }}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#2563EB", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
+                      >
+                        <FaPaperPlane size={11} /> Send reminder
+                      </button>
+                    </Can>
+                    <Can permission="delete_medical">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTarget(row);
+                        }}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #FECACA", background: "#FEF2F2", color: "#EF4444", fontWeight: 600, fontSize: "12px", cursor: "pointer" }}
+                      >
+                        <FaTrash size={11} /> Delete
+                      </button>
+                    </Can>
+                  </>
+                )}
+              />
+            </div>
+          )}
         </>
       )}
 

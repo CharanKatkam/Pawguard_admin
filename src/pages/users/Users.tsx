@@ -9,7 +9,6 @@ import Can from "../../components/rbac/Can";
 import {
   FaUserPlus,
   FaUsers,
-  FaUserCheck,
   FaUserShield,
   FaTrash,
   FaCheckCircle,
@@ -18,7 +17,7 @@ import {
 import userService, { type UserPayload } from "../../services/userService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole } from "../../utils/roleUtils";
+import { normalizeRole, isInternalRole } from "../../utils/roleUtils";
 
 interface UserTableRow {
   id: string;
@@ -101,12 +100,13 @@ const ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendRoles: s
   { value: "finance_user", label: "Finance", backendRoles: ["finance_user"] },
 ];
 
-const isAdminRole = (roles: string[]): boolean => {
+/**
+ * Checks if any of the user's assigned roles are authorized for Admin Portal access.
+ * Reuses existing role normalization & internal staff logic from roleUtils.
+ */
+const hasAdminPortalAccess = (roles: string[]): boolean => {
   if (!roles || roles.length === 0) return false;
-  return roles.some((role) => {
-    const normalized = normalizeRole(role);
-    return normalized === "super_admin" || normalized === "rescue_centre_admin";
-  });
+  return roles.some((role) => isInternalRole(role));
 };
 
 interface ApiErrorShape {
@@ -153,8 +153,8 @@ const Users = () => {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
-  // Filter state for summary cards
-  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "admin">("all");
+  // Filter state for summary cards: "all" or "admin" (Admin Portal Access)
+  const [activeFilter, setActiveFilter] = useState<"all" | "admin">("all");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -176,7 +176,6 @@ const Users = () => {
   // Fetch users function - defined before useEffect to avoid "accessed before declaration" error
   const fetchUsers = useCallback(async () => {
     try {
-      setLoading(true);
       setError(null);
 
       const response = await userService.getUsers();
@@ -192,7 +191,11 @@ const Users = () => {
         : [];
 
       const formattedUsers = userList.map((user: UserPayload): UserTableRow => {
-        const roles = Array.isArray(user.roles) ? user.roles : [];
+        const roles = Array.isArray(user.roles)
+          ? user.roles
+          : user.role
+          ? [user.role]
+          : [];
         return {
           id: user.id || "-",
           name: user.full_name || user.name || "-",
@@ -218,6 +221,7 @@ const Users = () => {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchUsers();
   }, [fetchUsers]);
 
@@ -303,37 +307,12 @@ const Users = () => {
     []
   );
 
-  // Memoize filtered users for stats
-  const filteredUsersForStats = useMemo(() => {
-    return users.filter((user: UserTableRow) => {
-      if (activeFilter === "active" && !user.isActive) return false;
-      if (activeFilter === "admin" && !isAdminRole(user.roles)) return false;
-      if (!matchesRoleFilter(user.roles, roleFilter)) return false;
-      const lowerSearch = searchTerm.trim().toLowerCase();
-      if (lowerSearch) {
-        const searchableFields = [
-          user.name,
-          user.email,
-          user.phone,
-          user.id,
-          ...user.roles,
-        ].filter(Boolean);
-        if (!searchableFields.some((field) => String(field).toLowerCase().includes(lowerSearch))) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [users, activeFilter, roleFilter, searchTerm, matchesRoleFilter]);
-
-  // Memoize stats to avoid ref access during render lint error
-  // The stats array contains onClick handlers that scroll to the table using document.getElementById
-  // By memoizing, we ensure the array is only recreated when dependencies change
+  // Memoize summary cards
   const stats = useMemo(
     () => [
       {
         title: "Total Registered Users",
-        value: loading ? "..." : `${filteredUsersForStats.length} Users`,
+        value: loading ? "..." : `${users.length} Users`,
         trend: roleFilter !== "all" ? "Filtered View" : "Organization Accounts",
         color: "#2563EB",
         icon: <FaUsers />,
@@ -346,26 +325,12 @@ const Users = () => {
         selected: activeFilter === "all" && roleFilter === "all" && !searchTerm,
       },
       {
-        title: "Active Personnel",
+        title: "Admin Portal Access",
         value: loading
           ? "..."
-          : `${filteredUsersForStats.filter((u: UserTableRow) => u.status === "Active").length} Active`,
-        trend: roleFilter !== "all" ? "Filtered View" : "Current Workforce",
-        color: "#10B981",
-        icon: <FaUserCheck />,
-        onClick: () => {
-          setActiveFilter("active");
-          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        },
-        selected: activeFilter === "active",
-      },
-      {
-        title: "Administrators",
-        value: loading
-          ? "..."
-          : `${filteredUsersForStats.filter((u: UserTableRow) => isAdminRole(u.roles)).length} Admins`,
-        trend: roleFilter !== "all" ? "Filtered View" : "System Access",
-        color: "#EF4444",
+          : `${users.filter((u: UserTableRow) => hasAdminPortalAccess(u.roles)).length} Users`,
+        trend: roleFilter !== "all" ? "Filtered View" : "Permitted Access",
+        color: "#6366F1",
         icon: <FaUserShield />,
         onClick: () => {
           setActiveFilter("admin");
@@ -374,16 +339,15 @@ const Users = () => {
         selected: activeFilter === "admin",
       },
     ],
-    [loading, filteredUsersForStats, activeFilter, roleFilter, searchTerm]
+    [loading, users, activeFilter, roleFilter, searchTerm]
   );
 
   // Filter users based on active filter, role filter, and search term
   const filteredUsers = useMemo(() => {
     const lowerSearch = searchTerm.trim().toLowerCase();
     return users.filter((user) => {
-      // Active/Admin filter
-      if (activeFilter === "active" && !user.isActive) return false;
-      if (activeFilter === "admin" && !isAdminRole(user.roles)) return false;
+      // Admin Portal Access filter
+      if (activeFilter === "admin" && !hasAdminPortalAccess(user.roles)) return false;
 
       // Role filter
       if (!matchesRoleFilter(user.roles, roleFilter)) return false;
@@ -412,10 +376,8 @@ const Users = () => {
       if (option) return `${option.label} Users`;
     }
     switch (activeFilter) {
-      case "active":
-        return "Active Personnel";
       case "admin":
-        return "Administrators";
+        return "Admin Portal Access Users";
       default:
         return "All Registered Users";
     }

@@ -175,9 +175,36 @@ const Adoptions = () => {
   const scheduledVerifications = adoptions.filter((a: any) => a.home_inspection_scheduled_at).length;
 
   const stats = [
-    { title: "Adoptions Completed", value: `${adoptions.filter(a => String(a.status).toLowerCase() === "approved" || String(a.status).toLowerCase() === "completed").length} Pets`, trend: "Approved", color: "#10B981", icon: <FaHeart /> },
-    { title: "Pending Applications", value: `${adoptions.filter(a => !rejectedStatuses.includes(String(a.status).toLowerCase()) && String(a.status).toLowerCase() !== "approved" && String(a.status).toLowerCase() !== "completed").length} Reviews`, trend: "In Review", color: "#F59E0B", icon: <FaClipboardCheck /> },
-    { title: "Home Verifications", value: `${scheduledVerifications} Visits`, trend: "Scheduled Inspections", color: "#2563EB", icon: <FaUserCheck /> },
+    {
+      title: "Adoptions Completed",
+      value: `${adoptions.filter(a => String(a.status).toLowerCase() === "approved" || String(a.status).toLowerCase() === "completed").length} Pets`,
+      trend: "Approved",
+      color: "#10B981",
+      icon: <FaHeart />,
+      onClick: () => {
+        document.getElementById("adoptions-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Pending Applications",
+      value: `${adoptions.filter(a => !rejectedStatuses.includes(String(a.status).toLowerCase()) && String(a.status).toLowerCase() !== "approved" && String(a.status).toLowerCase() !== "completed").length} Reviews`,
+      trend: "In Review",
+      color: "#F59E0B",
+      icon: <FaClipboardCheck />,
+      onClick: () => {
+        document.getElementById("adoptions-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Home Verifications",
+      value: `${scheduledVerifications} Visits`,
+      trend: "Scheduled Inspections",
+      color: "#2563EB",
+      icon: <FaUserCheck />,
+      onClick: () => {
+        setIsScheduleModalOpen(true);
+      },
+    },
   ];
 
   const columns = [
@@ -215,7 +242,7 @@ const Adoptions = () => {
         ))}
       </div>
 
-      <div className="soft-card" style={{ padding: "20px" }}>
+      <div id="adoptions-table-card" className="soft-card" style={{ padding: "20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
             Adoption Applications Queue

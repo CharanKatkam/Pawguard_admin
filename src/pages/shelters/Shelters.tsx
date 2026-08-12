@@ -6,7 +6,7 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaHome, FaBed, FaHospital, FaPlus, FaEdit, FaTrash } from "react-icons/fa";
+import { FaHome, FaBed, FaHospital, FaPlus, FaEdit, FaTrash, FaExchangeAlt } from "react-icons/fa";
 import shelterService from "../../services/shelterService";
 import petService from "../../services/petService";
 import ShelterTransfers from "../../components/shelters/ShelterTransfers";
@@ -27,6 +27,7 @@ const unwrapList = (v: any) =>
   Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
 const Shelters = () => {
+  const [activeTab, setActiveTab] = useState<"facilities" | "transfers">("facilities");
   const [shelters, setShelters] = useState<any[]>([]);
   const [allShelters, setAllShelters] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -300,9 +301,39 @@ const Shelters = () => {
   const activeCount = allShelters.filter((s: any) => s.status === "active").length;
 
   const stats = [
-    { title: "Rescue Facilities", value: loading ? "..." : totalCount, trend: "Registered Hubs", color: "#2563EB", icon: <FaHome /> },
-    { title: "Total Cage Capacity", value: loading ? "..." : totalCapacity, trend: "Across Facilities", color: "#10B981", icon: <FaBed /> },
-    { title: "Active Facilities", value: loading ? "..." : activeCount, trend: "Operational Hubs", color: "#6366F1", icon: <FaHospital /> },
+    {
+      title: "Rescue Facilities",
+      value: loading ? "..." : totalCount,
+      trend: "Registered Hubs",
+      color: "#2563EB",
+      icon: <FaHome />,
+      onClick: () => {
+        setActiveTab("facilities");
+        document.getElementById("shelter-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Total Cage Capacity",
+      value: loading ? "..." : totalCapacity,
+      trend: "Across Facilities",
+      color: "#10B981",
+      icon: <FaBed />,
+      onClick: () => {
+        setActiveTab("transfers");
+        document.getElementById("kennel-management-section")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Active Facilities",
+      value: loading ? "..." : activeCount,
+      trend: "Operational Hubs",
+      color: "#6366F1",
+      icon: <FaHospital />,
+      onClick: () => {
+        setActiveTab("facilities");
+        document.getElementById("shelter-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
   ];
 
   const columns = [
@@ -415,35 +446,80 @@ const Shelters = () => {
         ))}
       </div>
 
-      <div className="soft-card" style={{ padding: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            Active Rescue Facilities Directory
-          </h3>
-          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading facilities...</span>}
-        </div>
-        <DataTable
-          columns={columns}
-          data={shelters}
-          module="shelters"
-          loading={loading}
-          error={error}
-          onRetry={fetchShelters}
-          emptyMessage="No shelter facilities registered yet."
-          renderRowActions={rowActions}
-          serverMode
-          totalCount={totalCount}
-          page={page}
-          onPageChange={setPage}
-          searchValue={search}
-          onSearchChange={(term) => {
-            setSearch(term);
-            setPage(1);
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <button
+          onClick={() => setActiveTab("facilities")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "9px 18px",
+            borderRadius: "8px",
+            border: "1px solid #CBD5E1",
+            background: activeTab === "facilities" ? "#2563EB" : "#FFFFFF",
+            color: activeTab === "facilities" ? "#FFFFFF" : "#475569",
+            fontWeight: 600,
+            fontSize: "13px",
+            cursor: "pointer",
           }}
-        />
+        >
+          <FaHospital /> Rescue Facilities
+        </button>
+        <button
+          onClick={() => setActiveTab("transfers")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "9px 18px",
+            borderRadius: "8px",
+            border: "1px solid #CBD5E1",
+            background: activeTab === "transfers" ? "#2563EB" : "#FFFFFF",
+            color: activeTab === "transfers" ? "#FFFFFF" : "#475569",
+            fontWeight: 600,
+            fontSize: "13px",
+            cursor: "pointer",
+          }}
+        >
+          <FaExchangeAlt /> Shelter Transfers &amp; Kennels
+        </button>
       </div>
 
-      <ShelterTransfers />
+      {activeTab === "facilities" && (
+        <div id="shelter-table-card" className="soft-card" style={{ padding: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+              Active Rescue Facilities Directory
+            </h3>
+            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading facilities...</span>}
+          </div>
+          <DataTable
+            columns={columns}
+            data={shelters}
+            module="shelters"
+            loading={loading}
+            error={error}
+            onRetry={fetchShelters}
+            emptyMessage="No shelter facilities registered yet."
+            renderRowActions={rowActions}
+            serverMode
+            totalCount={totalCount}
+            page={page}
+            onPageChange={setPage}
+            searchValue={search}
+            onSearchChange={(term) => {
+              setSearch(term);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
+
+      {activeTab === "transfers" && (
+        <div id="kennel-management-section">
+          <ShelterTransfers />
+        </div>
+      )}
 
       {/* Register New Facility Modal */}
       <Modal

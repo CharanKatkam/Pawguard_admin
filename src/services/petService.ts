@@ -108,16 +108,52 @@ export const petService = {
   },
 
   // GET /dogs/{dog_id}/qr-image - staff-only dog profile QR image (image blob).
-  // The backend generates/caches the QR for the dog, so re-fetching simply
-  // returns the existing QR instead of creating a duplicate.
+  // Dynamically passes the production-safe frontend origin to ensure the QR code
+  // builds valid public scan URLs without relying on server-side environment overrides.
   getDogQrImage: async (dogId: string): Promise<Blob> => {
+    const frontendBaseUrl =
+      (import.meta.env.VITE_FRONTEND_BASE_URL as string) ||
+      (typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://pawguard-admin.vercel.app");
+
     const response = await api.get(`/dogs/${dogId}/qr-image`, {
+      params: {
+        frontend_url: frontendBaseUrl,
+        frontend_base_url: frontendBaseUrl,
+      },
+      headers: {
+        "X-Frontend-Base-Url": frontendBaseUrl,
+        "X-Frontend-Url": frontendBaseUrl,
+      },
       responseType: "blob",
     });
     if (!(response.data instanceof Blob)) {
       throw new Error("QR endpoint did not return a valid image.");
     }
     return response.data;
+  },
+
+  // GET /dogs/{dog_id}/public-scan - privacy-safe public dog QR scan
+  getPublicDogScan: async (dogId: string) => {
+    const response = await api.get(`/dogs/${dogId}/public-scan`);
+    return response.data;
+  },
+
+  /**
+   * Returns the exact, unaltered backend-authoritative safety token for a dog record.
+   * Priority: dog.raw_token -> dog.registration_number -> dog.id
+   */
+  formatSafetyToken: (dog?: { id?: string; registration_number?: string; raw_token?: string } | null): string => {
+    if (!dog) return "-";
+    if (dog.raw_token && typeof dog.raw_token === "string" && dog.raw_token.trim()) {
+      return dog.raw_token.trim().toUpperCase();
+    }
+    if (dog.registration_number && typeof dog.registration_number === "string" && dog.registration_number.trim() && dog.registration_number !== "-") {
+      return dog.registration_number.trim().toUpperCase();
+    }
+    if (dog.id && typeof dog.id === "string" && dog.id.trim()) {
+      return dog.id.trim();
+    }
+    return "-";
   },
 };
 

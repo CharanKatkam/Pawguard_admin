@@ -19,6 +19,7 @@ import {
   FaMicrochip,
   FaClock,
   FaSpinner,
+  FaEye,
 } from "react-icons/fa";
 import lostFoundService, {
   type Species,
@@ -1103,7 +1104,26 @@ const LostAndFound = () => {
         pageSize={PAGE_SIZE}
         searchValue={search}
         onSearchChange={setSearch}
-        onRowClick={openDetails}
+        renderRowActions={(row: any) => (
+          <button
+            onClick={() => openDetails(row)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              borderRadius: "6px",
+              border: "1px solid #93C5FD",
+              background: "#EFF6FF",
+              color: "#1D4ED8",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <FaEye size={12} /> View Details
+          </button>
+        )}
       />
 
       {selectedReport && (

@@ -348,14 +348,99 @@ const Finance = () => {
     : donations.filter((d) => String(d.status) === "failed").length;
 
   const stats = [
-    { title: "Total Revenue / Donations", value: summaryLoading ? "..." : (summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue)), trend: summaryLoading ? "Loading..." : (summaryRevenue !== undefined && summaryRevenue !== null ? "Backend Summary" : "From Transactions"), color: "#10B981", icon: <FaCoins /> },
-    { title: "Operational Expenses", value: summaryLoading ? "..." : (summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses)), trend: summaryLoading ? "Loading..." : (summaryExpenses !== undefined && summaryExpenses !== null ? "Backend Summary" : "From Transactions"), color: "#2563EB", icon: <FaFileInvoiceDollar /> },
-    { title: "Donor Contributions", value: summaryLoading ? "..." : String(summaryDonors ?? donorCount), trend: summaryLoading ? "Loading..." : (summaryDonors !== undefined && summaryDonors !== null ? "Unique Donors (Backend)" : "Unique Donors"), color: "#6366F1", icon: <FaHandHoldingHeart /> },
-    { title: "Net Reserve Balance", value: summaryLoading ? "..." : (summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses)), trend: summaryLoading ? "Loading..." : (summaryNet !== undefined && summaryNet !== null ? "Backend Net Balance" : "Calculated"), color: "#F59E0B", icon: <FaChartLine /> },
-    { title: "Total Transactions", value: summaryLoading ? "..." : String(transactions.length), trend: "All Records", color: "#64748B", icon: <FaFileInvoiceDollar /> },
-    { title: "Successful Donations", value: summaryLoading ? "..." : String(successfulDonations), trend: "Completed", color: "#10B981", icon: <FaCheckCircle /> },
-    { title: "Pending Donations", value: summaryLoading ? "..." : String(pendingDonations), trend: "Awaiting", color: "#F59E0B", icon: <FaHourglassHalf /> },
-    { title: "Failed/Cancelled Donations", value: summaryLoading ? "..." : String(failedDonations), trend: "Failed", color: "#EF4444", icon: <FaTimesCircle /> },
+    {
+      title: "Total Revenue / Donations",
+      value: summaryLoading ? "..." : (summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue)),
+      trend: summaryLoading ? "Loading..." : (summaryRevenue !== undefined && summaryRevenue !== null ? "Backend Summary" : "From Transactions"),
+      color: "#10B981",
+      icon: <FaCoins />,
+      onClick: () => {
+        setActiveTab("donations");
+        setDonationFilterStatus("");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Operational Expenses",
+      value: summaryLoading ? "..." : (summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses)),
+      trend: summaryLoading ? "Loading..." : (summaryExpenses !== undefined && summaryExpenses !== null ? "Backend Summary" : "From Transactions"),
+      color: "#2563EB",
+      icon: <FaFileInvoiceDollar />,
+      onClick: () => {
+        setActiveTab("transactions");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Donor Contributions",
+      value: summaryLoading ? "..." : String(summaryDonors ?? donorCount),
+      trend: summaryLoading ? "Loading..." : (summaryDonors !== undefined && summaryDonors !== null ? "Unique Donors (Backend)" : "Unique Donors"),
+      color: "#6366F1",
+      icon: <FaHandHoldingHeart />,
+      onClick: () => {
+        setActiveTab("donations");
+        setDonationFilterStatus("");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Net Reserve Balance",
+      value: summaryLoading ? "..." : (summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses)),
+      trend: summaryLoading ? "Loading..." : (summaryNet !== undefined && summaryNet !== null ? "Backend Net Balance" : "Calculated"),
+      color: "#F59E0B",
+      icon: <FaChartLine />,
+      onClick: () => {
+        setActiveTab("transactions");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Total Transactions",
+      value: summaryLoading ? "..." : String(transactions.length),
+      trend: "All Records",
+      color: "#64748B",
+      icon: <FaFileInvoiceDollar />,
+      onClick: () => {
+        setActiveTab("transactions");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Successful Donations",
+      value: summaryLoading ? "..." : String(successfulDonations),
+      trend: "Completed",
+      color: "#10B981",
+      icon: <FaCheckCircle />,
+      onClick: () => {
+        setActiveTab("donations");
+        setDonationFilterStatus("success");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Pending Donations",
+      value: summaryLoading ? "..." : String(pendingDonations),
+      trend: "Awaiting",
+      color: "#F59E0B",
+      icon: <FaHourglassHalf />,
+      onClick: () => {
+        setActiveTab("donations");
+        setDonationFilterStatus("pending");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Failed/Cancelled Donations",
+      value: summaryLoading ? "..." : String(failedDonations),
+      trend: "Failed",
+      color: "#EF4444",
+      icon: <FaTimesCircle />,
+      onClick: () => {
+        setActiveTab("donations");
+        setDonationFilterStatus("failed");
+        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
   ];
 
   const txColumns = [
@@ -410,7 +495,7 @@ const Finance = () => {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", borderBottom: "2px solid #E2E8F0", paddingBottom: "0" }}>
+      <div id="finance-table-card" style={{ display: "flex", gap: "8px", borderBottom: "2px solid #E2E8F0", marginBottom: "20px" }}>
         {(["donations", "transactions"] as TabKey[]).map((tab) => (
           <button
             key={tab}

@@ -166,13 +166,8 @@ const DataTable: React.FC<DataTableProps> = ({
 
   const handleRowClick = (row: Record<string, any>) => {
     if (onRowClick) {
-      // Parent owns the row-click interaction (e.g. opens its own details view).
       onRowClick(row);
-      return;
     }
-    setSelectedRow(row);
-    setEditFormData({ ...row });
-    setModalMode("view");
   };
 
   const handleStartEdit = () => {
@@ -418,11 +413,11 @@ const DataTable: React.FC<DataTableProps> = ({
                 return (
                 <tr
                   key={idx}
-                  onClick={() => handleRowClick(row)}
+                  onClick={onRowClick ? () => handleRowClick(row) : undefined}
                   style={{
                     borderBottom: "1px solid #F1F5F9",
                     transition: "background 0.15s ease",
-                    cursor: "pointer",
+                    cursor: onRowClick ? "pointer" : "default",
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#F8FAFC")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "#FFFFFF")}

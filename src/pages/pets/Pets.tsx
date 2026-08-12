@@ -18,6 +18,9 @@ import {
   FaPrint,
   FaEye,
   FaStethoscope,
+  FaCopy,
+  FaSearch,
+  FaCheckCircle,
 } from "react-icons/fa";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
@@ -36,6 +39,7 @@ interface QrDogInfo {
   estimated_age?: string;
   registration_number?: string;
   rescue_case_id?: string;
+  raw_token?: string;
 }
 
 const emptyPetForm = {
@@ -95,7 +99,8 @@ const Pets = () => {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
-  // Modals state
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [adoptableOnly, setAdoptableOnly] = useState<boolean>(false);
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(() => searchParams.get("action") === "register");
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isAdoptableModalOpen, setIsAdoptableModalOpen] = useState(false);
@@ -113,6 +118,13 @@ const Pets = () => {
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
+
+  // Manual Token Lookup modal state
+  const [isTokenLookupModalOpen, setIsTokenLookupModalOpen] = useState(false);
+  const [inputToken, setInputToken] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [verifiedDog, setVerifiedDog] = useState<any | null>(null);
 
   // Form states
   const [petForm, setPetForm] = useState({ ...emptyPetForm });
@@ -147,14 +159,22 @@ const Pets = () => {
 
       const response = await petService.getPets({
         search: search.trim() || undefined,
+        status: statusFilter || undefined,
+        is_adoptable: adoptableOnly ? true : undefined,
         page,
         page_size: 5,
       });
-      const dogList = unwrapList(response);
+      let dogList = unwrapList(response).map(formatDog);
+      if (statusFilter) {
+        dogList = dogList.filter((d: any) => String(d.status).toLowerCase() === statusFilter.toLowerCase());
+      }
+      if (adoptableOnly) {
+        dogList = dogList.filter((d: any) => d.is_adoptable);
+      }
       const total = response?.meta?.total ?? response?.data?.meta?.total ?? dogList.length;
       setTotalCount(total);
 
-      setDogs(dogList.map(formatDog));
+      setDogs(dogList);
     } catch (err: any) {
       setError(
         err?.response?.data?.detail ||
@@ -192,7 +212,7 @@ const Pets = () => {
 
   useEffect(() => {
     fetchDogs();
-  }, [search, page]);
+  }, [search, page, statusFilter, adoptableOnly]);
 
   useEffect(() => {
     const t = setTimeout(() => fetchAllDogs(), 300);
@@ -340,14 +360,49 @@ const Pets = () => {
         setQrError("The QR service returned an empty image. No QR could be generated for this dog.");
         return;
       }
+
+      // Check if blob is a JSON error response returned by server
+      if (blob.type === "application/json" || blob.type.includes("json")) {
+        const text = await blob.text();
+        try {
+          const parsed = JSON.parse(text);
+          const rawMsg = String(parsed?.error?.message || parsed?.detail || parsed?.message || "");
+          if (rawMsg.includes("FRONTEND_BASE_URL")) {
+            setQrError("Backend Configuration Error: The server QR generator requires FRONTEND_BASE_URL environment configuration on the backend deployment.");
+          } else {
+            setQrError(rawMsg || "Failed to generate QR from backend.");
+          }
+          return;
+        } catch {
+          /* not JSON, process as image below */
+        }
+      }
+
       setQrBlob(blob);
       setQrImageUrl(URL.createObjectURL(blob));
-    } catch (err) {
-      const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      const msg =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        "Failed to generate QR. The backend QR service may be unavailable.";
+    } catch (err: unknown) {
+      let msg = "Failed to retrieve QR code from backend service. Please check network connection.";
+      const e = err as { response?: { data?: unknown; status?: number } };
+      if (e?.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text();
+          const parsed = JSON.parse(text);
+          msg = parsed?.error?.message || parsed?.detail || parsed?.message || msg;
+        } catch {
+          /* use fallback msg */
+        }
+      } else if (e?.response?.data && typeof e.response.data === "object") {
+        const obj = e.response.data as Record<string, unknown>;
+        const errObj = obj.error as Record<string, unknown> | undefined;
+        msg = String(errObj?.message || obj.detail || obj.message || msg);
+      }
+
+      if (msg.includes("FRONTEND_BASE_URL")) {
+        msg = "Backend Configuration Error: The backend server requires FRONTEND_BASE_URL environment setup on Render/deployment server.";
+      } else if (e?.response?.status === 403) {
+        msg = "Unauthorized: Your role does not have permission (shelter:update) to generate QR tags for shelter animals.";
+      }
+
       setQrError(msg);
     } finally {
       setQrLoading(false);
@@ -370,6 +425,90 @@ const Pets = () => {
     triggerDownload(qrImageUrl, `PawGuard_QR_${safeReg}.png`);
   };
 
+  const handleCopyToken = (tokenStr: string) => {
+    if (!tokenStr) return;
+    try {
+      navigator.clipboard.writeText(tokenStr);
+      addToast("Safety token copied to clipboard!", "success");
+    } catch {
+      addToast(`Token: ${tokenStr}`, "info");
+    }
+  };
+
+  const handleVerifyToken = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const query = inputToken.trim();
+    if (!query) {
+      setLookupError("Please enter a safety token or code to verify.");
+      setVerifiedDog(null);
+      return;
+    }
+    setLookupLoading(true);
+    setLookupError(null);
+    setVerifiedDog(null);
+    try {
+      // Normalize query (supports "PG-DOG-2026-0001", "DOG-2026-0001", or UUID)
+      const rawUpper = query.toUpperCase().trim();
+      const strippedUpper = rawUpper.replace(/^PG-/, "").trim();
+
+      // Check loaded dogs list first
+      const matched = allDogs.find((d) => {
+        const token = petService.formatSafetyToken(d).toUpperCase();
+        const reg = String(d.registration_number || "").toUpperCase();
+        const idStr = String(d.id || "").toUpperCase();
+        const chip = String(d.microchip_id || "").toUpperCase();
+        return (
+          token === rawUpper ||
+          token === `PG-${strippedUpper}` ||
+          reg === strippedUpper ||
+          reg === rawUpper ||
+          idStr === strippedUpper ||
+          idStr === rawUpper ||
+          (chip && (chip === strippedUpper || chip === rawUpper))
+        );
+      });
+
+      if (matched) {
+        setVerifiedDog(matched);
+        return;
+      }
+
+      // Try API lookup by ID / registration
+      try {
+        const response = await petService.getPetById(strippedUpper);
+        const data = response?.data || response;
+        if (data && (data.id || data.registration_number)) {
+          const formatted = formatDog(data);
+          setVerifiedDog(formatted);
+          return;
+        }
+      } catch {
+        // Fallback to public scan endpoint
+        try {
+          const scanResponse = await petService.getPublicDogScan(strippedUpper);
+          const scanData = scanResponse?.data || scanResponse;
+          if (scanData && (scanData.name || scanData.registration_number)) {
+            const formatted = formatDog({
+              ...scanData,
+              id: strippedUpper,
+              status: scanData.current_status || scanData.status || "shelter",
+            });
+            setVerifiedDog(formatted);
+            return;
+          }
+        } catch {
+          /* fail to lookupError */
+        }
+      }
+
+      setLookupError("No dog found for this safety token. Please check the code and try again.");
+    } catch {
+      setLookupError("Failed to verify safety token. Please check connection and try again.");
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   const handlePrintQr = async () => {
     if (!qrBlob || !qrDog) return;
     try {
@@ -378,7 +517,8 @@ const Pets = () => {
       const registration = String(qrDog.registration_number || qrDog.id || "-");
       const breed = String(qrDog.breed || "-");
       const status = String(qrDog.status || "-");
-      const win = window.open("", "_blank", "width=420,height=640");
+      const token = petService.formatSafetyToken(qrDog);
+      const win = window.open("", "_blank", "width=440,height=680");
       if (!win) {
         addToast("Popup blocked. Allow popups to print the QR code.", "error");
         return;
@@ -387,27 +527,29 @@ const Pets = () => {
         <!doctype html>
         <html>
           <head>
-            <title>PawGuard QR - ${escapeHtml(name)}</title>
+            <title>PawGuard Safety Tag - ${escapeHtml(name)}</title>
             <style>
               body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 32px; text-align: center; color: #0F172A; }
-              .card { border: 1px solid #E2E8F0; border-radius: 16px; padding: 24px; }
-              h1 { font-size: 24px; margin: 0 0 4px; color: #0F172A; }
-              .meta { color: #64748B; font-size: 13px; margin: 3px 0; }
-              .sub { font-size: 11px; color: #94A3B8; margin: 2px 0; }
-              img.qr { width: 260px; height: 260px; image-rendering: pixelated; margin: 20px auto; display: block; }
-              .footer { margin-top: 24px; font-size: 11px; color: #94A3B8; }
+              .card { border: 2px solid #6D28D9; border-radius: 16px; padding: 24px; background: #FFFFFF; }
+              h1 { font-size: 24px; margin: 0 0 4px; color: #6D28D9; letter-spacing: -0.02em; }
+              .sub { font-size: 11px; color: #64748B; margin: 2px 0 16px; text-transform: uppercase; font-weight: bold; }
+              .meta { color: #334155; font-size: 13px; margin: 4px 0; }
+              .token-box { background: #F1F5F9; border: 1px solid #CBD5E1; border-radius: 8px; padding: 8px 12px; font-family: monospace; font-size: 16px; font-weight: bold; color: #6D28D9; margin: 14px 0; display: inline-block; }
+              img.qr { width: 240px; height: 240px; image-rendering: pixelated; margin: 14px auto; display: block; }
+              .footer { margin-top: 20px; font-size: 11px; color: #94A3B8; }
             </style>
           </head>
           <body>
             <div class="card">
               <h1>PawGuard</h1>
-              <p class="sub">Rescued Dog Profile</p>
-              <p class="meta">${escapeHtml(name)} &bull; ${escapeHtml(breed)}</p>
-              <p class="meta">ID: ${escapeHtml(registration)} &bull; Status: ${escapeHtml(status)}</p>
-              <img class="qr" src="${dataUrl}" alt="QR Code"
+              <div class="sub">Official Dog Safety Tag</div>
+              <p class="meta"><strong>Dog Name:</strong> ${escapeHtml(name)} &bull; <strong>Breed:</strong> ${escapeHtml(breed)}</p>
+              <p class="meta"><strong>Dog ID:</strong> ${escapeHtml(registration)} &bull; <strong>Status:</strong> ${escapeHtml(status)}</p>
+              <img class="qr" src="${dataUrl}" alt="Safety Tag QR Code"
                    onload="setTimeout(function(){ window.print(); }, 250);" />
-              <p class="meta">Scan to view this rescued dog's live profile</p>
-              <div class="footer">Generated via PawGuard Admin &bull; Dog Management</div>
+              <div class="token-box">TOKEN: ${escapeHtml(token)}</div>
+              <p class="meta">Scan QR or enter token at PawGuard portal to identify dog</p>
+              <div class="footer">PawGuard Rescue &amp; Shelter Management Network &bull; 1:1 Unified Token</div>
             </div>
           </body>
         </html>
@@ -488,6 +630,13 @@ const Pets = () => {
       trend: "Registered Dogs",
       color: "#2563EB",
       icon: <FaPaw />,
+      selected: !statusFilter && !adoptableOnly,
+      onClick: () => {
+        setStatusFilter("");
+        setAdoptableOnly(false);
+        setPage(1);
+        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "Dogs in Shelter",
@@ -495,6 +644,13 @@ const Pets = () => {
       trend: "Currently Sheltered",
       color: "#EF4444",
       icon: <FaAmbulance />,
+      selected: statusFilter === "shelter",
+      onClick: () => {
+        setStatusFilter("shelter");
+        setAdoptableOnly(false);
+        setPage(1);
+        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "Adoptable Dogs",
@@ -502,6 +658,13 @@ const Pets = () => {
       trend: "Ready for Adoption",
       color: "#10B981",
       icon: <FaHeart />,
+      selected: adoptableOnly,
+      onClick: () => {
+        setAdoptableOnly(true);
+        setStatusFilter("");
+        setPage(1);
+        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
     },
   ];
 
@@ -663,6 +826,21 @@ const Pets = () => {
           />
         </Can>
 
+        <Can permission="view_animals">
+          <QuickActionCard
+            icon={<FaSearch />}
+            title="Find Dog by Safety Token"
+            subtitle="Verify token or QR tag"
+            color="#6366F1"
+            onClick={() => {
+              setInputToken("");
+              setLookupError(null);
+              setVerifiedDog(null);
+              setIsTokenLookupModalOpen(true);
+            }}
+          />
+        </Can>
+
         <Can permission="edit_animals">
           <QuickActionCard
             icon={<FaAmbulance />}
@@ -697,23 +875,75 @@ const Pets = () => {
         ))}
       </div>
 
-      <div className="soft-card" style={{ padding: "20px" }}>
+      <div id="dogs-table-card" className="soft-card" style={{ padding: "20px" }}>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             marginBottom: "16px",
+            flexWrap: "wrap",
+            gap: "12px",
           }}
         >
-          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            Registered Dogs
-          </h3>
-          {loading && (
-            <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
-              Loading dogs...
-            </span>
-          )}
+          <div>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+              Registered Dogs
+            </h3>
+            {(statusFilter || adoptableOnly) && (
+              <div style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600, marginTop: "2px" }}>
+                Active Filter: {adoptableOnly ? "Adoptable Dogs Only" : `Status: ${statusFilter.toUpperCase()}`}{" "}
+                <button
+                  onClick={() => {
+                    setStatusFilter("");
+                    setAdoptableOnly(false);
+                    setPage(1);
+                  }}
+                  style={{ background: "none", border: "none", color: "#DC2626", cursor: "pointer", fontSize: "12px", textDecoration: "underline", marginLeft: "6px" }}
+                >
+                  Clear Filter
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setAdoptableOnly(false);
+                setPage(1);
+              }}
+              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
+            >
+              <option value="">All Statuses</option>
+              <option value="shelter">In Shelter</option>
+              <option value="clinic">In Clinic</option>
+              <option value="rescued">Rescued</option>
+              <option value="fostered">Fostered</option>
+              <option value="adopted">Adopted</option>
+            </select>
+
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "#334155", cursor: "pointer", fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={adoptableOnly}
+                onChange={(e) => {
+                  setAdoptableOnly(e.target.checked);
+                  if (e.target.checked) setStatusFilter("");
+                  setPage(1);
+                }}
+              />
+              Adoptable Only
+            </label>
+
+            {loading && (
+              <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
+                Loading dogs...
+              </span>
+            )}
+          </div>
         </div>
 
         <DataTable
@@ -1130,12 +1360,162 @@ const Pets = () => {
         </div>
       </Modal>
 
-      {/* QR Code Modal (rescued dogs only) */}
+      {/* Find Dog by Safety Token Modal */}
+      <Modal
+        isOpen={isTokenLookupModalOpen}
+        onClose={() => {
+          setIsTokenLookupModalOpen(false);
+          setInputToken("");
+          setLookupError(null);
+          setVerifiedDog(null);
+        }}
+        title="Find Dog by Safety Token"
+        maxWidth="500px"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <form onSubmit={handleVerifyToken} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>
+              Enter Safety Token or Code
+            </label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                type="text"
+                required
+                placeholder="e.g. PG-DOG-2026-0001 or DOG-2026-0001"
+                value={inputToken}
+                onChange={(e) => setInputToken(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  fontSize: "14px",
+                  fontFamily: "monospace",
+                  textTransform: "uppercase",
+                  boxSizing: "border-box",
+                }}
+              />
+              <button
+                type="submit"
+                disabled={lookupLoading}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#6366F1",
+                  color: "#FFF",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {lookupLoading ? "Verifying..." : "Verify Token"}
+              </button>
+            </div>
+            <span style={{ fontSize: "12px", color: "#64748B" }}>
+              Enter the unique safety token (e.g. PG-DOG-XXXX) printed on the dog's safety tag or encoded in the QR.
+            </span>
+          </form>
+
+          {lookupError && (
+            <div
+              style={{
+                background: "#FEF2F2",
+                border: "1px solid #FCA5A5",
+                color: "#991B1B",
+                padding: "14px 16px",
+                borderRadius: "10px",
+                fontSize: "13px",
+                fontWeight: 600,
+              }}
+            >
+              ⚠️ {lookupError}
+            </div>
+          )}
+
+          {verifiedDog && (
+            <div
+              style={{
+                background: "#ECFDF5",
+                border: "1px solid #A7F3D0",
+                borderRadius: "12px",
+                padding: "16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#047857", fontWeight: 700, fontSize: "13px" }}>
+                  <FaCheckCircle color="#10B981" /> Token Verified &bull; Exact Match
+                </div>
+                <span
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "999px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    background: "#FFFFFF",
+                    color: "#065F46",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  Status: {verifiedDog.status || "Shelter"}
+                </span>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #D1FAE5" }}>
+                <div style={{ fontSize: "16px", fontWeight: 800, color: "#0F172A" }}>
+                  {verifiedDog.name}
+                </div>
+                <div style={{ fontSize: "13px", color: "#475569", marginTop: "4px" }}>
+                  <strong>Dog ID:</strong> <span style={{ fontFamily: "monospace" }}>{verifiedDog.registration_number || verifiedDog.id}</span>
+                </div>
+                <div style={{ fontSize: "13px", color: "#475569", marginTop: "2px" }}>
+                  <strong>Breed:</strong> {verifiedDog.breed || "-"} &nbsp;|&nbsp; <strong>Gender:</strong> {verifiedDog.gender ? verifiedDog.gender.charAt(0).toUpperCase() + verifiedDog.gender.slice(1) : "-"}
+                </div>
+                <div style={{ fontSize: "13px", color: "#6D28D9", fontWeight: 700, marginTop: "6px", fontFamily: "monospace" }}>
+                  Token: {petService.formatSafetyToken(verifiedDog)}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = verifiedDog;
+                    setIsTokenLookupModalOpen(false);
+                    openViewMasterFile(d);
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "9px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#2563EB",
+                    color: "#FFFFFF",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaEye /> View Dog Information
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* QR Code & Safety Tag Modal */}
       <Modal
         isOpen={isQrModalOpen}
         onClose={closeQrModal}
-        title={qrDog?.name ? `QR Code - ${qrDog.name}` : "Dog QR Code"}
-        maxWidth="480px"
+        title={qrDog?.name ? `QR Code — ${qrDog.name}` : "Dog Safety Tag & QR Code"}
+        maxWidth="500px"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {qrDog && (
@@ -1143,29 +1523,37 @@ const Pets = () => {
               style={{
                 background: "#F8FAFC",
                 border: "1px solid #E2E8F0",
-                borderRadius: "10px",
-                padding: "14px 16px",
+                borderRadius: "12px",
+                padding: "16px",
                 display: "grid",
                 gridTemplateColumns: "1fr",
-                gap: "6px",
+                gap: "8px",
               }}
             >
-              <div style={{ fontWeight: 700, color: "#0F172A", fontSize: "15px" }}>
-                {qrDog.name || "-"}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 800, color: "#0F172A", fontSize: "16px" }}>
+                  Dog Name: {qrDog.name || "-"}
+                </span>
+                <span
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "999px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    background: "#EFF6FF",
+                    color: "#1E40AF",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  Status: {qrDog.status || "Shelter"}
+                </span>
               </div>
               <div style={{ fontSize: "13px", color: "#475569" }}>
-                <strong>Dog ID:</strong> {qrDog.registration_number || qrDog.id || "-"}
+                <strong>Dog ID:</strong> <span style={{ fontFamily: "monospace" }}>{qrDog.registration_number || qrDog.id || "-"}</span>
               </div>
               <div style={{ fontSize: "13px", color: "#475569" }}>
                 <strong>Breed:</strong> {qrDog.breed || "-"} &nbsp;|&nbsp;{" "}
                 <strong>Gender:</strong> {qrDog.gender ? qrDog.gender.charAt(0).toUpperCase() + qrDog.gender.slice(1) : "-"}
-              </div>
-              <div style={{ fontSize: "13px", color: "#475569" }}>
-                <strong>Age:</strong> {qrDog.estimated_age || "-"} &nbsp;|&nbsp;{" "}
-                <strong>Status:</strong> {String(qrDog.status || "-").charAt(0).toUpperCase() + String(qrDog.status || "-").slice(1)}
-              </div>
-              <div style={{ fontSize: "12px", color: "#6D28D9", fontWeight: 600 }}>
-                Rescue-linked dog &bull; QR via rescue case
               </div>
             </div>
           )}
@@ -1175,8 +1563,8 @@ const Pets = () => {
               <div
                 style={{
                   display: "inline-block",
-                  width: "28px",
-                  height: "28px",
+                  width: "32px",
+                  height: "32px",
                   border: "3px solid #F3E8FF",
                   borderTopColor: "#6D28D9",
                   borderRadius: "50%",
@@ -1184,25 +1572,43 @@ const Pets = () => {
                 }}
               />
               <div style={{ marginTop: "12px", fontSize: "13px", color: "#64748B", fontWeight: 500 }}>
-                Generating QR code...
+                Fetching unique QR code from backend...
               </div>
             </div>
           )}
 
           {!qrLoading && qrError && (
-            <div
-              style={{
-                background: "#FEF2F2",
-                border: "1px solid #FCA5A5",
-                color: "#991B1B",
-                padding: "16px",
-                borderRadius: "10px",
-                fontSize: "14px",
-                fontWeight: 600,
-                textAlign: "center",
-              }}
-            >
-              {qrError}
+            <div style={{ textAlign: "center", padding: "16px" }}>
+              <div
+                style={{
+                  background: "#FEF2F2",
+                  border: "1px solid #FCA5A5",
+                  color: "#991B1B",
+                  padding: "14px 16px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  marginBottom: "12px",
+                }}
+              >
+                ⚠️ {qrError}
+              </div>
+              <button
+                type="button"
+                onClick={() => qrDog && openQrModal(qrDog)}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  color: "#334155",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Retry QR Generation
+              </button>
             </div>
           )}
 
@@ -1212,7 +1618,7 @@ const Pets = () => {
                 background: "#F8FAFC",
                 border: "1px dashed #CBD5E1",
                 color: "#64748B",
-                padding: "40px 20px",
+                padding: "36px 20px",
                 borderRadius: "10px",
                 fontSize: "14px",
                 fontWeight: 600,
@@ -1224,68 +1630,114 @@ const Pets = () => {
           )}
 
           {!qrLoading && !qrError && qrImageUrl && (
-            <div style={{ textAlign: "center" }}>
+            <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "14px" }}>
+              {/* LARGE QR CODE */}
               <div
                 style={{
-                  display: "inline-flex",
-                  padding: "12px",
-                  border: "1px solid #E2E8F0",
-                  borderRadius: "12px",
+                  padding: "16px",
+                  border: "2px solid #E2E8F0",
+                  borderRadius: "16px",
                   background: "#FFFFFF",
+                  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.06)",
                 }}
               >
                 <img
                   src={qrImageUrl}
-                  alt={`QR code for ${qrDog?.name || "dog"}`}
-                  style={{ width: "220px", height: "220px", imageRendering: "pixelated" }}
+                  alt={`QR Code tag for ${qrDog?.name || "Dog"}`}
+                  style={{ width: "240px", height: "240px", imageRendering: "pixelated", display: "block" }}
                 />
               </div>
-              <p style={{ margin: "12px 0 0", fontSize: "12px", color: "#64748B" }}>
-                Scan to view this rescued dog's live profile
-              </p>
-            </div>
-          )}
 
-          {!qrLoading && !qrError && qrImageUrl && (
-            <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginTop: "4px" }}>
-              <button
-                type="button"
-                onClick={handleDownloadQr}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "10px 18px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#6D28D9",
-                  color: "#FFF",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
-                <FaDownload /> Download QR
-              </button>
-              <button
-                type="button"
-                onClick={handlePrintQr}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "10px 18px",
-                  borderRadius: "8px",
-                  border: "1px solid #C4B5FD",
-                  background: "#FFFFFF",
-                  color: "#6D28D9",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
-                <FaPrint /> Print QR
-              </button>
+              {/* UNIQUE SAFETY TOKEN DISPLAY */}
+              {qrDog && (
+                <div
+                  style={{
+                    width: "100%",
+                    background: "#F1F5F9",
+                    border: "1px solid #CBD5E1",
+                    borderRadius: "10px",
+                    padding: "12px 16px",
+                    boxSizing: "border-box",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>
+                      Unique Safety Token
+                    </div>
+                    <div style={{ fontSize: "15px", fontWeight: 800, color: "#6D28D9", fontFamily: "monospace", marginTop: "2px" }}>
+                      {petService.formatSafetyToken(qrDog)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyToken(petService.formatSafetyToken(qrDog))}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "8px 14px",
+                      borderRadius: "6px",
+                      border: "1px solid #C4B5FD",
+                      background: "#FFFFFF",
+                      color: "#6D28D9",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <FaCopy /> Copy Token
+                  </button>
+                </div>
+              )}
+
+              {/* ACTION BUTTONS */}
+              <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "center" }}>
+                <button
+                  type="button"
+                  onClick={handleDownloadQr}
+                  style={{
+                    flex: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    padding: "11px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#6D28D9",
+                    color: "#FFF",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaDownload /> Download QR
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintQr}
+                  style={{
+                    flex: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    padding: "11px 16px",
+                    borderRadius: "8px",
+                    border: "1px solid #C4B5FD",
+                    background: "#FFFFFF",
+                    color: "#6D28D9",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaPrint /> Print Safety Tag
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1368,6 +1820,50 @@ const Pets = () => {
               </div>
             </div>
 
+            {/* Safety Identification Box in Master File */}
+            <div style={{ background: "#F3E8FF", border: "1px solid #DDD6FE", borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 700, color: "#6D28D9" }}>
+                  <FaQrcode color="#6D28D9" /> Safety Identification (Unified 1:1)
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const dog = selectedViewDog;
+                    setIsViewModalOpen(false);
+                    openQrModal(dog);
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "#6D28D9",
+                    color: "#FFFFFF",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaQrcode /> Generate / View QR
+                </button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+                <div>
+                  <span style={{ color: "#64748B" }}>Unique Safety Token:</span>{" "}
+                  <strong style={{ fontFamily: "monospace", color: "#6D28D9" }}>
+                    {petService.formatSafetyToken(selectedViewDog)}
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>QR Tag Status:</span>{" "}
+                  <strong style={{ color: "#059669" }}>Active &amp; Linked</strong>
+                </div>
+              </div>
+            </div>
+
             <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>
                 <FaStethoscope color="#2563EB" /> Veterinary &amp; Operational Clearance
@@ -1386,10 +1882,6 @@ const Pets = () => {
                 <div>
                   <span style={{ color: "#64748B" }}>Current Facility / Shelter:</span>{" "}
                   <strong>{selectedViewDog.shelter_name || selectedViewDog.current_facility || "Central Shelter"}</strong>
-                </div>
-                <div>
-                  <span style={{ color: "#64748B" }}>QR Tag Identifier:</span>{" "}
-                  <strong style={{ color: "#6D28D9" }}>{selectedViewDog.registration_number ? `QR-${selectedViewDog.registration_number.slice(0, 8)}` : "Active"}</strong>
                 </div>
               </div>
             </div>

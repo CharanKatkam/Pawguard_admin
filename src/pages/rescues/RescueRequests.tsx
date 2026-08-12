@@ -4,7 +4,7 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt } from "react-icons/fa";
+import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaEye } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -256,10 +256,29 @@ const RescueRequests = () => {
         onRetry={fetchRequests}
         emptyMessage="No public rescue requests."
         module="rescue_requests"
-        onView={(item: any) => {
-          setSelectedRequest(item);
-          setIsViewModalOpen(true);
-        }}
+        renderRowActions={(item: any) => (
+          <button
+            onClick={() => {
+              setSelectedRequest(item);
+              setIsViewModalOpen(true);
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              borderRadius: "6px",
+              border: "1px solid #93C5FD",
+              background: "#EFF6FF",
+              color: "#1D4ED8",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <FaEye size={12} /> View Details
+          </button>
+        )}
       />
 
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Log Emergency Rescue Call">

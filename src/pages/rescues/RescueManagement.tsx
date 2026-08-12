@@ -12,6 +12,9 @@ import {
   FaCheckCircle,
   FaExclamationTriangle,
   FaPlus,
+  FaEye,
+  FaEdit,
+  FaTrash,
 } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import userService from "../../services/userService";
@@ -441,34 +444,88 @@ const RescueManagement = () => {
           error={error}
           onRetry={fetchRescueCases}
           module="rescues"
-          emptyMessage="No active rescue cases found. Click 'New Rescue Case' to report one."
-          onView={(item: any) => {
-            setSelectedCase(item);
-            setIsViewModalOpen(true);
-          }}
-          onEdit={(item: any) => {
-            setSelectedCase(item);
-            const sevRaw = String(item.severity || "").toLowerCase();
-            const severity = SEVERITY_OPTIONS.some((s) => s.value === sevRaw) ? sevRaw : "high";
-            const condRaw = String(item.physical_condition || "").toLowerCase();
-            const physical_condition = PHYSICAL_CONDITION_OPTIONS.some((c) => c.value === condRaw) ? condRaw : "unknown";
-            setFormData({
-              location_address: item.location_address !== "-" ? String(item.location_address || "") : "",
-              location_landmark: item.location_landmark !== "-" ? String(item.location_landmark || "") : "",
-              severity,
-              is_urgent: item.is_urgent === "Yes",
-              animal_count: Number(item.animal_count !== "-" ? item.animal_count : 1),
-              physical_condition,
-              reporter_name: item.reporter_name !== "-" ? String(item.reporter_name || "") : "",
-              reporter_phone: item.reporter_phone !== "-" ? String(item.reporter_phone || "") : "",
-              reporter_notes: item.reporter_notes !== "-" ? String(item.reporter_notes || "") : "",
-            });
-            setIsEditModalOpen(true);
-          }}
-          onDelete={(item: any) => {
-            setSelectedCase(item);
-            setIsDeleteModalOpen(true);
-          }}
+          renderRowActions={(item: any) => (
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => {
+                  setSelectedCase(item);
+                  setIsViewModalOpen(true);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #93C5FD",
+                  background: "#EFF6FF",
+                  color: "#1D4ED8",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <FaEye size={12} /> View Details
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedCase(item);
+                  const sevRaw = String(item.severity || "").toLowerCase();
+                  const severity = SEVERITY_OPTIONS.some((s) => s.value === sevRaw) ? sevRaw : "high";
+                  const condRaw = String(item.physical_condition || "").toLowerCase();
+                  const physical_condition = PHYSICAL_CONDITION_OPTIONS.some((c) => c.value === condRaw) ? condRaw : "unknown";
+                  setFormData({
+                    location_address: item.location_address !== "-" ? String(item.location_address || "") : "",
+                    location_landmark: item.location_landmark !== "-" ? String(item.location_landmark || "") : "",
+                    severity,
+                    is_urgent: item.is_urgent === "Yes",
+                    animal_count: Number(item.animal_count !== "-" ? item.animal_count : 1),
+                    physical_condition,
+                    reporter_name: item.reporter_name !== "-" ? String(item.reporter_name || "") : "",
+                    reporter_phone: item.reporter_phone !== "-" ? String(item.reporter_phone || "") : "",
+                    reporter_notes: item.reporter_notes !== "-" ? String(item.reporter_notes || "") : "",
+                  });
+                  setIsEditModalOpen(true);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  color: "#2563EB",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <FaEdit size={12} /> Edit
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedCase(item);
+                  setIsDeleteModalOpen(true);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #FCA5A5",
+                  background: "#FFFFFF",
+                  color: "#DC2626",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <FaTrash size={12} /> Delete
+              </button>
+            </div>
+          )}
         />
       </div>
 

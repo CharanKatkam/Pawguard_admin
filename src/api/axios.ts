@@ -3,7 +3,9 @@ import { notifyAuthChanged } from "../utils/dataSync";
 import { getAccessToken, clearAuthData } from "../utils/authStorage";
 
 // Base API configuration for production and development environment
-const API_BASE_URL = "https://pawguard-backend-mqri.onrender.com/api/v1";
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string) ||
+  "https://pawguard-backend-mqri.onrender.com/api/v1";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
