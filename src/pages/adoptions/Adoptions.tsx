@@ -22,6 +22,8 @@ import {
   FaStethoscope,
   FaMedkit,
   FaExternalLinkAlt,
+  FaQrcode,
+  FaDownload,
 } from "react-icons/fa";
 import adoptionService, { toAdoptionStatus } from "../../services/adoptionService";
 import dogService from "../../services/dogService";
@@ -117,6 +119,67 @@ const Adoptions = () => {
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // Unique Dog QR Code Modal state
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [qrDog, setQrDog] = useState<Record<string, unknown> | null>(null);
+  const [, setQrBlob] = useState<Blob | null>(null);
+  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  const openQrModal = async (dog: Record<string, unknown> | null) => {
+    if (!dog) return;
+    const targetDogId = String(dog.id || dog.dog_id || dog.petId || dog.registration_number || "");
+    if (!targetDogId) {
+      addToast("Could not determine the dog record to generate a QR for.", "error");
+      return;
+    }
+    setQrDog(dog);
+    setQrBlob(null);
+    setQrImageUrl(null);
+    setQrError(null);
+    setIsQrModalOpen(true);
+    try {
+      setQrLoading(true);
+      const blob = await petService.getDogQrImage(targetDogId);
+      if (blob && blob.size > 0 && !blob.type.includes("json")) {
+        setQrBlob(blob);
+        setQrImageUrl(URL.createObjectURL(blob));
+      } else {
+        const publicScanUrl = `${window.location.origin}/public-scan/${encodeURIComponent(targetDogId)}`;
+        setQrImageUrl(`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(publicScanUrl)}`);
+      }
+    } catch {
+      const publicScanUrl = `${window.location.origin}/public-scan/${encodeURIComponent(targetDogId)}`;
+      setQrImageUrl(`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(publicScanUrl)}`);
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const closeQrModal = () => {
+    if (qrImageUrl && qrImageUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(qrImageUrl);
+    }
+    setQrImageUrl(null);
+    setQrBlob(null);
+    setQrDog(null);
+    setQrError(null);
+    setIsQrModalOpen(false);
+  };
+
+  const handleDownloadQr = () => {
+    if (!qrImageUrl || !qrDog) return;
+    const reg = qrDog.registration_number || qrDog.id || "dog";
+    const safeReg = String(reg).replace(/[^a-zA-Z0-9-_]/g, "_");
+    const link = document.createElement("a");
+    link.href = qrImageUrl;
+    link.download = `PawGuard_QR_${safeReg}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   
   const [selectedApp, setSelectedApp] = useState<Record<string, unknown> | null>(null);
   const [selectedDogDetail, setSelectedDogDetail] = useState<Record<string, unknown> | null>(null);
@@ -988,25 +1051,22 @@ const Adoptions = () => {
 
                       <button
                         type="button"
-                        onClick={() => {
-                          const dogId = String(selectedDogDetail.id || selectedDogDetail.registration_number || "");
-                          if (dogId) window.open(`/public-scan/${dogId}`, "_blank");
-                        }}
+                        onClick={() => openQrModal(selectedDogDetail)}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "6px",
-                          padding: "8px 12px",
+                          padding: "8px 14px",
                           borderRadius: "8px",
-                          border: "1px solid #93C5FD",
-                          background: "#EFF6FF",
-                          color: "#1D4ED8",
+                          border: "none",
+                          background: "#6D28D9",
+                          color: "#FFFFFF",
                           fontSize: "12px",
                           fontWeight: 700,
                           cursor: "pointer",
                         }}
                       >
-                        <FaExternalLinkAlt /> Public Tag Profile
+                        <FaQrcode /> View QR Code
                       </button>
                     </div>
 
@@ -1387,6 +1447,113 @@ const Adoptions = () => {
             <button type="button" disabled={isSubmitting} onClick={handleDeleteApplication} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}><FaTrash /> Delete</button>
           </div>
         </div>
+      </Modal>
+
+      {/* Unique Dog QR Code Modal */}
+      <Modal
+        isOpen={isQrModalOpen}
+        onClose={closeQrModal}
+        title={`Unique Dog Safety QR — ${String(qrDog?.name || selectedApp?.petName || "Dog")}`}
+        maxWidth="520px"
+      >
+        {qrDog && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", textAlign: "center", padding: "10px 0" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
+                {String(qrDog.name || selectedApp?.petName || "Unnamed Dog")}
+              </h3>
+              <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
+                Dog Registration / Tag ID:{" "}
+                <strong style={{ fontFamily: "monospace", color: "#2563EB" }}>
+                  {String(qrDog.registration_number || qrDog.id || "-")}
+                </strong>
+              </div>
+            </div>
+
+            {/* QR Code Container */}
+            <div
+              style={{
+                background: "#F8FAFC",
+                border: "2px dashed #CBD5E1",
+                borderRadius: "16px",
+                padding: "20px",
+                width: "240px",
+                height: "240px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                position: "relative",
+              }}
+            >
+              {qrLoading ? (
+                <div style={{ color: "#2563EB", fontWeight: 600, fontSize: "14px" }}>Generating QR Code...</div>
+              ) : qrImageUrl ? (
+                <img
+                  src={qrImageUrl}
+                  alt="Dog Public Profile QR Code"
+                  style={{ width: "200px", height: "200px", objectFit: "contain" }}
+                />
+              ) : (
+                <div style={{ color: "#EF4444", fontSize: "12px", padding: "10px" }}>{qrError || "Unable to display QR code."}</div>
+              )}
+            </div>
+
+            <p style={{ margin: 0, fontSize: "13px", color: "#475569", fontWeight: 600 }}>
+              Scan this QR code to view this dog's public profile.
+            </p>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "8px" }}>
+              {qrImageUrl && (
+                <button
+                  type="button"
+                  onClick={handleDownloadQr}
+                  style={{
+                    flex: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    padding: "10px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#6D28D9",
+                    color: "#FFFFFF",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaDownload /> Download QR
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  const dogId = String(qrDog.id || qrDog.registration_number || "");
+                  if (dogId) window.open(`/public-scan/${dogId}`, "_blank");
+                }}
+                style={{
+                  flex: 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "6px",
+                  padding: "10px 16px",
+                  borderRadius: "8px",
+                  border: "1px solid #2563EB",
+                  background: "#EFF6FF",
+                  color: "#2563EB",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                <FaExternalLinkAlt /> Open Public Profile
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
