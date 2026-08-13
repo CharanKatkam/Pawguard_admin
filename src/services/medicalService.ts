@@ -1,7 +1,7 @@
 import api from "../api/axios";
 import { publishActionEvent } from "../utils/eventSystem";
 
-const pick = (data: Record<string, unknown>, ...keys: string[]): any => {
+const pick = (data: Record<string, unknown>, ...keys: string[]): unknown => {
   for (const k of keys) {
     const v = data[k];
     if (v !== undefined && v !== null && v !== "") return v;
@@ -9,51 +9,158 @@ const pick = (data: Record<string, unknown>, ...keys: string[]): any => {
   return undefined;
 };
 
-const normalizeMedicalRow = (r: Record<string, any>, type: string): Record<string, unknown> => {
-  const clinical = [];
-  if (r.body_condition_score !== undefined && r.body_condition_score !== null) clinical.push(`BCS ${r.body_condition_score}/9`);
-  if (r.visible_injuries) clinical.push(String(r.visible_injuries));
-  if (r.dental_health) clinical.push(String(r.dental_health));
-  if (r.post_op_notes) clinical.push(String(r.post_op_notes));
+const normalizeMedicalRow = (r: Record<string, unknown>, type: string): Record<string, unknown> => {
+  const vetIdRaw = r.administered_by || r.vet_id;
+  const vetName = vetIdRaw ? `Vet ID: ${String(vetIdRaw).slice(0, 8)}` : "-";
+
+  if (type === "exams") {
+    const notes: string[] = [];
+    if (r.body_condition_score !== undefined && r.body_condition_score !== null) notes.push(`BCS ${r.body_condition_score}/9`);
+    if (r.visible_injuries) notes.push(String(r.visible_injuries));
+    if (r.dental_health) notes.push(`Dental: ${r.dental_health}`);
+    if (r.coat_condition) notes.push(`Coat: ${r.coat_condition}`);
+    return {
+      recordId: r.id,
+      id: r.id,
+      entityType: "exams",
+      type: "exams",
+      categoryName: "Clinical Exam",
+      petName: (r.dog as { name?: string } | undefined)?.name || r.dog_id || "-",
+      petId: r.dog_id || "-",
+      vetName,
+      vetId: vetIdRaw || null,
+      diagnosis: r.triage_diagnosis || "-",
+      treatment: notes.length > 0 ? notes.join("; ") : "-",
+      date: r.exam_date || r.created_at || "-",
+      raw: r,
+    };
+  }
+
+  if (type === "treatments") {
+    return {
+      recordId: r.id,
+      id: r.id,
+      entityType: "treatments",
+      type: "treatments",
+      categoryName: "Treatment / Surgery",
+      petName: (r.dog as { name?: string } | undefined)?.name || r.dog_id || "-",
+      petId: r.dog_id || "-",
+      vetName,
+      vetId: vetIdRaw || null,
+      diagnosis: "-",
+      treatment: r.treatment_type ? `${r.treatment_type}${r.description ? `: ${r.description}` : ""}` : (r.description || "-"),
+      treatmentType: r.treatment_type || "-",
+      description: r.description || "-",
+      date: r.treatment_date || r.created_at || "-",
+      raw: r,
+    };
+  }
+
+  if (type === "vaccinations") {
+    return {
+      recordId: r.id,
+      id: r.id,
+      entityType: "vaccinations",
+      type: "vaccinations",
+      categoryName: "Vaccination",
+      petName: (r.dog as { name?: string } | undefined)?.name || r.dog_id || "-",
+      petId: r.dog_id || "-",
+      vetName,
+      vetId: vetIdRaw || null,
+      diagnosis: "-",
+      treatment: r.vaccine_name ? `Vaccine: ${r.vaccine_name}${r.lot_number ? ` (Lot #${r.lot_number})` : ""}` : "-",
+      vaccineName: r.vaccine_name || "-",
+      lotNumber: r.lot_number || null,
+      nextDueAt: r.next_due_at || null,
+      date: r.administered_at || r.created_at || "-",
+      raw: r,
+    };
+  }
+
+  if (type === "prescriptions") {
+    return {
+      recordId: r.id,
+      id: r.id,
+      entityType: "prescriptions",
+      type: "prescriptions",
+      categoryName: "Prescription",
+      petName: (r.dog as { name?: string } | undefined)?.name || r.dog_id || "-",
+      petId: r.dog_id || "-",
+      vetName,
+      vetId: vetIdRaw || null,
+      diagnosis: "-",
+      treatment: r.drug_name ? `Rx: ${r.drug_name} (${r.dosage || "As directed"}, ${r.route || "Oral"})` : "-",
+      drugName: r.drug_name || "-",
+      dosage: r.dosage || "-",
+      route: r.route || "-",
+      startAt: r.start_at || "-",
+      endAt: r.end_at || "-",
+      isActive: r.is_active ?? true,
+      date: r.start_at || r.created_at || "-",
+      raw: r,
+    };
+  }
+
   return {
     recordId: r.id,
     id: r.id,
     entityType: type,
-    petName: r.dog?.name || r.dog_id || "",
-    petId: r.dog_id,
-    vetName: r.administered_by || r.vet_id || "",
-    diagnosis: r.triage_diagnosis || r.vaccine_name || r.treatment_type || "",
-    treatment: r.description || clinical.join("; "),
-    vaccineName: r.vaccine_name,
-    nextDueAt: r.next_due_at,
-    status: r.status || "",
     type,
-    date: r.exam_date || r.administered_at || r.treatment_date || r.created_at,
+    categoryName: type,
+    petName: (r.dog as { name?: string } | undefined)?.name || r.dog_id || "-",
+    petId: r.dog_id || "-",
+    vetName,
+    diagnosis: "-",
+    treatment: "-",
+    date: r.created_at || "-",
+    raw: r,
   };
 };
 
 export const medicalService = {
   getMedicalRecords: async () => {
-    const [exams, vaccinations, treatments] = await Promise.all([
-      api.get("/medical/exams").catch((e) => {
-        throw e;
-      }),
-      api.get("/medical/vaccinations"),
-      api.get("/medical/treatments"),
+    const [exams, vaccinations, treatments, prescriptions] = await Promise.all([
+      api.get("/medical/exams").catch(() => ({ data: [] })),
+      api.get("/medical/vaccinations").catch(() => ({ data: [] })),
+      api.get("/medical/treatments").catch(() => ({ data: [] })),
+      api.get("/medical/prescriptions").catch(() => ({ data: [] })),
     ]);
-    const unwrap = (res: any) => (Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : []);
+    const unwrap = (res: { data?: { data?: Record<string, unknown>[] } | Record<string, unknown>[] }): Record<string, unknown>[] => {
+      const data = res?.data;
+      if (Array.isArray(data)) return data;
+      if (data && typeof data === "object" && Array.isArray(data.data)) return data.data;
+      return [];
+    };
     const rows = [
-      ...unwrap(exams).map((r: any) => normalizeMedicalRow(r, "exams")),
-      ...unwrap(vaccinations).map((r: any) => normalizeMedicalRow(r, "vaccinations")),
-      ...unwrap(treatments).map((r: any) => normalizeMedicalRow(r, "treatments")),
-    ].sort((a: any, b: any) => String(b.date || "").localeCompare(String(a.date || "")));
+      ...unwrap(exams).map((r) => normalizeMedicalRow(r, "exams")),
+      ...unwrap(vaccinations).map((r) => normalizeMedicalRow(r, "vaccinations")),
+      ...unwrap(treatments).map((r) => normalizeMedicalRow(r, "treatments")),
+      ...unwrap(prescriptions).map((r) => normalizeMedicalRow(r, "prescriptions")),
+    ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
     return { data: rows, total: rows.length };
   },
 
   getMedicalHistory: async (dogId: string) => {
-    const response = await api.get(`/medical/dogs/${dogId}/history`);
-    const rows = Array.isArray(response?.data?.data) ? response.data.data : Array.isArray(response?.data) ? response.data : [];
-    return { data: rows };
+    try {
+      const response = await api.get(`/medical/dogs/${dogId}/history`);
+      const payload = response?.data?.data || response?.data;
+      if (Array.isArray(payload)) {
+        return { data: payload };
+      }
+      if (payload && typeof payload === "object") {
+        const unwrap = (val: unknown): Record<string, unknown>[] => (Array.isArray(val) ? (val as Record<string, unknown>[]) : []);
+        const rows = [
+          ...unwrap(payload.exams).map((r) => normalizeMedicalRow(r, "exams")),
+          ...unwrap(payload.treatments).map((r) => normalizeMedicalRow(r, "treatments")),
+          ...unwrap(payload.vaccinations).map((r) => normalizeMedicalRow(r, "vaccinations")),
+          ...unwrap(payload.prescriptions).map((r) => normalizeMedicalRow(r, "prescriptions")),
+        ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+        return { data: rows };
+      }
+      return { data: [] };
+    } catch {
+      return { data: [] };
+    }
   },
 
   // GET /medical/clearances/dogs/{dog_id} - list medical clearance certificates for a dog

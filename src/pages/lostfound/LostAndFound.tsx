@@ -63,15 +63,21 @@ const formatCoord = (v: number | null | undefined): string =>
 const extractError = (err: unknown, fallback: string): string => {
   if (err && typeof err === "object") {
     const candidate = err as {
-      response?: { data?: { detail?: unknown } };
+      response?: {
+        data?: {
+          detail?: unknown;
+          message?: string;
+          error?: { message?: string };
+        };
+      };
       message?: unknown;
     };
-    if (typeof candidate.response?.data?.detail === "string") {
-      return candidate.response.data.detail;
-    }
-    if (typeof candidate.message === "string") {
-      return candidate.message;
-    }
+    const d = candidate.response?.data?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d) && d.length > 0 && typeof d[0]?.msg === "string") return d[0].msg;
+    if (typeof candidate.response?.data?.message === "string") return candidate.response.data.message;
+    if (typeof candidate.response?.data?.error?.message === "string") return candidate.response.data.error.message;
+    if (typeof candidate.message === "string") return candidate.message;
   }
   return fallback;
 };
@@ -1104,26 +1110,77 @@ const LostAndFound = () => {
         pageSize={PAGE_SIZE}
         searchValue={search}
         onSearchChange={setSearch}
-        renderRowActions={(row: any) => (
-          <button
-            onClick={() => openDetails(row)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              borderRadius: "6px",
-              border: "1px solid #93C5FD",
-              background: "#EFF6FF",
-              color: "#1D4ED8",
-              fontSize: "12px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            <FaEye size={12} /> View Details
-          </button>
-        )}
+        renderRowActions={(row: RegistryReport) => {
+          const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
+          const kind = rowKind === "found" || rowKind === "lost" ? rowKind : activeTab;
+          return (
+            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => openDetails(row)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  padding: "5px 9px",
+                  borderRadius: "6px",
+                  border: "1px solid #93C5FD",
+                  background: "#EFF6FF",
+                  color: "#1D4ED8",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <FaEye size={12} /> View
+              </button>
+              <button
+                type="button"
+                onClick={() => openMatches(row)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  padding: "5px 9px",
+                  borderRadius: "6px",
+                  border: "1px solid #C084FC",
+                  background: "#F3E8FF",
+                  color: "#7E22CE",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <FaHandshake size={12} /> Matches
+              </button>
+              {kind === "lost" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedReport(row);
+                    setSelectedReportKind("lost");
+                    void handleBroadcast();
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "5px 9px",
+                    borderRadius: "6px",
+                    border: "1px solid #BFDBFE",
+                    background: "#EFF6FF",
+                    color: "#2563EB",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaBroadcastTower size={12} /> Broadcast
+                </button>
+              )}
+            </div>
+          );
+        }}
       />
 
       {selectedReport && (
@@ -1364,7 +1421,7 @@ const LostAndFound = () => {
                   Boolean(match.claim_submitted_at) &&
                   !match.claim_reviewed_at;
                 const canResolve =
-                  match.status === "confirmed" && Boolean(match.claim_reviewed_at);
+                  match.status === "pending" || match.status === "confirmed";
                 const linkedReport = (
                   selectedReportKind === "lost" ? match.found_report : match.lost_report
                 ) as RegistryReport | null | undefined;

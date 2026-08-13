@@ -131,8 +131,25 @@ export const rescueService = {
     return response.data;
   },
 
-  approveRescueRequest: async (requestId: string) => {
-    const response = await api.post(`/rescue/${requestId}/verify`);
+  approveRescueRequest: async (
+    requestId: string,
+    data?: {
+      status?: string;
+      severity?: string;
+      is_urgent?: boolean;
+      rejection_rationale?: string;
+      media_evidence?: string[];
+    }
+  ) => {
+    const payload: Record<string, unknown> = {
+      status: data?.status || "verified",
+    };
+    if (data?.severity) payload.severity = String(data.severity).toLowerCase();
+    if (typeof data?.is_urgent === "boolean") payload.is_urgent = data.is_urgent;
+    if (data?.rejection_rationale) payload.rejection_rationale = data.rejection_rationale;
+    if (Array.isArray(data?.media_evidence)) payload.media_evidence = data.media_evidence;
+
+    const response = await api.post(`/rescue/${requestId}/verify`, payload);
     await publishActionEvent({
       module: "rescue",
       action: "approve",

@@ -1,22 +1,28 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaEye } from "react-icons/fa";
+import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaEye, FaSearchLocation } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
+import lostFoundService from "../../services/lostFoundService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const RescueRequests = () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
 
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const tableSectionRef = useRef<HTMLDivElement>(null);
+
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -30,10 +36,6 @@ const RescueRequests = () => {
     reporter_notes: "",
   });
 
-  useEffect(() => {
-    fetchRequests();
-  }, []);
-
   const fetchRequests = async () => {
     try {
       setLoading(true);
@@ -45,6 +47,7 @@ const RescueRequests = () => {
         ? response.data
         : [];
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const formatted = list.map((item: any) => {
         const stage = dispatchStage({ status: item.status, dispatch: item.dispatch });
         return {
@@ -70,12 +73,20 @@ const RescueRequests = () => {
       });
 
       setRequests(formatted);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to load incoming rescue requests.");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      setError(e?.response?.data?.detail || "Failed to load incoming rescue requests.");
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchRequests();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleCreateRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,21 +106,28 @@ const RescueRequests = () => {
       });
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to submit request", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to submit request", "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleVerify = async (id: string) => {
+  const handleVerify = async (id: string, reqObj?: Record<string, unknown>) => {
     try {
-      await rescueService.approveRescueRequest(id);
+      await rescueService.approveRescueRequest(id, {
+        status: "verified",
+        severity: reqObj?.severity ? String(reqObj.severity) : undefined,
+        is_urgent: typeof reqObj?.is_urgent === "boolean" ? reqObj.is_urgent : undefined,
+      });
       addToast("Request verified and moved to active triage!", "success");
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to verify request", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string; error?: { message?: string } } }; message?: string };
+      const errMsg = e?.response?.data?.error?.message || e?.response?.data?.detail || e?.response?.data?.message || e?.message || "Failed to verify request";
+      addToast(errMsg, "error");
     }
   };
 
@@ -120,8 +138,9 @@ const RescueRequests = () => {
       addToast("Request rejected.", "info");
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to reject request", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to reject request", "error");
     }
   };
 
@@ -131,8 +150,9 @@ const RescueRequests = () => {
       addToast("Case escalated to backup personnel.", "success");
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to escalate case", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to escalate case", "error");
     }
   };
 
@@ -142,8 +162,9 @@ const RescueRequests = () => {
       addToast("Dog marked as located.", "success");
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to update case", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to update case", "error");
     }
   };
 
@@ -153,8 +174,9 @@ const RescueRequests = () => {
       addToast("Dog secured by field team.", "success");
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to update case", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to update case", "error");
     }
   };
 
@@ -164,8 +186,43 @@ const RescueRequests = () => {
       addToast("Dog admitted to the rescue centre.", "success");
       fetchRequests();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to admit dog", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to admit dog", "error");
+    }
+  };
+
+  const handleLogFoundPetFromRescue = async (req: Record<string, unknown>) => {
+    try {
+      setIsSubmitting(true);
+      const address = String(req.location || req.location_address || "Rescue Location");
+      const lat = req.latitude && req.latitude !== "-" ? Number(req.latitude) : null;
+      const lng = req.longitude && req.longitude !== "-" ? Number(req.longitude) : null;
+      const notes = [
+        req.condition ? `Physical Condition: ${String(req.condition)}` : "",
+        req.reporter_notes ? `Reporter Notes: ${String(req.reporter_notes)}` : "",
+      ].filter(Boolean).join(" | ");
+
+      const res = await lostFoundService.createFoundReport({
+        species: "dog",
+        breed_observed: "Rescued Dog",
+        color_observed: "Mixed / Unspecified",
+        location_address: address,
+        latitude: lat,
+        longitude: lng,
+        found_at: new Date().toISOString(),
+        marker_description: notes || `Secured via Rescue Request #${String(req.ticket_number || req.id || "")}`,
+      });
+
+      const reportId = (res as { data?: { id?: string }; id?: string })?.data?.id || (res as { id?: string })?.id;
+      addToast(`Found pet report created for rescued dog! (${reportId ? `Report #${String(reportId).slice(0, 8)}` : "Saved"})`, "success");
+      setIsViewModalOpen(false);
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to log found pet report", "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -196,13 +253,25 @@ const RescueRequests = () => {
     {
       key: "dispatch_status",
       header: "Dispatch Status",
-      render: (val: string, row: any) => (
-        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: row.dispatch_bg, color: row.dispatch_color }}>
+      render: (val: string, row: Record<string, unknown>) => (
+        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: String(row.dispatch_bg || ""), color: String(row.dispatch_color || "") }}>
           {val}
         </span>
       ),
     },
   ];
+
+  const handleStatCardClick = (status: string) => {
+    setStatusFilter(status);
+    if (tableSectionRef.current) {
+      tableSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const filteredRequests = requests.filter((r) => {
+    if (statusFilter === "all") return true;
+    return r.status === statusFilter;
+  });
 
   return (
     <div style={{ padding: "24px", maxWidth: "1400px", margin: "0 auto" }}>
@@ -240,46 +309,124 @@ const RescueRequests = () => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        <StatCard title="Total Incoming" value={requests.length} icon={<FaAmbulance />} color="#2563EB" />
-        <StatCard title="Reported (Triage)" value={requests.filter((r) => r.status === "reported").length} icon={<FaClock />} color="#F59E0B" />
-        <StatCard title="Verified" value={requests.filter((r) => r.status === "verified").length} icon={<FaCheck />} color="#2563EB" />
-        <StatCard title="Dispatched" value={requests.filter((r) => r.status === "dispatched").length} icon={<FaMapMarkerAlt />} color="#7C3AED" />
-        <StatCard title="Rescued" value={requests.filter((r) => r.status === "rescued").length} icon={<FaCheck />} color="#10B981" />
-        <StatCard title="Rejected / Invalid" value={requests.filter((r) => r.status === "rejected").length} icon={<FaTimes />} color="#EF4444" />
+        <StatCard
+          title="Total Incoming"
+          value={requests.length}
+          icon={<FaAmbulance />}
+          color="#2563EB"
+          onClick={() => handleStatCardClick("all")}
+          selected={statusFilter === "all"}
+        />
+        <StatCard
+          title="Reported (Triage)"
+          value={requests.filter((r) => r.status === "reported").length}
+          icon={<FaClock />}
+          color="#F59E0B"
+          onClick={() => handleStatCardClick("reported")}
+          selected={statusFilter === "reported"}
+        />
+        <StatCard
+          title="Verified"
+          value={requests.filter((r) => r.status === "verified").length}
+          icon={<FaCheck />}
+          color="#2563EB"
+          onClick={() => handleStatCardClick("verified")}
+          selected={statusFilter === "verified"}
+        />
+        <StatCard
+          title="Dispatched"
+          value={requests.filter((r) => r.status === "dispatched").length}
+          icon={<FaMapMarkerAlt />}
+          color="#7C3AED"
+          onClick={() => handleStatCardClick("dispatched")}
+          selected={statusFilter === "dispatched"}
+        />
+        <StatCard
+          title="Rescued"
+          value={requests.filter((r) => r.status === "rescued").length}
+          icon={<FaCheck />}
+          color="#10B981"
+          onClick={() => handleStatCardClick("rescued")}
+          selected={statusFilter === "rescued"}
+        />
+        <StatCard
+          title="Rejected / Invalid"
+          value={requests.filter((r) => r.status === "rejected").length}
+          icon={<FaTimes />}
+          color="#EF4444"
+          onClick={() => handleStatCardClick("rejected")}
+          selected={statusFilter === "rejected"}
+        />
       </div>
 
-      <DataTable
-        data={requests}
-        columns={columns}
-        loading={loading}
-        error={error}
-        onRetry={fetchRequests}
-        emptyMessage="No public rescue requests."
-        module="rescue_requests"
-        renderRowActions={(item: any) => (
-          <button
-            onClick={() => {
-              setSelectedRequest(item);
-              setIsViewModalOpen(true);
-            }}
+      <div ref={tableSectionRef}>
+        {statusFilter !== "all" && (
+          <div
             style={{
-              display: "inline-flex",
+              display: "flex",
+              justifyContent: "space-between",
               alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              borderRadius: "6px",
-              border: "1px solid #93C5FD",
+              marginBottom: "14px",
               background: "#EFF6FF",
-              color: "#1D4ED8",
-              fontSize: "12px",
-              fontWeight: 600,
-              cursor: "pointer",
+              border: "1px solid #BFDBFE",
+              borderRadius: "10px",
+              padding: "10px 16px",
             }}
           >
-            <FaEye size={12} /> View Details
-          </button>
+            <div style={{ fontSize: "13px", fontWeight: 600, color: "#1E40AF" }}>
+              Filtered by Status: <span style={{ textTransform: "uppercase", fontWeight: 700 }}>{statusFilter}</span> ({filteredRequests.length} of {requests.length} requests)
+            </div>
+            <button
+              onClick={() => setStatusFilter("all")}
+              style={{
+                background: "#FFFFFF",
+                border: "1px solid #93C5FD",
+                borderRadius: "6px",
+                padding: "4px 10px",
+                fontSize: "12px",
+                color: "#1D4ED8",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Show All Requests
+            </button>
+          </div>
         )}
-      />
+
+        <DataTable
+          data={filteredRequests}
+          columns={columns}
+          loading={loading}
+          error={error}
+          onRetry={fetchRequests}
+          emptyMessage={statusFilter !== "all" ? `No rescue requests with status "${statusFilter}".` : "No public rescue requests."}
+          module="rescue_requests"
+          renderRowActions={(item: Record<string, unknown>) => (
+            <button
+              onClick={() => {
+                setSelectedRequest(item);
+                setIsViewModalOpen(true);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "1px solid #93C5FD",
+                background: "#EFF6FF",
+                color: "#1D4ED8",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <FaEye size={12} /> View Details
+            </button>
+          )}
+        />
+      </div>
 
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Log Emergency Rescue Call">
         <form onSubmit={handleCreateRequest} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -361,7 +508,7 @@ const RescueRequests = () => {
                   ) : null}
                   {selectedRequest.dispatch.assigned_driver_id ? <div>Driver: {selectedRequest.dispatch.assigned_driver_id}</div> : null}
                   {selectedRequest.dispatch.agents && selectedRequest.dispatch.agents.length > 0 ? (
-                    <div>Agents: {selectedRequest.dispatch.agents.map((a: any) => a.agent_id).join(", ")}</div>
+                    <div>Agents: {selectedRequest.dispatch.agents.map((a: Record<string, unknown>) => a.agent_id).join(", ")}</div>
                   ) : null}
                   {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {new Date(selectedRequest.dispatch.dispatched_at).toLocaleString()}</div> : null}
                 </div>
@@ -379,7 +526,7 @@ const RescueRequests = () => {
               {selectedRequest.status === "reported" && (
                 <>
                   <Can permission="approve_rescue_requests">
-                    <button onClick={() => { handleVerify(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Verify</button>
+                    <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Verify</button>
                   </Can>
                   <Can permission="edit_rescue_requests">
                     <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Reject</button>
@@ -400,6 +547,26 @@ const RescueRequests = () => {
                 <Can permission="edit_rescues">
                   <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Secured</button>
                 </Can>
+              )}
+              {["rescued", "admitted"].includes(selectedRequest.status) && (
+                <button
+                  onClick={() => handleLogFoundPetFromRescue(selectedRequest)}
+                  disabled={isSubmitting}
+                  style={{
+                    padding: "8px 16px",
+                    background: "#7C3AED",
+                    color: "#FFF",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: isSubmitting ? "wait" : "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontWeight: 600,
+                  }}
+                >
+                  <FaSearchLocation size={12} /> Log as Found Pet for Matching
+                </button>
               )}
               {selectedRequest.status === "rescued" && (
                 <Can permission="edit_rescues">

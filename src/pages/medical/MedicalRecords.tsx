@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
@@ -20,7 +20,7 @@ const inputStyle: React.CSSProperties = {
 
 const MedicalRecords = () => {
   const [medicalRecords, setMedicalRecords] = useState<Record<string, unknown>[]>([]);
-  const [dogs, setDogs] = useState<any[]>([]);
+  const [dogs, setDogs] = useState<Record<string, unknown>[]>([]);
   const [certificatesIssued, setCertificatesIssued] = useState(0);
   const [loading, setLoading] = useState<boolean>(true);
   const { addToast } = useToast();
@@ -32,9 +32,9 @@ const MedicalRecords = () => {
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
-  const [selectedDogProfile, setSelectedDogProfile] = useState<any | null>(null);
-  const [dogHistory, setDogHistory] = useState<any[]>([]);
+  const [selectedRecord, setSelectedRecord] = useState<Record<string, unknown> | null>(null);
+  const [selectedDogProfile, setSelectedDogProfile] = useState<Record<string, unknown> | null>(null);
+  const [dogHistory, setDogHistory] = useState<Record<string, unknown>[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("all");
 
@@ -45,53 +45,45 @@ const MedicalRecords = () => {
   const [certForm, setCertForm] = useState({ dogId: "", clearanceType: "health_clearance", notes: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchRecords();
-    fetchDogs();
-  }, []);
-
-  const fetchDogs = async () => {
-    try {
-      const response = await dogService.getAllDogs();
-      const list = Array.isArray(response?.data) ? response.data : [];
-      setDogs(list);
-      fetchCertificates(list);
-    } catch {
-      setDogs([]);
-      setCertificatesIssued(0);
-    }
-  };
-
-  const fetchCertificates = async (dogList: any[] = dogs) => {
+  const fetchCertificates = useCallback(async (dogList: Record<string, unknown>[] = dogs) => {
     if (dogList.length === 0) {
       setCertificatesIssued(0);
       return;
     }
     const results = await Promise.allSettled(
-      dogList.map((d) => medicalService.getDogClearances(d.id || d.dog_id))
+      dogList.map((d) => medicalService.getDogClearances(String(d.id || d.dog_id || "")))
     );
     const approved = results.reduce((acc, r) => {
       if (r.status !== "fulfilled") return acc;
       const list = Array.isArray(r.value) ? r.value : Array.isArray(r.value?.data) ? r.value.data : [];
       return (
         acc +
-        list.filter((c: any) => String(c.status).toLowerCase() === "approved").length
+        list.filter((c: Record<string, unknown>) => String(c.status).toLowerCase() === "approved").length
       );
     }, 0);
     setCertificatesIssued(approved);
-  };
+  }, [dogs]);
 
-  const dogLabel = (d: any) =>
-    d?.name ? `${d.name}${d.breed ? ` (${d.breed})` : ""}` : d?.id ? d.id : "";
+  const fetchDogs = useCallback(async () => {
+    try {
+      const response = await dogService.getAllDogs();
+      const list = Array.isArray(response?.data) ? (response.data as Record<string, unknown>[]) : [];
+      setDogs(list);
+      fetchCertificates(list);
+    } catch {
+      setDogs([]);
+      setCertificatesIssued(0);
+    }
+  }, [fetchCertificates]);
 
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async () => {
     try {
       setLoading(true);
       const response = await medicalService.getMedicalRecords();
       if (response && Array.isArray(response.data)) {
-        const rows = response.data.map((r: any) => {
+        const rows = response.data.map((r: Record<string, unknown>) => {
           const dog = dogs.find((d) => d.id === r.petId || d.id === r.pet_id);
-          return dog && !r.petName?.includes(" ") ? { ...r, petName: dog.name } : r;
+          return dog && !String(r.petName || "").includes(" ") ? { ...r, petName: dog.name } : r;
         });
         setMedicalRecords(rows);
       }
@@ -100,7 +92,17 @@ const MedicalRecords = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast, dogs]);
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      fetchRecords();
+      fetchDogs();
+    });
+  }, [fetchDogs, fetchRecords]);
+
+  const dogLabel = (d: Record<string, unknown> | undefined) =>
+    d?.name ? `${String(d.name)}${d.breed ? ` (${String(d.breed)})` : ""}` : d?.id ? String(d.id) : "";
 
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,8 +118,9 @@ const MedicalRecords = () => {
       setExamForm({ dogId: "", diagnosis: "", treatment: "" });
       fetchRecords();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Failed to log examination.";
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to log examination.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -138,8 +141,9 @@ const MedicalRecords = () => {
       setVaccineForm({ dogId: "", vaccineName: "", nextDueAt: "" });
       fetchRecords();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Failed to log vaccination.";
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to log vaccination.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -160,8 +164,9 @@ const MedicalRecords = () => {
       setSurgeryForm({ dogId: "", procedure: "", description: "" });
       fetchRecords();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Failed to schedule treatment.";
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to schedule treatment.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -183,8 +188,9 @@ const MedicalRecords = () => {
       fetchRecords();
       fetchCertificates();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Failed to issue certificate.";
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to issue certificate.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -195,37 +201,39 @@ const MedicalRecords = () => {
     if (!selectedRecord) return;
     try {
       setIsSubmitting(true);
-      await medicalService.deleteMedicalRecord(selectedRecord.recordId, selectedRecord.entityType);
-      addToast(`Deleted ${selectedRecord.entityType === "exams" ? "record" : selectedRecord.entityType.slice(0, -1)} ${selectedRecord.recordId}`, "success");
+      await medicalService.deleteMedicalRecord(String(selectedRecord.recordId), String(selectedRecord.entityType));
+      addToast(`Deleted record ${String(selectedRecord.recordId)}`, "success");
       setIsDeleteModalOpen(false);
       setSelectedRecord(null);
       fetchRecords();
       notifyDataChanged();
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Failed to delete record.";
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to delete record.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const openMedicalProfile = async (record: any) => {
-    const dog = dogs.find((d) => d.id === record.petId || d.id === record.pet_id) || {
-      id: record.petId || record.pet_id || "DOG-REC",
-      name: record.petName || "Patient Dog",
-      breed: "Canine",
-      status: record.status || "Under Care",
+  const openMedicalProfile = async (record: Record<string, unknown>) => {
+    const dogId = String(record.petId || record.pet_id || "");
+    const dog = dogs.find((d) => d.id === dogId) || {
+      id: dogId || "-",
+      name: record.petName || "-",
+      breed: "-",
+      status: record.status || "-",
     };
     setSelectedDogProfile({
       ...dog,
       recordContext: record,
     });
     setIsProfileModalOpen(true);
-    if (dog.id) {
+    if (dogId) {
       try {
         setHistoryLoading(true);
-        const res = await medicalService.getMedicalHistory(dog.id);
-        setDogHistory(Array.isArray(res?.data) ? res.data : []);
+        const res = await medicalService.getMedicalHistory(dogId);
+        setDogHistory(Array.isArray(res?.data) ? (res.data as Record<string, unknown>[]) : []);
       } catch {
         setDogHistory([]);
       } finally {
@@ -271,7 +279,7 @@ const MedicalRecords = () => {
   return (
     <div>
       <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Medical Records & Clinical Care</h1>
+        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Medical Records &amp; Clinical Care</h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
           Centralized veterinary management system: patient histories, surgical logs, treatment schedules, and medical clearance certificates.
         </p>
@@ -313,19 +321,20 @@ const MedicalRecords = () => {
               <option value="exams">Clinical Exams</option>
               <option value="vaccinations">Vaccinations</option>
               <option value="treatments">Treatments &amp; Surgeries</option>
+              <option value="prescriptions">Prescriptions</option>
             </select>
             {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading records...</span>}
           </div>
         </div>
         <DataTable
           columns={columns}
-          data={categoryFilter === "all" ? medicalRecords : medicalRecords.filter((r: any) => r.type === categoryFilter)}
+          data={categoryFilter === "all" ? medicalRecords : medicalRecords.filter((r) => r.type === categoryFilter)}
           module="medical"
           onDelete={(row) => {
             setSelectedRecord(row);
             setIsDeleteModalOpen(true);
           }}
-          renderRowActions={(row: any) => (
+          renderRowActions={(row: Record<string, unknown>) => (
             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
               <button
                 onClick={() => void openMedicalProfile(row)}
@@ -358,7 +367,7 @@ const MedicalRecords = () => {
             <select required value={examForm.dogId} onChange={(e) => setExamForm({ ...examForm, dogId: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
-                <option key={d.id} value={d.id}>{dogLabel(d)}</option>
+                <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
               ))}
             </select>
           </div>
@@ -385,7 +394,7 @@ const MedicalRecords = () => {
             <select required value={vaccineForm.dogId} onChange={(e) => setVaccineForm({ ...vaccineForm, dogId: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
-                <option key={d.id} value={d.id}>{dogLabel(d)}</option>
+                <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
               ))}
             </select>
           </div>
@@ -412,7 +421,7 @@ const MedicalRecords = () => {
             <select required value={surgeryForm.dogId} onChange={(e) => setSurgeryForm({ ...surgeryForm, dogId: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
-                <option key={d.id} value={d.id}>{dogLabel(d)}</option>
+                <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
               ))}
             </select>
           </div>
@@ -439,7 +448,7 @@ const MedicalRecords = () => {
             <select required value={certForm.dogId} onChange={(e) => setCertForm({ ...certForm, dogId: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
-                <option key={d.id} value={d.id}>{dogLabel(d)}</option>
+                <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
               ))}
             </select>
           </div>
@@ -462,7 +471,7 @@ const MedicalRecords = () => {
       <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Medical Record">
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ color: "#334155", margin: 0 }}>
-            Are you sure you want to delete this record for <strong>{selectedRecord?.petName}</strong>?
+            Are you sure you want to delete this record for <strong>{String(selectedRecord?.petName || "")}</strong>?
           </p>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
             <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
@@ -478,7 +487,7 @@ const MedicalRecords = () => {
           setIsProfileModalOpen(false);
           setSelectedDogProfile(null);
         }}
-        title={`Dog Medical Profile — ${selectedDogProfile?.name || selectedDogProfile?.petName || "Patient"}`}
+        title={`Dog Medical Profile — ${String(selectedDogProfile?.name || selectedDogProfile?.petName || "Patient")}`}
         maxWidth="720px"
       >
         {selectedDogProfile && (
@@ -487,14 +496,14 @@ const MedicalRecords = () => {
             <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
-                  {selectedDogProfile.name || selectedDogProfile.petName || "Unnamed Patient"}
+                  {String(selectedDogProfile.name || selectedDogProfile.petName || "-")}
                 </h2>
                 <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  Dog ID: <strong style={{ fontFamily: "monospace" }}>{selectedDogProfile.id || selectedDogProfile.registration_number}</strong> &bull; Breed: {selectedDogProfile.breed || "Canine"}
+                  Dog ID: <strong style={{ fontFamily: "monospace" }}>{String(selectedDogProfile.id || selectedDogProfile.registration_number || "-")}</strong> &bull; Breed: {String(selectedDogProfile.breed || "-")}
                 </div>
               </div>
               <span style={{ padding: "6px 14px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: "#ECFDF5", color: "#059669", display: "flex", alignItems: "center", gap: "6px" }}>
-                <FaHeartbeat /> {selectedDogProfile.status || "Stable / Under Care"}
+                <FaHeartbeat /> {String(selectedDogProfile.status || "-")}
               </span>
             </div>
 
@@ -503,28 +512,28 @@ const MedicalRecords = () => {
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Primary Diagnosis</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {selectedDogProfile.recordContext?.diagnosis || "Intake Clinical Exam Complete"}
+                  {(selectedDogProfile.recordContext as Record<string, unknown> | undefined)?.diagnosis && (selectedDogProfile.recordContext as Record<string, unknown>).diagnosis !== "-" ? String((selectedDogProfile.recordContext as Record<string, unknown>).diagnosis) : "Not recorded"}
                 </div>
               </div>
 
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Attending Veterinarian</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {selectedDogProfile.recordContext?.vetName || "Staff Veterinarian"}
+                  {(selectedDogProfile.recordContext as Record<string, unknown> | undefined)?.vetName && (selectedDogProfile.recordContext as Record<string, unknown>).vetName !== "-" ? String((selectedDogProfile.recordContext as Record<string, unknown>).vetName) : "Not recorded"}
                 </div>
               </div>
 
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Treatment / Procedure</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {selectedDogProfile.recordContext?.treatment || "Standard Supportive Care"}
+                  {(selectedDogProfile.recordContext as Record<string, unknown> | undefined)?.treatment && (selectedDogProfile.recordContext as Record<string, unknown>).treatment !== "-" ? String((selectedDogProfile.recordContext as Record<string, unknown>).treatment) : "Not recorded"}
                 </div>
               </div>
 
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Veterinary Clearance Status</div>
                 <div style={{ fontSize: "14px", fontWeight: 700, color: selectedDogProfile.vet_clearance === false ? "#DC2626" : "#059669", marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <FaCheckCircle /> {selectedDogProfile.vet_clearance === false ? "Pending Clearance" : "Cleared for Placement"}
+                  <FaCheckCircle /> {selectedDogProfile.vet_clearance_status ? String(selectedDogProfile.vet_clearance_status) : (selectedDogProfile.vet_clearance === false ? "Pending Clearance" : selectedDogProfile.vet_clearance === true ? "Cleared" : "Not recorded")}
                 </div>
               </div>
             </div>
@@ -538,14 +547,20 @@ const MedicalRecords = () => {
                 <div style={{ textAlign: "center", padding: "20px", color: "#64748B", fontSize: "13px" }}>Loading medical timeline...</div>
               ) : dogHistory.length === 0 ? (
                 <div style={{ background: "#FFFFFF", padding: "12px", borderRadius: "8px", color: "#64748B", fontSize: "13px", textAlign: "center" }}>
-                  Clinical history logged under patient profile. Active records attached to Dog Master File.
+                  No medical records logged for this patient.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
-                  {dogHistory.map((item: any, idx: number) => (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "220px", overflowY: "auto" }}>
+                  {dogHistory.map((item: Record<string, unknown>, idx: number) => (
                     <div key={idx} style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", fontSize: "12px" }}>
-                      <div style={{ fontWeight: 700, color: "#0F172A" }}>{item.event_type || item.type || "Medical Activity"} &bull; {item.date || item.created_at || "Recent"}</div>
-                      <div style={{ color: "#475569", marginTop: "2px" }}>{item.description || item.notes || "Recorded in clinical logs."}</div>
+                      <div style={{ fontWeight: 700, color: "#0F172A" }}>
+                        {String(item.categoryName || item.entityType || item.type || "Medical Record")} &bull; {item.date && item.date !== "-" ? String(item.date) : "Not recorded"}
+                      </div>
+                      <div style={{ color: "#475569", marginTop: "2px" }}>
+                        {item.diagnosis && item.diagnosis !== "-" ? `Diagnosis: ${String(item.diagnosis)}` : ""}
+                        {item.treatment && item.treatment !== "-" ? `${item.diagnosis && item.diagnosis !== "-" ? " | " : ""}Details: ${String(item.treatment)}` : ""}
+                        {(!item.diagnosis || item.diagnosis === "-") && (!item.treatment || item.treatment === "-") ? "Recorded in clinical logs." : ""}
+                      </div>
                     </div>
                   ))}
                 </div>

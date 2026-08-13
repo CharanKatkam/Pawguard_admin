@@ -15,8 +15,10 @@ import {
   FaEye,
   FaEdit,
   FaTrash,
+  FaSearchLocation,
 } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
+import lostFoundService from "../../services/lostFoundService";
 import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -282,6 +284,40 @@ const RescueManagement = () => {
       notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to assign coordinator", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLogFoundPetFromRescue = async (caseItem: Record<string, unknown>) => {
+    try {
+      setIsSubmitting(true);
+      const address = caseItem.location_address !== "-" ? String(caseItem.location_address || "") : "Rescue Location";
+      const lat = caseItem.latitude && caseItem.latitude !== "-" ? Number(caseItem.latitude) : null;
+      const lng = caseItem.longitude && caseItem.longitude !== "-" ? Number(caseItem.longitude) : null;
+      const notes = [
+        caseItem.physical_condition !== "-" ? `Physical Condition: ${String(caseItem.physical_condition)}` : "",
+        caseItem.reporter_notes !== "-" ? `Reporter Notes: ${String(caseItem.reporter_notes)}` : "",
+      ].filter(Boolean).join(" | ");
+
+      const res = await lostFoundService.createFoundReport({
+        species: "dog",
+        breed_observed: "Rescued Dog",
+        color_observed: "Mixed / Unspecified",
+        location_address: address,
+        latitude: lat,
+        longitude: lng,
+        found_at: new Date().toISOString(),
+        marker_description: notes || `Secured via Rescue Case #${String(caseItem.ticket_number || caseItem.id || "")}`,
+      });
+
+      const reportId = (res as { data?: { id?: string }; id?: string })?.data?.id || (res as { id?: string })?.id;
+      addToast(`Found pet report created for rescued dog! (${reportId ? `Report #${String(reportId).slice(0, 8)}` : "Saved"})`, "success");
+      setIsViewModalOpen(false);
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to log found pet report", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -872,6 +908,26 @@ const RescueManagement = () => {
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+            {["rescued", "admitted"].includes(String(selectedCase.status).toLowerCase()) && (
+              <button
+                onClick={() => handleLogFoundPetFromRescue(selectedCase)}
+                disabled={isSubmitting}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#7C3AED",
+                  color: "#FFF",
+                  cursor: isSubmitting ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontWeight: 600,
+                }}
+              >
+                <FaSearchLocation size={12} /> Log as Found Pet for Matching
+              </button>
+            )}
             <Can permission="edit_rescues">
               <button
                 onClick={() => {
