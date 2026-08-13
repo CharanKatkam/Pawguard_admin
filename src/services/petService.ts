@@ -133,8 +133,31 @@ export const petService = {
   },
 
   // GET /dogs/{dog_id}/public-scan - privacy-safe public dog QR scan
-  getPublicDogScan: async (dogId: string) => {
-    const response = await api.get(`/dogs/${dogId}/public-scan`);
+  getPublicDogScan: async (identifier: string) => {
+    let clean = String(identifier || "").trim();
+    if (!clean) {
+      throw new Error("Dog identifier is required");
+    }
+    if (clean.toUpperCase().startsWith("PG-")) {
+      clean = clean.slice(3).trim();
+    }
+
+    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    let targetDogId = clean;
+
+    if (!uuidRegex.test(clean)) {
+      try {
+        const listRes = await api.get("/dogs", { params: { registration_number: clean } });
+        const items = listRes.data?.data || listRes.data?.items || (Array.isArray(listRes.data) ? listRes.data : []);
+        if (items.length > 0 && items[0]?.id) {
+          targetDogId = items[0].id;
+        }
+      } catch {
+        /* fall back to direct call */
+      }
+    }
+
+    const response = await api.get(`/dogs/${targetDogId}/public-scan`);
     return response.data;
   },
 

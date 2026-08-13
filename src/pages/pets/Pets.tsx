@@ -21,6 +21,7 @@ import {
   FaCopy,
   FaSearch,
   FaCheckCircle,
+  FaExternalLinkAlt,
 } from "react-icons/fa";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
@@ -1736,6 +1737,32 @@ const Pets = () => {
                   }}
                 >
                   <FaPrint /> Print Safety Tag
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = dogId(qrDog);
+                    if (id) {
+                      window.open(`/public-scan/${id}`, "_blank");
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    padding: "11px 16px",
+                    borderRadius: "8px",
+                    border: "1px solid #2563EB",
+                    background: "#EFF6FF",
+                    color: "#2563EB",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaExternalLinkAlt /> Preview Public Scan
                 </button>
               </div>
             </div>

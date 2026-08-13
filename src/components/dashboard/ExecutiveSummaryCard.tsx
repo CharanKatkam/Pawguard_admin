@@ -4,7 +4,7 @@ import { FaArrowRight } from "react-icons/fa";
 
 interface ExecutiveSummaryCardProps {
   title: string;
-  value: number;
+  value: number | string;
   subtitle?: string;
   icon: React.ReactNode;
   color: string;
@@ -41,6 +41,8 @@ const ExecutiveSummaryCard = ({
       </div>
     );
   }
+
+  const formattedValue = typeof value === "number" ? value.toLocaleString("en-IN") : value;
 
   return (
     <div
@@ -117,7 +119,7 @@ const ExecutiveSummaryCard = ({
             lineHeight: 1,
           }}
         >
-          {value.toLocaleString()}
+          {formattedValue}
         </span>
         <FaArrowRight size={12} style={{ color: "#CBD5E1" }} />
       </div>
@@ -126,10 +128,10 @@ const ExecutiveSummaryCard = ({
           style={{
             margin: "8px 0 0",
             fontSize: "12px",
-            color: value === 0 ? "#F59E0B" : "#94A3B8",
+            color: "#64748B",
           }}
         >
-          {value === 0 ? "No records yet" : subtitle}
+          {subtitle}
         </p>
       )}
     </div>

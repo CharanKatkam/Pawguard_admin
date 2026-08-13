@@ -17,9 +17,16 @@ import {
   FaHome,
   FaCalendarAlt,
   FaSearch,
+  FaDog,
+  FaUser,
+  FaStethoscope,
+  FaMedkit,
+  FaExternalLinkAlt,
 } from "react-icons/fa";
 import adoptionService, { toAdoptionStatus } from "../../services/adoptionService";
 import dogService from "../../services/dogService";
+import petService from "../../services/petService";
+import medicalService from "../../services/medicalService";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const StatusBadge = ({ status }: { status: string }) => {
@@ -37,40 +44,40 @@ const StatusBadge = ({ status }: { status: string }) => {
     color = "#7E22CE";
     label = "Screening";
   } else if (s === "interview") {
-    bg = "#ECFEFF";
-    color = "#0891B2";
+    bg = "#FEF3C7";
+    color = "#D97706";
     label = "Interview";
   } else if (s === "home_check") {
-    bg = "#FFFBEB";
-    color = "#D97706";
-    label = "Home Inspection";
-  } else if (s === "approved") {
-    bg = "#ECFDF5";
-    color = "#059669";
-    label = "Approved";
-  } else if (s === "completed") {
-    bg = "#D1FAE5";
-    color = "#047857";
-    label = "Completed";
-  } else if (s === "rejected") {
-    bg = "#FEF2F2";
-    color = "#DC2626";
-    label = "Rejected";
-  } else if (s === "vetting") {
     bg = "#E0E7FF";
     color = "#4338CA";
+    label = "Home Visit";
+  } else if (s === "approved") {
+    bg = "#D1FAE5";
+    color = "#047857";
+    label = "Approved";
+  } else if (s === "completed") {
+    bg = "#DCFCE7";
+    color = "#15803D";
+    label = "Completed";
+  } else if (s === "rejected") {
+    bg = "#FEE2E2";
+    color = "#B91C1C";
+    label = "Rejected";
+  } else if (s === "vetting") {
+    bg = "#E0F2FE";
+    color = "#0369A1";
     label = "Vetting";
   }
 
   return (
     <span
       style={{
+        backgroundColor: bg,
+        color,
         padding: "4px 10px",
         borderRadius: "999px",
         fontSize: "12px",
         fontWeight: 700,
-        background: bg,
-        color,
         display: "inline-block",
       }}
     >
@@ -88,25 +95,17 @@ const inputStyle: React.CSSProperties = {
 };
 
 const extractErrorMessage = (err: unknown, fallback: string): string => {
-  const e = err as {
-    response?: {
-      data?: {
-        detail?: string | { msg?: string }[];
-        message?: string;
-        error?: { message?: string };
-      };
-    };
-    message?: string;
-  };
-  const d = e?.response?.data?.detail;
-  if (typeof d === "string") return d;
-  if (Array.isArray(d) && d.length > 0 && typeof d[0]?.msg === "string") return d[0].msg;
-  return e?.response?.data?.message || e?.response?.data?.error?.message || e?.message || fallback;
+  if (err && typeof err === "object") {
+    const res = (err as { response?: { data?: { detail?: string; message?: string } } }).response;
+    if (res?.data?.detail) return res.data.detail;
+    if (res?.data?.message) return res.data.message;
+  }
+  return fallback;
 };
 
 const Adoptions = () => {
   const [adoptions, setAdoptions] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const { addToast } = useToast();
 
   // Modals state
@@ -120,10 +119,15 @@ const Adoptions = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   
   const [selectedApp, setSelectedApp] = useState<Record<string, unknown> | null>(null);
+  const [selectedDogDetail, setSelectedDogDetail] = useState<Record<string, unknown> | null>(null);
+  const [selectedDogMedical, setSelectedDogMedical] = useState<Record<string, unknown>[]>([]);
+  const [selectedDogLoading, setSelectedDogLoading] = useState<boolean>(false);
+  const [activeDetailTab, setActiveDetailTab] = useState<"applicant" | "dog" | "medical">("applicant");
 
   // Form states
   const [newForm, setNewForm] = useState({ applicantName: "", petName: "", dogId: "", residentialStatus: "owned" });
   const [scheduleForm, setScheduleForm] = useState({ appId: "", date: "", notes: "" });
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [screeningForm, setScreeningForm] = useState({ appId: "", nextStage: "interview", notes: "" });
   const [approveForm, setApproveForm] = useState({ appId: "" });
   const [rejectionReason, setRejectionReason] = useState("");
@@ -157,17 +161,61 @@ const Adoptions = () => {
     });
   }, [fetchAdoptions]);
 
-  const openDetailsModal = async (appRow: Record<string, unknown>) => {
+  const openDetailsModal = async (
+    appRow: Record<string, unknown>,
+    initialTab: "applicant" | "dog" | "medical" = "applicant"
+  ) => {
     try {
       setSelectedApp(appRow);
+      setActiveDetailTab(initialTab);
       setIsDetailsModalOpen(true);
+      setSelectedDogDetail(null);
+      setSelectedDogMedical([]);
+      setSelectedDogLoading(true);
+
       const appId = String(appRow.id || appRow.applicationId || "");
+      let currentApp = appRow;
       if (appId) {
         const fullDetails = await adoptionService.getAdoptionById(appId);
-        if (fullDetails) setSelectedApp(fullDetails);
+        if (fullDetails) {
+          currentApp = fullDetails;
+          setSelectedApp(fullDetails);
+        }
+      }
+
+      const dogId = String(
+        currentApp.dog_id ||
+        currentApp.petId ||
+        (currentApp.dog as Record<string, unknown> | undefined)?.id ||
+        ""
+      );
+
+      if (dogId) {
+        const [dogRes, medRes] = await Promise.allSettled([
+          petService.getPetById(dogId),
+          medicalService.getMedicalHistory(dogId),
+        ]);
+
+        if (dogRes.status === "fulfilled" && dogRes.value) {
+          const valObj = dogRes.value as Record<string, unknown>;
+          const dogData = valObj.data || valObj;
+          if (dogData && typeof dogData === "object") {
+            setSelectedDogDetail(dogData as Record<string, unknown>);
+          }
+        }
+
+        if (medRes.status === "fulfilled" && medRes.value) {
+          const valObj = medRes.value as Record<string, unknown>;
+          const medData = valObj.data || valObj || [];
+          if (Array.isArray(medData)) {
+            setSelectedDogMedical(medData as Record<string, unknown>[]);
+          }
+        }
       }
     } catch {
       // Keep basic row if detail fetch fails
+    } finally {
+      setSelectedDogLoading(false);
     }
   };
 
@@ -209,9 +257,12 @@ const Adoptions = () => {
       const petName = String(appRow.petName || "selected dog");
 
       await adoptionService.updateAdoptionStatus(id, "screening", adopterId, petName);
-      addToast(`Application #${id} moved to Screening.`, "success");
+      addToast(`Application #${id} moved to Screening. Review applicant & dog details below.`, "success");
       fetchAdoptions();
       notifyDataChanged();
+
+      const updatedRow = { ...appRow, status: "screening" };
+      await openDetailsModal(updatedRow, "dog");
     } catch (err: unknown) {
       addToast(extractErrorMessage(err, "Failed to move application to screening."), "error");
     } finally {
@@ -257,6 +308,7 @@ const Adoptions = () => {
 
   const handleScheduleVerification = async (e: React.FormEvent) => {
     e.preventDefault();
+    setScheduleError(null);
     const appId = scheduleForm.appId || String(selectedApp?.id || selectedApp?.applicationId || "");
     if (!appId) {
       addToast("Please select an application to schedule a visit for.", "error");
@@ -277,10 +329,13 @@ const Adoptions = () => {
       setIsScheduleModalOpen(false);
       setIsDetailsModalOpen(false);
       setScheduleForm({ appId: "", date: "", notes: "" });
+      setScheduleError(null);
       fetchAdoptions();
       notifyDataChanged();
     } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to schedule home verification."), "error");
+      const errMsg = extractErrorMessage(err, "Failed to schedule home verification.");
+      setScheduleError(errMsg);
+      addToast(errMsg, "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -704,123 +759,451 @@ const Adoptions = () => {
         />
       </div>
 
-      {/* Application Details Modal */}
+      {/* Application Details & Comprehensive Screening Modal */}
       <Modal
         isOpen={isDetailsModalOpen}
         onClose={() => {
           setIsDetailsModalOpen(false);
           setSelectedApp(null);
+          setSelectedDogDetail(null);
+          setSelectedDogMedical([]);
         }}
-        title={`Adoption Application Details — #${String(selectedApp?.ticketNumber || selectedApp?.id || "")}`}
-        maxWidth="720px"
+        title={`Adoption Application #${String(selectedApp?.ticketNumber || selectedApp?.id || "")} — Screening Review`}
+        maxWidth="780px"
       >
         {selectedApp && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {/* Header info */}
-            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            {/* Header Summary Banner */}
+            <div
+              style={{
+                background: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+                borderRadius: "10px",
+                padding: "16px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "12px",
+              }}
+            >
               <div>
                 <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#0F172A" }}>
                   Applicant: {String(selectedApp.applicantName || "-")}
                 </h3>
                 <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  Interested Dog: <strong>{String(selectedApp.petName || "-")}</strong> &bull; Applied: {String(selectedApp.date || selectedApp.created_at || "-")}
+                  Requested Pet: <strong style={{ color: "#2563EB" }}>{String(selectedApp.petName || "-")}</strong> &bull; Submitted: {String(selectedApp.date || selectedApp.created_at || "-")}
                 </div>
               </div>
               <StatusBadge status={String(selectedApp.status || "submitted")} />
             </div>
 
-            {/* Grid breakdown */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Email</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {String(selectedApp.applicantEmail || "-")}
-                </div>
-              </div>
+            {/* Navigation Tabs */}
+            <div
+              style={{
+                display: "flex",
+                borderBottom: "2px solid #E2E8F0",
+                gap: "8px",
+                overflowX: "auto",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveDetailTab("applicant")}
+                style={{
+                  padding: "10px 16px",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  color: activeDetailTab === "applicant" ? "#2563EB" : "#64748B",
+                  borderBottom: activeDetailTab === "applicant" ? "3px solid #2563EB" : "3px solid transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <FaUser /> Applicant Questionnaire
+              </button>
 
-              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Phone</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {String(selectedApp.applicantPhone || "-")}
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setActiveDetailTab("dog")}
+                style={{
+                  padding: "10px 16px",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  color: activeDetailTab === "dog" ? "#2563EB" : "#64748B",
+                  borderBottom: activeDetailTab === "dog" ? "3px solid #2563EB" : "3px solid transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <FaDog /> Requested Dog Profile
+              </button>
 
-              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Residential Status</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px", textTransform: "capitalize" }}>
-                  {String(selectedApp.residential_status || "-")}
-                </div>
-              </div>
-
-              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Household Members</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {String(selectedApp.household_members_count ?? "-")}
-                </div>
-              </div>
-
-              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Yard Fenced</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: selectedApp.has_yard_fence ? "#059669" : "#DC2626", marginTop: "4px" }}>
-                  {selectedApp.has_yard_fence ? "Yes — Fenced Yard" : "No / Unfenced"}
-                </div>
-              </div>
-
-              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Landlord Approval</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: selectedApp.has_landlord_approval ? "#059669" : "#DC2626", marginTop: "4px" }}>
-                  {selectedApp.has_landlord_approval ? "Yes — Approved" : "N/A or Pending"}
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setActiveDetailTab("medical")}
+                style={{
+                  padding: "10px 16px",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  color: activeDetailTab === "medical" ? "#2563EB" : "#64748B",
+                  borderBottom: activeDetailTab === "medical" ? "3px solid #2563EB" : "3px solid transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <FaStethoscope /> Dog Health &amp; Medical ({selectedDogMedical.length})
+              </button>
             </div>
 
-            {/* Questionnaire & Notes */}
-            <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Pet Care Experience</div>
-                <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
-                  {String(selectedApp.pet_care_experience || "No prior notes recorded.")}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Existing Pets Medical Details</div>
-                <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
-                  {String(selectedApp.existing_pets_medical_details || "None reported.")}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Vetting / Officer Notes</div>
-                <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
-                  {String(selectedApp.vetting_officer_notes || "No officer notes.")}
-                </div>
-              </div>
-              {Boolean(selectedApp.home_inspection_scheduled_at) && (
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#D97706", textTransform: "uppercase" }}>Scheduled Home Verification</div>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <FaCalendarAlt color="#D97706" /> {new Date(String(selectedApp.home_inspection_scheduled_at)).toLocaleString()}
+            {/* TAB 1: APPLICANT QUESTIONNAIRE */}
+            {activeDetailTab === "applicant" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Email</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                      {String(selectedApp.applicantEmail || "-")}
+                    </div>
                   </div>
-                  {Boolean(selectedApp.home_inspection_notes) && (
-                    <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                      Notes: {String(selectedApp.home_inspection_notes)}
+
+                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Phone</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                      {String(selectedApp.applicantPhone || "-")}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Residential Status</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px", textTransform: "capitalize" }}>
+                      {String(selectedApp.residential_status || "-")}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Household Members</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                      {String(selectedApp.household_members_count ?? "-")}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Yard Fenced</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: selectedApp.has_yard_fence ? "#059669" : "#DC2626", marginTop: "4px" }}>
+                      {selectedApp.has_yard_fence ? "Yes — Fenced Yard" : "No / Unfenced"}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Landlord Approval</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: selectedApp.has_landlord_approval ? "#059669" : "#DC2626", marginTop: "4px" }}>
+                      {selectedApp.has_landlord_approval ? "Yes — Approved" : "N/A or Pending"}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Pet Care Experience</div>
+                    <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
+                      {String(selectedApp.pet_care_experience || "No prior notes recorded.")}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Existing Pets Medical Details</div>
+                    <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
+                      {String(selectedApp.existing_pets_medical_details || "None reported.")}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Vetting / Officer Notes</div>
+                    <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
+                      {String(selectedApp.vetting_officer_notes || "No officer notes.")}
+                    </div>
+                  </div>
+                  {Boolean(selectedApp.home_inspection_scheduled_at) && (
+                    <div>
+                      <div style={{ fontSize: "11px", fontWeight: 700, color: "#D97706", textTransform: "uppercase" }}>Scheduled Home Verification</div>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <FaCalendarAlt color="#D97706" /> {new Date(String(selectedApp.home_inspection_scheduled_at)).toLocaleString()}
+                      </div>
+                      {Boolean(selectedApp.home_inspection_notes) && (
+                        <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                          Notes: {String(selectedApp.home_inspection_notes)}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* Modal Actions */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            {/* TAB 2: REQUESTED DOG PROFILE */}
+            {activeDetailTab === "dog" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {selectedDogLoading ? (
+                  <div style={{ padding: "30px", textAlign: "center", color: "#2563EB", fontWeight: 600 }}>
+                    Loading dog profile details...
+                  </div>
+                ) : selectedDogDetail ? (
+                  <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "12px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
+                      <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
+                        {(selectedDogDetail.photo_url || selectedDogDetail.photo) ? (
+                          <img
+                            src={String(selectedDogDetail.photo_url || selectedDogDetail.photo)}
+                            alt={String(selectedDogDetail.name || "Dog")}
+                            style={{ width: "72px", height: "72px", borderRadius: "12px", objectFit: "cover", border: "1px solid #CBD5E1" }}
+                          />
+                        ) : (
+                          <div style={{ width: "72px", height: "72px", borderRadius: "12px", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
+                            <FaDog />
+                          </div>
+                        )}
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0F172A" }}>
+                            {String(selectedDogDetail.name || selectedApp.petName || "Unnamed Dog")}
+                          </h3>
+                          <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                            Reg / Tag ID: <strong style={{ fontFamily: "monospace", color: "#2563EB" }}>{String(selectedDogDetail.registration_number || selectedDogDetail.id || "-")}</strong>
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                            Breed: <strong>{String(selectedDogDetail.breed || "Canine")}</strong> {selectedDogDetail.breed_classification ? `(${selectedDogDetail.breed_classification})` : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dogId = String(selectedDogDetail.id || selectedDogDetail.registration_number || "");
+                          if (dogId) window.open(`/public-scan/${dogId}`, "_blank");
+                        }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid #93C5FD",
+                          background: "#EFF6FF",
+                          color: "#1D4ED8",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <FaExternalLinkAlt /> Public Tag Profile
+                      </button>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "8px" }}>
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Gender</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", textTransform: "capitalize" }}>
+                          {String(selectedDogDetail.gender || "-")}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Estimated Age</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                          {String(selectedDogDetail.estimated_age || (selectedDogDetail.age_months ? `${selectedDogDetail.age_months} months` : "-"))}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Weight</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                          {selectedDogDetail.weight_kg || selectedDogDetail.weight ? `${selectedDogDetail.weight_kg || selectedDogDetail.weight} kg` : "-"}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Coat Color / Markings</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                          {String(selectedDogDetail.color || selectedDogDetail.distinguishing_marks || "-")}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Temperament</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", textTransform: "capitalize" }}>
+                          {String(selectedDogDetail.temperament || "-")}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Spayed / Neutered</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: selectedDogDetail.is_spayed_neutered ? "#059669" : "#D97706", marginTop: "2px" }}>
+                          {selectedDogDetail.is_spayed_neutered ? "Yes — Neutered/Spayed" : "Not Neutered"}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Microchip ID</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", fontFamily: "monospace" }}>
+                          {String(selectedDogDetail.microchip_id || "Not Microchipped")}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Facility Status</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#2563EB", marginTop: "2px", textTransform: "uppercase" }}>
+                          {String(selectedDogDetail.status || selectedDogDetail.current_status || "Shelter Care")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: "20px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #E2E8F0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
+                    Dog profile information loaded from application details ({String(selectedApp.petName || "Selected Dog")}).
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: DOG HEALTH & MEDICAL RECORDS */}
+            {activeDetailTab === "medical" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {selectedDogLoading ? (
+                  <div style={{ padding: "30px", textAlign: "center", color: "#2563EB", fontWeight: 600 }}>
+                    Loading clinical health &amp; medical records...
+                  </div>
+                ) : selectedDogMedical.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                      Clinical Health &amp; Veterinary Records ({selectedDogMedical.length} entries)
+                    </div>
+                    {selectedDogMedical.map((rec, idx) => (
+                      <div key={idx} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "8px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", background: "#EFF6FF", color: "#2563EB", textTransform: "uppercase" }}>
+                              {String(rec.categoryName || rec.type || "Medical")}
+                            </span>
+                            <strong style={{ fontSize: "13px", color: "#0F172A" }}>{String(rec.treatment || rec.vaccineName || rec.diagnosis || "-")}</strong>
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
+                            Recorded: {String(rec.date || "-")} &bull; {String(rec.vetName || "Staff Vet")}
+                          </div>
+                        </div>
+                        {Boolean(rec.nextDueAt) && (
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "4px 8px", borderRadius: "6px", border: "1px solid #FDE68A" }}>
+                            Next Due: {String(rec.nextDueAt)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: "24px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #E2E8F0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
+                    <FaMedkit style={{ fontSize: "24px", color: "#94A3B8", marginBottom: "6px" }} />
+                    <br />
+                    No clinical medical history or vaccination records logged yet for this dog in the database.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Modal Actions Footer */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #E2E8F0", paddingTop: "14px", marginTop: "8px" }}>
               <button
                 type="button"
                 onClick={() => {
                   setIsDetailsModalOpen(false);
                   setSelectedApp(null);
+                  setSelectedDogDetail(null);
+                  setSelectedDogMedical([]);
                 }}
                 style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
               >
                 Close Details
               </button>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                {String(selectedApp.status).toLowerCase() === "submitted" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailsModalOpen(false);
+                      void handleStartScreeningDirect(selectedApp);
+                    }}
+                    style={{ padding: "10px 16px", borderRadius: "8px", border: "none", background: "#7E22CE", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Start Screening
+                  </button>
+                )}
+
+                {String(selectedApp.status).toLowerCase() === "screening" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailsModalOpen(false);
+                      setScreeningForm({ appId: String(selectedApp.id || selectedApp.applicationId), nextStage: "interview", notes: String(selectedApp.vetting_officer_notes || "") });
+                      setIsScreeningModalOpen(true);
+                    }}
+                    style={{ padding: "10px 16px", borderRadius: "8px", border: "none", background: "#7E22CE", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Complete Screening
+                  </button>
+                )}
+
+                {["screening", "interview", "vetting", "submitted"].includes(String(selectedApp.status).toLowerCase()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailsModalOpen(false);
+                      setScheduleForm({ appId: String(selectedApp.id || selectedApp.applicationId), date: "", notes: "" });
+                      setIsScheduleModalOpen(true);
+                    }}
+                    style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #D97706", background: "#FFFBEB", color: "#D97706", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Schedule Visit
+                  </button>
+                )}
+
+                {["interview", "home_check", "vetting"].includes(String(selectedApp.status).toLowerCase()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailsModalOpen(false);
+                      setApproveForm({ appId: String(selectedApp.id || selectedApp.applicationId) });
+                      setIsApproveModalOpen(true);
+                    }}
+                    style={{ padding: "10px 16px", borderRadius: "8px", border: "none", background: "#059669", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Approve Adoption
+                  </button>
+                )}
+
+                {["submitted", "screening", "interview", "home_check", "vetting"].includes(String(selectedApp.status).toLowerCase()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailsModalOpen(false);
+                      setRejectionReason("");
+                      setIsRejectModalOpen(true);
+                    }}
+                    style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#DC2626", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Reject
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -899,8 +1282,13 @@ const Adoptions = () => {
       </Modal>
 
       {/* Schedule Home Verification Modal */}
-      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Inspection Visit">
+      <Modal isOpen={isScheduleModalOpen} onClose={() => { setIsScheduleModalOpen(false); setScheduleError(null); }} title="Schedule Home Inspection Visit">
         <form onSubmit={handleScheduleVerification} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {scheduleError && (
+            <div style={{ padding: "12px 14px", backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: "8px", color: "#991B1B", fontSize: "13px", lineHeight: 1.4 }}>
+              ⚠️ <strong>Backend Error:</strong> {scheduleError}
+            </div>
+          )}
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Select Application *</label>
             <select value={scheduleForm.appId} onChange={(e) => setScheduleForm({ ...scheduleForm, appId: e.target.value })} style={inputStyle}>

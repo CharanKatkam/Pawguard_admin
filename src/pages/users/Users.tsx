@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
@@ -13,8 +13,11 @@ import {
   FaTrash,
   FaCheckCircle,
   FaTimesCircle,
+  FaKey,
+  FaExternalLinkAlt,
 } from "react-icons/fa";
 import userService, { type UserPayload } from "../../services/userService";
+import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { normalizeRole, isInternalRole } from "../../utils/roleUtils";
@@ -147,6 +150,7 @@ const parseRoleNames = (value: string): string[] =>
     .filter(Boolean);
 
 const Users = () => {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<UserTableRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -163,6 +167,48 @@ const Users = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserTableRow | null>(null);
+
+  // User Profile & Password Reset Modal State
+  const [selectedUserProfile, setSelectedUserProfile] = useState<UserTableRow | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [isResetTokenFormOpen, setIsResetTokenFormOpen] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  const handleRequestPasswordReset = async () => {
+    if (!selectedUserProfile?.email) return;
+    try {
+      setIsResettingPassword(true);
+      await authService.requestPasswordReset(selectedUserProfile.email);
+      addToast(`Password reset initialized for ${selectedUserProfile.email}. Check reset token to finalize.`, "success");
+      setIsResetTokenFormOpen(true);
+    } catch (err: unknown) {
+      addToast(getErrorMessage(err, "Failed to request password reset."), "error");
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
+  const handleConfirmPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetToken || !newPassword) {
+      addToast("Please enter both reset token and new password.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await authService.confirmPasswordReset(resetToken.trim(), newPassword);
+      addToast(`Login password updated successfully for ${selectedUserProfile?.email || "user"}!`, "success");
+      setIsResetTokenFormOpen(false);
+      setResetToken("");
+      setNewPassword("");
+    } catch (err: unknown) {
+      addToast(getErrorMessage(err, "Failed to confirm password reset."), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Form State
   const [formData, setFormData] = useState({
@@ -578,6 +624,16 @@ const Users = () => {
             totalCount={filteredUsers.length}
             searchValue={searchTerm}
             onSearchChange={setSearchTerm}
+            onRowClick={(row) => {
+              const target = row as UserTableRow;
+              setSelectedUserProfile(target);
+              setIsProfileModalOpen(true);
+            }}
+            onView={(row) => {
+              const target = row as UserTableRow;
+              setSelectedUserProfile(target);
+              setIsProfileModalOpen(true);
+            }}
             onEdit={(row) => {
               const target = row as UserTableRow;
               setSelectedUser(target);
@@ -596,6 +652,255 @@ const Users = () => {
           />
         </div>
       </div>
+
+      {/* User Profile & Credentials Modal */}
+      <Modal
+        isOpen={isProfileModalOpen && !!selectedUserProfile}
+        onClose={() => {
+          setIsProfileModalOpen(false);
+          setSelectedUserProfile(null);
+          setIsResetTokenFormOpen(false);
+          setResetToken("");
+          setNewPassword("");
+        }}
+        title={`User Profile — ${selectedUserProfile?.name || "Details"}`}
+      >
+        {selectedUserProfile && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            {/* Header Badge Card */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "16px",
+                background: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+                padding: "16px",
+                borderRadius: "12px",
+              }}
+            >
+              <div
+                style={{
+                  width: "52px",
+                  height: "52px",
+                  borderRadius: "50%",
+                  background: "#2563EB",
+                  color: "#FFFFFF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "20px",
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {selectedUserProfile.name.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+                  {selectedUserProfile.name}
+                </h3>
+                <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span
+                    style={{
+                      background: "#EFF6FF",
+                      color: "#1E40AF",
+                      padding: "2px 10px",
+                      borderRadius: "999px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {formatRole(selectedUserProfile.roles[0] || selectedUserProfile.role)}
+                  </span>
+                  <span
+                    style={{
+                      background: selectedUserProfile.isActive ? "#DCFCE7" : "#FEE2E2",
+                      color: selectedUserProfile.isActive ? "#166534" : "#991B1B",
+                      padding: "2px 10px",
+                      borderRadius: "999px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {selectedUserProfile.isActive ? "Active" : "Inactive"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Profile Details Grid */}
+            <div>
+              <h4 style={{ margin: "0 0 12px", fontSize: "13px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                Account Overview
+              </h4>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "12px",
+                  background: "#FFFFFF",
+                  border: "1px solid #E2E8F0",
+                  borderRadius: "10px",
+                  padding: "14px",
+                }}
+              >
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Full Name</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedUserProfile.name}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Email Address</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#2563EB", marginTop: "2px" }}>{selectedUserProfile.email}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Phone Number</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedUserProfile.phone || "+919876517358"}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Assigned Role</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{formatRole(selectedUserProfile.roles[0] || selectedUserProfile.role)}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Account Status</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: selectedUserProfile.isActive ? "#16A34A" : "#DC2626", marginTop: "2px" }}>
+                    {selectedUserProfile.isActive ? "Active" : "Inactive"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>User ID (UUID)</label>
+                  <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#475569", marginTop: "2px", wordBreak: "break-all" }}>{selectedUserProfile.id}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Login Credentials Section */}
+            <div style={{ background: "#F8FAFC", border: "1px solid #CBD5E1", borderRadius: "12px", padding: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                <h4 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <FaKey style={{ color: "#2563EB" }} /> Login Credentials
+                </h4>
+                <span style={{ fontSize: "11px", color: "#64748B", background: "#E2E8F0", padding: "2px 8px", borderRadius: "4px", fontWeight: 600 }}>
+                  Secured
+                </span>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>Login Email:</label>
+                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#0F172A", fontFamily: "monospace", background: "#FFFFFF", padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", marginTop: "2px" }}>
+                    {selectedUserProfile.email}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>Password:</label>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", marginTop: "2px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>🔒 Not displayed / not retrievable</span>
+                    <span style={{ fontSize: "11px", color: "#94A3B8" }}>Encrypted Hash</span>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "6px", display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={handleRequestPasswordReset}
+                    disabled={isResettingPassword}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: "8px",
+                      background: "#2563EB",
+                      color: "#FFFFFF",
+                      border: "none",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: isResettingPassword ? "wait" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FaKey size={13} /> {isResettingPassword ? "Initializing Reset..." : "Set / Reset Login Password"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsProfileModalOpen(false);
+                      navigate("/rescues");
+                    }}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: "8px",
+                      background: "#F1F5F9",
+                      color: "#0F172A",
+                      border: "1px solid #CBD5E1",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FaExternalLinkAlt size={12} /> View Assigned Rescues
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Optional Reset Token Confirmation Form */}
+            {isResetTokenFormOpen && (
+              <div style={{ background: "#EFF6FF", border: "1px solid #93C5FD", borderRadius: "10px", padding: "14px" }}>
+                <h5 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 700, color: "#1E40AF" }}>
+                  Confirm Password Reset with Token
+                </h5>
+                <p style={{ fontSize: "12px", color: "#3B82F6", margin: "0 0 10px" }}>
+                  Enter the reset token generated by backend OpenAPI (or email) and specify the new test password for this user.
+                </p>
+                <form onSubmit={handleConfirmPasswordReset} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <div>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#1E3A8A" }}>Reset Token:</label>
+                    <input
+                      type="text"
+                      value={resetToken}
+                      onChange={(e) => setResetToken(e.target.value)}
+                      placeholder="Paste reset token..."
+                      required
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "13px", marginTop: "2px", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#1E3A8A" }}>New Password:</label>
+                    <PasswordInput
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new test password (min 10 chars)..."
+                      required
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      style={{ padding: "8px 14px", borderRadius: "6px", background: "#1D4ED8", color: "#FFFFFF", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      {isSubmitting ? "Updating..." : "Update Password"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsResetTokenFormOpen(false)}
+                      style={{ padding: "8px 14px", borderRadius: "6px", background: "#FFFFFF", color: "#475569", border: "1px solid #CBD5E1", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* Provision User Modal */}
       <Modal

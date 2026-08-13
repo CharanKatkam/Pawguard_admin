@@ -8,7 +8,7 @@ import {
   FaHeart,
   FaHouse,
   FaHandsHolding,
-  FaDollarSign,
+  FaIndianRupeeSign,
 } from "react-icons/fa6";
 import { FaRegClock, FaShieldAlt, FaSync } from "react-icons/fa";
 import useExecutiveDashboard from "../../../hooks/useExecutiveDashboard";
@@ -21,33 +21,39 @@ import DashboardNotificationsPanel from "../../../components/dashboard/Dashboard
 import RecentActivitiesPanel from "../../../components/dashboard/RecentActivitiesPanel";
 import DashboardNavigationCards from "../../../components/dashboard/DashboardNavigationCards";
 import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../../utils/roleUtils";
-import { isPending } from "../../../utils/chartUtils";
-import type { AnyRecord, DashboardSummary } from "../../../types/dashboard";
 
 const AnalyticsCharts = lazy(() => import("../../../components/dashboard/AnalyticsCharts"));
 
-const isIncome = (record: AnyRecord): boolean =>
-  /donation|income|grant|fundraising|sponsor|revenue|inflow/i.test(
-    String(record.type ?? record.category ?? record.transaction_type ?? record.description ?? "")
-  );
-
-const pickCount = (
-  summary: DashboardSummary,
-  list: AnyRecord[],
-  keys: string[],
-  predicate?: (record: AnyRecord) => boolean
-): number => {
-  for (const key of keys) {
-    const value = summary[key];
-    if (typeof value === "number") return value;
-  }
-  return predicate ? list.filter(predicate).length : list.length;
-};
+const formatINR = (amount: number): string =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
 
 const SuperAdminDashboard = () => {
   const navigate = useNavigate();
-  const { summary, users, dogs, shelters, rescues, adoptions, fosters, volunteers, inventory, medical, finance, activities, loading, error, lastUpdated, refreshing, refresh } =
-    useExecutiveDashboard();
+  const {
+    summary,
+    users,
+    dogs,
+    shelters,
+    rescues,
+    adoptions,
+    fosters,
+    volunteers,
+    donations,
+    inventory,
+    medical,
+    finance,
+    financeSummary,
+    activities,
+    loading,
+    error,
+    lastUpdated,
+    refreshing,
+    refresh,
+  } = useExecutiveDashboard();
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -59,68 +65,149 @@ const SuperAdminDashboard = () => {
   const displayName = user?.name || "Administrator";
   const roleTitle = getRoleTitle(getCurrentUserRole() ?? "super_admin");
 
+  // 1. Total Users
+  const totalUsers = users.length || Number(summary.total_users || summary.users_count || 0);
+  const activeUsersCount = users.filter((u) => u.is_active !== false).length;
+
+  // 2. Rescued Dogs
+  const totalDogs = dogs.length || Number(summary.total_dogs || summary.dogs_count || 0);
+  const rescuedDogsCount = dogs.filter((d) =>
+    Boolean(d.rescue_case_id || String(d.status || d.current_status || "").toLowerCase().includes("rescue"))
+  ).length;
+
+  // 3. Shelters
+  const totalShelters = shelters.length || Number(summary.total_shelters || summary.shelters_count || 0);
+  const activeSheltersCount = shelters.filter((s) => s.status !== "inactive" && s.is_active !== false).length;
+
+  // 4. Active Rescues (matching PawGuard lifecycle: reported -> verified -> dispatched -> located -> rescued -> admitted)
+  const activeRescuesList = rescues.filter((r) =>
+    /reported|verified|dispatched|located|rescued|admitted|pending|in_progress|open/i.test(
+      String(r.status || r.stage || r.dispatch_status || "")
+    )
+  );
+  const activeRescuesCount = rescues.length > 0 ? activeRescuesList.length : Number(summary.active_rescues || 0);
+  const awaitingDispatchCount = rescues.filter((r) =>
+    /reported|pending|new/i.test(String(r.status || r.stage || ""))
+  ).length;
+
+  // 5. Pending Adoptions (submitted, screening, interview, home_check, vetting)
+  const pendingAdoptionsList = adoptions.filter((a) =>
+    /submitted|screening|interview|home_check|vetting|pending|in_review/i.test(String(a.status || ""))
+  );
+  const pendingAdoptionsCount = adoptions.length > 0 ? pendingAdoptionsList.length : Number(summary.pending_adoptions || 0);
+  const newAdoptionAppsCount = adoptions.filter((a) => String(a.status || "").toLowerCase() === "submitted").length;
+
+  // 6. Active Fosters
+  const activeFostersList = fosters.filter((f) =>
+    /active|placed|approved|in_progress|pending/i.test(String(f.status || f.placement_status || ""))
+  );
+  const activeFostersCount = fosters.length > 0 ? activeFostersList.length : Number(summary.active_foster_placements || 0);
+
+  // 7. Volunteers
+  const totalVolunteers = volunteers.length || Number(summary.volunteers_count || summary.volunteers || 0);
+  const activeVolunteersCount = volunteers.filter((v) => v.is_active !== false && String(v.status || "").toLowerCase() !== "rejected").length;
+
+  // 8. Donations (INR ₹) — aligned with Finance.tsx calculation & financeSummary source
+  const numericVal = (val: unknown): number => {
+    const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const summaryRevenue = financeSummary?.total_donations ?? financeSummary?.totalRevenue ?? financeSummary?.total_revenue ?? financeSummary?.total_income;
+  const summarySuccessfulDonations = financeSummary?.successful_donations ?? financeSummary?.successfulDonations;
+
+  const transactionIncomeSum = finance
+    .filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase()))
+    .reduce((sum, t) => sum + numericVal(t.amount), 0);
+
+  const donationIncomeSum = donations
+    .filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted")
+    .reduce((sum, d) => sum + numericVal(d.amount), 0);
+
+  const rawDonationsSum = donations.reduce((sum, d) => sum + numericVal(d.amount), 0);
+
+  const totalDonationAmount = Number(
+    summaryRevenue ??
+    (transactionIncomeSum > 0 ? transactionIncomeSum : undefined) ??
+    (donationIncomeSum > 0 ? donationIncomeSum : undefined) ??
+    (rawDonationsSum > 0 ? rawDonationsSum : undefined) ??
+    summary.total_donations ??
+    summary.total_revenue ??
+    0
+  );
+
+  const successfulCount = Number(
+    summarySuccessfulDonations ??
+    (donations.filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted").length > 0
+      ? donations.filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted").length
+      : undefined) ??
+    (donations.length > 0 ? donations.length : undefined) ??
+    finance.filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase())).length ??
+    0
+  );
+
   const kpis = [
     {
       title: "Total Users",
-      value: pickCount(summary, users, ["total_users", "users_count"]),
-      subtitle: `${users.filter((u) => u.is_active !== false).length} active accounts`,
+      value: totalUsers,
+      subtitle: `${activeUsersCount} active accounts`,
       icon: <FaUsers />,
       color: "#2563EB",
       path: "/users",
     },
     {
       title: "Rescued Dogs",
-      value: pickCount(summary, dogs, ["total_dogs", "dogs_count"]),
-      subtitle: `${dogs.length} registered dogs`,
+      value: totalDogs,
+      subtitle: `${totalDogs} registered dogs${rescuedDogsCount > 0 ? ` · ${rescuedDogsCount} rescued` : ""}`,
       icon: <FaPaw />,
       color: "#EF4444",
       path: "/pets",
     },
     {
       title: "Shelters",
-      value: pickCount(summary, shelters, ["total_shelters", "shelters_count", "rescue_centres_count"]),
-      subtitle: "Facilities in the network",
+      value: totalShelters,
+      subtitle: `${activeSheltersCount} active facilities`,
       icon: <FaBuilding />,
       color: "#8B5CF6",
       path: "/shelters",
     },
     {
       title: "Active Rescues",
-      value: pickCount(summary, rescues, ["active_rescues", "rescue_requests"], (r) => isPending(r)),
-      subtitle: "Incidents in progress",
+      value: activeRescuesCount,
+      subtitle: activeRescuesCount > 0 ? `${awaitingDispatchCount} awaiting dispatch` : "No active rescue incidents",
       icon: <FaTruckMedical />,
       color: "#F97316",
       path: "/rescues",
     },
     {
       title: "Pending Adoptions",
-      value: pickCount(summary, adoptions, ["pending_adoptions", "adoptions_count"], (r) => isPending(r)),
-      subtitle: "Applications in review",
+      value: pendingAdoptionsCount,
+      subtitle: pendingAdoptionsCount > 0 ? `${newAdoptionAppsCount} new applications` : "No pending adoptions",
       icon: <FaHeart />,
       color: "#EC4899",
       path: "/adoptions",
     },
     {
       title: "Active Fosters",
-      value: pickCount(summary, fosters, ["active_foster_placements", "foster_placements"], (r) => isPending(r)),
-      subtitle: "Current foster placements",
+      value: activeFostersCount,
+      subtitle: activeFostersCount > 0 ? `${fosters.length} total placements` : "No active foster placements",
       icon: <FaHouse />,
       color: "#10B981",
       path: "/fosters",
     },
     {
       title: "Volunteers",
-      value: pickCount(summary, volunteers, ["volunteers", "volunteers_count"]),
-      subtitle: `${volunteers.length} applications received`,
+      value: totalVolunteers,
+      subtitle: totalVolunteers > 0 ? `${activeVolunteersCount} active volunteers` : "No volunteer records",
       icon: <FaHandsHolding />,
       color: "#F59E0B",
       path: "/volunteers",
     },
     {
       title: "Donations",
-      value: pickCount(summary, finance, ["donations_count", "total_donations"], isIncome),
-      subtitle: "Incoming contributions",
-      icon: <FaDollarSign />,
+      value: formatINR(totalDonationAmount),
+      subtitle: successfulCount > 0 ? `${successfulCount} successful donations` : "No donations recorded",
+      icon: <FaIndianRupeeSign />,
       color: "#06B6D4",
       path: "/finance",
     },

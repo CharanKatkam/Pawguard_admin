@@ -36,7 +36,12 @@ api.interceptors.response.use(
     if (axios.isAxiosError(error) && error.response) {
       const status = error.response.status;
 
-      if (status === 401 && window.location.pathname !== "/") {
+      const publicPaths = ["/", "/reset-password", "/403", "/public-scan", "/scan-pet", "/scan"];
+      const isPublicPath = publicPaths.some(
+        (p) => window.location.pathname === p || window.location.pathname.startsWith(p + "/")
+      );
+
+      if (status === 401 && !isPublicPath) {
         clearAuthData();
         notifyAuthChanged();
         window.location.href = "/";

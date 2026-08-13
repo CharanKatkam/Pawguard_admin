@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/auth/Login";
 import ResetPassword from "./pages/auth/ResetPassword";
 import Unauthorized from "./pages/auth/Unauthorized";
+import PublicDogProfile from "./pages/public/PublicDogProfile";
 import Dashboard from "./pages/dashboard/Dashboard";
 import Users from "./pages/users/Users";
 import Pets from "./pages/pets/Pets";
@@ -59,6 +60,11 @@ function App() {
 
         {/* 403 Unauthorized Error Page */}
         <Route path="/403" element={<Unauthorized />} />
+
+        {/* Public Dog QR Scan & Profile Pages (unauthenticated) */}
+        <Route path="/public-scan/:dogId?" element={<PublicDogProfile />} />
+        <Route path="/scan-pet/:dogId?" element={<PublicDogProfile />} />
+        <Route path="/scan/:dogId?" element={<PublicDogProfile />} />
 
         {/* Protected Admin Routes for Internal Staff Only */}
         <Route element={<ProtectedRoute />}>
@@ -189,7 +195,7 @@ function App() {
               element={
                 <ProtectedRoute
                   permission="view_adoptions"
-                  allowedRoles={["super_admin", "adoption_coordinator", "shelter_manager"]}
+                  allowedRoles={["super_admin", "adoption_coordinator", "shelter_manager", "rescue_centre_admin"]}
                 />
               }
             >

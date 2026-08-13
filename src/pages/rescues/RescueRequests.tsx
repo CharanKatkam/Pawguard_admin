@@ -1,18 +1,50 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaEye, FaSearchLocation } from "react-icons/fa";
+import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaSearchLocation, FaUserPlus, FaExternalLinkAlt, FaNotesMedical } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import lostFoundService from "../../services/lostFoundService";
+import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
 
+interface RescueRequestTableRow {
+  id: string;
+  ticket_number: string;
+  reporter: string;
+  phone: string;
+  location: string;
+  condition: string;
+  severity: string;
+  is_urgent: boolean;
+  status: string;
+  rejection_rationale: string;
+  dispatch: Record<string, unknown> | null;
+  dispatch_status: string;
+  dispatch_bg: string;
+  dispatch_color: string;
+  reports: Record<string, unknown>[];
+  media_urls: string[];
+  date: string;
+  raw: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface CoordinatorUser {
+  id: string;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  roles?: string[];
+  [key: string]: unknown;
+}
+
 const RescueRequests = () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [requests, setRequests] = useState<any[]>([]);
+  const [requests, setRequests] = useState<RescueRequestTableRow[]>([]);
+  const [coordinators, setCoordinators] = useState<CoordinatorUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
@@ -22,9 +54,11 @@ const RescueRequests = () => {
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<RescueRequestTableRow | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [assignForm, setAssignForm] = useState({ coordinator_id: "", notes: "" });
 
   const [formData, setFormData] = useState({
     reporter_name: "",
@@ -36,38 +70,53 @@ const RescueRequests = () => {
     reporter_notes: "",
   });
 
-  const fetchRequests = async () => {
+  const fetchCoordinators = useCallback(async () => {
+    try {
+      const response = await userService.getUsers();
+      const list: CoordinatorUser[] = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+      setCoordinators(
+        list.filter((u: CoordinatorUser) => Array.isArray(u.roles) && u.roles.includes("rescue_coordinator"))
+      );
+    } catch {
+      setCoordinators([]);
+    }
+  }, []);
+
+  const fetchRequests = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const response = await rescueService.getRescueRequests();
-      const list = Array.isArray(response)
+      const list: Record<string, unknown>[] = Array.isArray(response)
         ? response
         : Array.isArray(response?.data)
         ? response.data
         : [];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const formatted = list.map((item: any) => {
-        const stage = dispatchStage({ status: item.status, dispatch: item.dispatch });
+      const formatted: RescueRequestTableRow[] = list.map((item: Record<string, unknown>) => {
+        const stage = dispatchStage({ status: item.status as string, dispatch: item.dispatch as Record<string, unknown> });
         return {
-          id: item.id || item.request_id || "",
-          ticket_number: item.ticket_number || "",
-          reporter: item.reporter_name || item.reporter || "",
-          phone: item.reporter_phone || item.phone || "",
-          location: item.location_address || item.location || "",
-          condition: item.physical_condition || "",
-          severity: item.severity || "",
+          id: String(item.id || item.request_id || ""),
+          ticket_number: String(item.ticket_number || ""),
+          reporter: String(item.reporter_name || item.reporter || ""),
+          phone: String(item.reporter_phone || item.phone || ""),
+          location: String(item.location_address || item.location || ""),
+          condition: String(item.physical_condition || ""),
+          severity: String(item.severity || ""),
           is_urgent: !!item.is_urgent,
           status: String(item.status || "").toLowerCase(),
-          rejection_rationale: item.rejection_rationale || "",
-          dispatch: item.dispatch || null,
+          rejection_rationale: String(item.rejection_rationale || ""),
+          dispatch: (item.dispatch as Record<string, unknown>) || null,
           dispatch_status: stage.label,
           dispatch_bg: stage.bg,
           dispatch_color: stage.color,
-          reports: item.reports || [],
-          media_urls: item.media_urls || [],
-          date: item.created_at || item.date || item.timestamp || "",
+          reports: (item.reports as Record<string, unknown>[]) || [],
+          media_urls: (item.media_urls as string[]) || [],
+          date: String(item.created_at || item.date || item.timestamp || ""),
           raw: item,
         };
       });
@@ -79,13 +128,13 @@ const RescueRequests = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      void fetchRequests();
-    }, 0);
-    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchRequests();
+    void fetchCoordinators();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreateRequest = async (e: React.FormEvent) => {
@@ -141,6 +190,34 @@ const RescueRequests = () => {
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } } };
       addToast(e?.response?.data?.detail || "Failed to reject request", "error");
+    }
+  };
+
+  const handleAssignCoordinatorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRequest) return;
+    if (!assignForm.coordinator_id) {
+      addToast("Select a rescue coordinator to assign.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await rescueService.assignCoordinator(
+        selectedRequest.id,
+        assignForm.coordinator_id,
+        assignForm.notes || undefined
+      );
+      addToast("Rescue coordinator assigned successfully!", "success");
+      setIsAssignModalOpen(false);
+      setIsViewModalOpen(false);
+      setAssignForm({ coordinator_id: "", notes: "" });
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to assign coordinator", "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -402,29 +479,10 @@ const RescueRequests = () => {
           onRetry={fetchRequests}
           emptyMessage={statusFilter !== "all" ? `No rescue requests with status "${statusFilter}".` : "No public rescue requests."}
           module="rescue_requests"
-          renderRowActions={(item: Record<string, unknown>) => (
-            <button
-              onClick={() => {
-                setSelectedRequest(item);
-                setIsViewModalOpen(true);
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "6px 12px",
-                borderRadius: "6px",
-                border: "1px solid #93C5FD",
-                background: "#EFF6FF",
-                color: "#1D4ED8",
-                fontSize: "12px",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              <FaEye size={12} /> View Details
-            </button>
-          )}
+          onRowClick={(item: RescueRequestTableRow) => {
+            setSelectedRequest(item);
+            setIsViewModalOpen(true);
+          }}
         />
       </div>
 
@@ -504,13 +562,13 @@ const RescueRequests = () => {
                 <strong style={{ color: "#7C3AED" }}>Dispatch Info</strong>
                 <div style={{ marginTop: "6px", fontSize: "14px" }}>
                   {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id ? (
-                    <div>Vehicle: {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id}</div>
+                    <div>Vehicle: {String(selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id)}</div>
                   ) : null}
-                  {selectedRequest.dispatch.assigned_driver_id ? <div>Driver: {selectedRequest.dispatch.assigned_driver_id}</div> : null}
-                  {selectedRequest.dispatch.agents && selectedRequest.dispatch.agents.length > 0 ? (
-                    <div>Agents: {selectedRequest.dispatch.agents.map((a: Record<string, unknown>) => a.agent_id).join(", ")}</div>
+                  {selectedRequest.dispatch.assigned_driver_id ? <div>Driver: {String(selectedRequest.dispatch.assigned_driver_id)}</div> : null}
+                  {selectedRequest.dispatch.agents && Array.isArray(selectedRequest.dispatch.agents) && selectedRequest.dispatch.agents.length > 0 ? (
+                    <div>Agents: {(selectedRequest.dispatch.agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")}</div>
                   ) : null}
-                  {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {new Date(selectedRequest.dispatch.dispatched_at).toLocaleString()}</div> : null}
+                  {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {new Date(String(selectedRequest.dispatch.dispatched_at)).toLocaleString()}</div> : null}
                 </div>
               </div>
             )}
@@ -526,26 +584,44 @@ const RescueRequests = () => {
               {selectedRequest.status === "reported" && (
                 <>
                   <Can permission="approve_rescue_requests">
-                    <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Verify</button>
+                    <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Verify</button>
                   </Can>
                   <Can permission="edit_rescue_requests">
-                    <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Reject</button>
+                    <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Reject</button>
                   </Can>
                 </>
               )}
+              {selectedRequest.status === "verified" && (
+                <Can permission="edit_rescues">
+                  <button
+                    onClick={() => {
+                      setAssignForm({ coordinator_id: String(selectedRequest.raw?.coordinator_id || ""), notes: "" });
+                      setIsAssignModalOpen(true);
+                    }}
+                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaUserPlus size={12} /> Assign Rescue Coordinator
+                  </button>
+                </Can>
+              )}
               {["verified", "dispatched", "located"].includes(selectedRequest.status) && (
                 <Can permission="edit_rescue_requests">
-                  <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Escalate</button>
+                  <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Escalate</button>
                 </Can>
               )}
               {selectedRequest.status === "dispatched" && (
                 <Can permission="edit_rescues">
-                  <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Located</button>
+                  <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Mark Located</button>
                 </Can>
               )}
               {selectedRequest.status === "located" && (
                 <Can permission="edit_rescues">
-                  <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Mark Secured</button>
+                  <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Mark Secured</button>
+                </Can>
+              )}
+              {selectedRequest.status === "rescued" && (
+                <Can permission="edit_rescues">
+                  <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Admit to Centre</button>
                 </Can>
               )}
               {["rescued", "admitted"].includes(selectedRequest.status) && (
@@ -568,15 +644,63 @@ const RescueRequests = () => {
                   <FaSearchLocation size={12} /> Log as Found Pet for Matching
                 </button>
               )}
-              {selectedRequest.status === "rescued" && (
-                <Can permission="edit_rescues">
-                  <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Admit to Centre</button>
-                </Can>
+              {selectedRequest.status === "admitted" && (
+                <>
+                  <button
+                    onClick={() => window.open(`/public/dogs/${selectedRequest.raw?.dog_id || selectedRequest.id}`, "_blank")}
+                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaExternalLinkAlt size={12} /> View Dog Profile
+                  </button>
+                  <button
+                    onClick={() => window.location.href = "/medical"}
+                    style={{ padding: "8px 16px", background: "#0284C7", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaNotesMedical size={12} /> Medical Workflow
+                  </button>
+                </>
               )}
-              <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer" }}>Close</button>
+              <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Close</button>
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} title={`Assign Coordinator${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}>
+        <form onSubmit={handleAssignCoordinatorSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {coordinators.length === 0 && (
+            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#92400E" }}>
+              No rescue coordinators found in the user directory. Add a user with the rescue coordinator role first.
+            </div>
+          )}
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Rescue Coordinator *</label>
+            <select
+              required
+              value={assignForm.coordinator_id}
+              onChange={(e) => setAssignForm({ ...assignForm, coordinator_id: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+            >
+              <option value="">Select a coordinator...</option>
+              {coordinators.map((c: CoordinatorUser) => (
+                <option key={c.id} value={c.id}>{String(c.full_name || c.email || c.id)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Notes (optional)</label>
+            <textarea
+              rows={3}
+              value={assignForm.notes}
+              onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

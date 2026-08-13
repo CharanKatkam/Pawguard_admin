@@ -12,6 +12,7 @@ import { volunteerService } from "../services/volunteerService";
 import { inventoryService } from "../services/inventoryService";
 import { medicalService } from "../services/medicalService";
 import { financeService } from "../services/financeService";
+import { donationsService } from "../services/donationsService";
 import { firstDefined, unwrapList } from "../utils/chartUtils";
 import type { ActivityEntry, AnyRecord, DashboardSummary } from "../types/dashboard";
 
@@ -27,6 +28,8 @@ export interface ExecutiveDashboardData {
   inventory: AnyRecord[];
   medical: AnyRecord[];
   finance: AnyRecord[];
+  donations: AnyRecord[];
+  financeSummary: AnyRecord | null;
   activities: ActivityEntry[];
   loading: boolean;
   error: string | null;
@@ -95,6 +98,8 @@ export function useExecutiveDashboard() {
     inventory: [],
     medical: [],
     finance: [],
+    donations: [],
+    financeSummary: null,
     activities: [],
     loading: true,
     error: null,
@@ -121,12 +126,28 @@ export function useExecutiveDashboard() {
       inventoryService.getInventory({ limit: 300 }),
       medicalService.getMedicalRecords(),
       financeService.getFinanceRecords({ limit: 500 }),
+      donationsService.getDonations({ page_size: 500 }),
+      financeService.getFinanceSummary(),
     ]);
 
     if (requestId !== requestIdRef.current) return;
 
-    const [summaryRes, activitiesRes, usersRes, dogsRes, sheltersRes, rescuesRes, adoptionsRes, fostersRes, volunteersRes, inventoryRes, medicalRes, financeRes] =
-      results;
+    const [
+      summaryRes,
+      activitiesRes,
+      usersRes,
+      dogsRes,
+      sheltersRes,
+      rescuesRes,
+      adoptionsRes,
+      fostersRes,
+      volunteersRes,
+      inventoryRes,
+      medicalRes,
+      financeRes,
+      donationsRes,
+      financeSummaryRes,
+    ] = results;
 
     const activities = mergeActivities(
       unwrapList(activitiesRes.status === "fulfilled" ? activitiesRes.value : []).map(normalizeActivity).filter((a): a is ActivityEntry => a !== null),
@@ -136,6 +157,8 @@ export function useExecutiveDashboard() {
     );
 
     const hasError = results.some((r) => r.status === "rejected");
+
+    const finSumRaw = financeSummaryRes.status === "fulfilled" ? financeSummaryRes.value : null;
 
     setData((prev) => ({
       ...prev,
@@ -150,6 +173,8 @@ export function useExecutiveDashboard() {
       inventory: unwrapList(inventoryRes.status === "fulfilled" ? inventoryRes.value : []),
       medical: unwrapList(medicalRes.status === "fulfilled" ? medicalRes.value : []),
       finance: unwrapList(financeRes.status === "fulfilled" ? financeRes.value : []),
+      donations: unwrapList(donationsRes.status === "fulfilled" ? donationsRes.value : []),
+      financeSummary: (finSumRaw && typeof finSumRaw === "object" ? (finSumRaw.data ?? finSumRaw) : null) as AnyRecord | null,
       activities,
       loading: false,
       error: hasError ? "Some data sources are unavailable. Showing available data." : null,
