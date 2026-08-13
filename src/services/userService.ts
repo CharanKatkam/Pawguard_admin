@@ -63,10 +63,18 @@ export const extractPermissionCodes = (raw: unknown): string[] => {
 };
 
 export const userService = {
-  // Super Admin - Users
   getUsers: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/admin/users", { params });
-    return response.data;
+    try {
+      const response = await api.get("/admin/users", { params });
+      return response.data;
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number } };
+      if (e?.response?.status === 403) {
+        console.warn("userService.getUsers: User directory is restricted to system:admin. Returning empty array for non-admin session.");
+        return { success: true, data: [] };
+      }
+      throw err;
+    }
   },
 
   createUser: async (data: UserPayload) => {

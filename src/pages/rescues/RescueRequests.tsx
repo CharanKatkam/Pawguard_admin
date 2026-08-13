@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaSearchLocation, FaUserPlus, FaExternalLinkAlt, FaNotesMedical } from "react-icons/fa";
+import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaSearchLocation, FaUserPlus, FaExternalLinkAlt, FaNotesMedical, FaTruck } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import lostFoundService from "../../services/lostFoundService";
 import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { normalizeRole, getCurrentUserRole } from "../../utils/roleUtils";
 
 interface RescueRequestTableRow {
   id: string;
@@ -43,6 +45,11 @@ interface CoordinatorUser {
 }
 
 const RescueRequests = () => {
+  const navigate = useNavigate();
+  const currentUserRole = getCurrentUserRole();
+  const isAdmin = currentUserRole === "super_admin" || currentUserRole === "rescue_centre_admin";
+  const isCoordinator = currentUserRole === "rescue_coordinator";
+
   const [requests, setRequests] = useState<RescueRequestTableRow[]>([]);
   const [coordinators, setCoordinators] = useState<CoordinatorUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +86,7 @@ const RescueRequests = () => {
         ? response.data
         : [];
       setCoordinators(
-        list.filter((u: CoordinatorUser) => Array.isArray(u.roles) && u.roles.includes("rescue_coordinator"))
+        list.filter((u: CoordinatorUser) => normalizeRole(u) === "rescue_coordinator")
       );
     } catch {
       setCoordinators([]);
@@ -581,7 +588,7 @@ const RescueRequests = () => {
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
-              {selectedRequest.status === "reported" && (
+              {selectedRequest.status === "reported" && isAdmin && (
                 <>
                   <Can permission="approve_rescue_requests">
                     <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Verify</button>
@@ -591,7 +598,7 @@ const RescueRequests = () => {
                   </Can>
                 </>
               )}
-              {selectedRequest.status === "verified" && (
+              {selectedRequest.status === "verified" && isAdmin && (
                 <Can permission="edit_rescues">
                   <button
                     onClick={() => {
@@ -603,6 +610,17 @@ const RescueRequests = () => {
                     <FaUserPlus size={12} /> Assign Rescue Coordinator
                   </button>
                 </Can>
+              )}
+              {selectedRequest.status === "verified" && isCoordinator && (
+                <button
+                  onClick={() => {
+                    setIsViewModalOpen(false);
+                    navigate(`/rescue-dispatch?case_id=${encodeURIComponent(selectedRequest.id)}`);
+                  }}
+                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaTruck size={12} /> Accept Case & Dispatch Team
+                </button>
               )}
               {["verified", "dispatched", "located"].includes(selectedRequest.status) && (
                 <Can permission="edit_rescue_requests">

@@ -22,7 +22,7 @@ import lostFoundService from "../../services/lostFoundService";
 import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { getCurrentUserRole } from "../../utils/roleUtils";
+import { getCurrentUserRole, normalizeRole } from "../../utils/roleUtils";
 
 // Backend enum values (RescueSeverity / RescuePhysicalCondition) per OpenAPI.
 const SEVERITY_OPTIONS = [
@@ -133,7 +133,7 @@ const RescueManagement = () => {
         ? response.data
         : [];
       setCoordinators(
-        list.filter((u: CoordinatorUser) => Array.isArray(u.roles) && u.roles.includes("rescue_coordinator"))
+        list.filter((u: CoordinatorUser) => normalizeRole(u) === "rescue_coordinator")
       );
     } catch {
       setCoordinators([]);

@@ -24,21 +24,33 @@ interface RescueDashboardData {
   pending: number;
   dispatched: number;
   rescued: number;
-  recent_calls: any[];
+  recent_calls: Record<string, unknown>[];
 }
 
-const unwrapList = (v: any): any[] =>
-  Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
+const unwrapList = (v: unknown): Record<string, unknown>[] => {
+  if (!v || typeof v !== "object") return [];
+  if (Array.isArray(v)) return v as Record<string, unknown>[];
+  const obj = v as Record<string, unknown>;
+  if (Array.isArray(obj.data)) return obj.data as Record<string, unknown>[];
+  if (obj.data && typeof obj.data === "object" && Array.isArray((obj.data as Record<string, unknown>).data)) {
+    return (obj.data as Record<string, unknown>).data as Record<string, unknown>[];
+  }
+  if (Array.isArray(obj.items)) return obj.items as Record<string, unknown>[];
+  if (obj.data && typeof obj.data === "object" && Array.isArray((obj.data as Record<string, unknown>).items)) {
+    return (obj.data as Record<string, unknown>).items as Record<string, unknown>[];
+  }
+  return [];
+};
 
-const formatAssigned = (c: any) => ({
-  id: c.id || c.ticket_number || "",
-  ticket: c.ticket_number || c.id || "-",
-  reporter: c.reporter_name || c.reporter || "-",
-  animal_count: c.animal_count ?? "-",
-  status: c.status || "-",
-  location: c.location_address || c.location || "-",
-  severity: c.severity || "-",
-  created_at: c.created_at ? new Date(c.created_at).toLocaleString() : "-",
+const formatAssigned = (c: Record<string, unknown>) => ({
+  id: String(c.id || c.ticket_number || ""),
+  ticket: String(c.ticket_number || c.id || "-"),
+  reporter: String(c.reporter_name || c.reporter || "-"),
+  animal_count: (c.animal_count ?? "-") as string | number,
+  status: String(c.status || "-"),
+  location: String(c.location_address || c.location || "-"),
+  severity: String(c.severity || "-"),
+  created_at: c.created_at ? new Date(String(c.created_at)).toLocaleString() : "-",
 });
 
 const RescueCoordinatorDashboard = () => {
@@ -55,7 +67,7 @@ const RescueCoordinatorDashboard = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [assignedCases, setAssignedCases] = useState<any[]>([]);
+  const [assignedCases, setAssignedCases] = useState<Record<string, unknown>[]>([]);
 
   // Cases where this coordinator is the assigned coordinator — only those are
   // shown under "Assigned to You" (backend `assigned_to_me` capability).
@@ -75,19 +87,19 @@ const RescueCoordinatorDashboard = () => {
 
       const response = await dashboardService.getRescueDashboard();
 
-      const data = response?.data || response || {};
+      const data = (response as { data?: Record<string, unknown> })?.data || (response as Record<string, unknown>) || {};
       setDashboardData({
-        total_calls: data.total_calls ?? data.totalCalls ?? 0,
-        pending: data.pending ?? data.pendingCases ?? 0,
-        dispatched: data.dispatched ?? data.dispatchedCases ?? 0,
-        rescued: data.rescued ?? data.rescuedAnimals ?? 0,
-        recent_calls: Array.isArray(data.recent_calls) ? data.recent_calls : Array.isArray(data.recentCalls) ? data.recentCalls : [],
+        total_calls: Number(data.total_calls ?? data.totalCalls ?? 0),
+        pending: Number(data.pending ?? data.pendingCases ?? 0),
+        dispatched: Number(data.dispatched ?? data.dispatchedCases ?? 0),
+        rescued: Number(data.rescued ?? data.rescuedAnimals ?? 0),
+        recent_calls: Array.isArray(data.recent_calls) ? (data.recent_calls as Record<string, unknown>[]) : Array.isArray(data.recentCalls) ? (data.recentCalls as Record<string, unknown>[]) : [],
       });
-    } catch (err: any) {
-      console.error("Rescue Coordinator Dashboard Error:", err);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
       setError(
-        err?.response?.data?.detail ||
-        err?.response?.data?.message ||
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
         "Failed to load rescue coordinator metrics. Access may be restricted."
       );
     } finally {
@@ -96,13 +108,14 @@ const RescueCoordinatorDashboard = () => {
   };
 
   useEffect(() => {
-    fetchDashboard();
-    fetchAssignedCases();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchDashboard();
+    void fetchAssignedCases();
   }, []);
 
   useDataSync(() => {
-    fetchDashboard();
-    fetchAssignedCases();
+    void fetchDashboard();
+    void fetchAssignedCases();
   });
 
   const stats = [
@@ -160,28 +173,31 @@ const RescueCoordinatorDashboard = () => {
     { key: "created_at", title: "Reported At" },
   ];
 
-  const rowActions = (row: any) => (
-    <button
-      onClick={() => navigate(`/rescue-dispatch?case_id=${encodeURIComponent(row.id)}`)}
-      disabled={!["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase())}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "6px 12px",
-        borderRadius: "6px",
-        border: "none",
-        background: "#2563EB",
-        color: "#FFF",
-        fontSize: "12px",
-        fontWeight: 600,
-        cursor: "pointer",
-        opacity: ["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase()) ? 1 : 0.45,
-      }}
-    >
-      <FaTruck /> Assign Team
-    </button>
-  );
+  const rowActions = (row: Record<string, unknown>) => {
+    const isVerified = String(row.status || "").toLowerCase() === "verified";
+    return (
+      <button
+        onClick={() => navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(row.id || ""))}`)}
+        disabled={!["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase())}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "6px 12px",
+          borderRadius: "6px",
+          border: "none",
+          background: isVerified ? "#10B981" : "#2563EB",
+          color: "#FFF",
+          fontSize: "12px",
+          fontWeight: 600,
+          cursor: "pointer",
+          opacity: ["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase()) ? 1 : 0.45,
+        }}
+      >
+        <FaTruck /> {isVerified ? "Accept & Assign Team" : "Assign Team"}
+      </button>
+    );
+  };
 
   return (
     <div>
@@ -329,6 +345,7 @@ const RescueCoordinatorDashboard = () => {
           }}
           emptyMessage="No rescue cases are assigned to you yet."
           renderRowActions={rowActions}
+          onRowClick={(row) => navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(row.id || ""))}`)}
         />
       </div>
     </div>

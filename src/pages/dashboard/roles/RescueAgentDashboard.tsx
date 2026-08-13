@@ -19,26 +19,38 @@ interface RescueDashboardData {
   pending: number;
   dispatched: number;
   rescued: number;
-  recent_calls: any[];
+  recent_calls: Record<string, unknown>[];
 }
 
-const unwrapList = (v: any): any[] =>
-  Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
+const unwrapList = (v: unknown): Record<string, unknown>[] => {
+  if (!v || typeof v !== "object") return [];
+  if (Array.isArray(v)) return v as Record<string, unknown>[];
+  const obj = v as Record<string, unknown>;
+  if (Array.isArray(obj.data)) return obj.data as Record<string, unknown>[];
+  if (obj.data && typeof obj.data === "object" && Array.isArray((obj.data as Record<string, unknown>).data)) {
+    return (obj.data as Record<string, unknown>).data as Record<string, unknown>[];
+  }
+  if (Array.isArray(obj.items)) return obj.items as Record<string, unknown>[];
+  if (obj.data && typeof obj.data === "object" && Array.isArray((obj.data as Record<string, unknown>).items)) {
+    return (obj.data as Record<string, unknown>).items as Record<string, unknown>[];
+  }
+  return [];
+};
 
-const formatAssigned = (c: any) => ({
-  id: c.id || c.ticket_number || "",
-  ticket: c.ticket_number || c.id || "-",
-  reporter: c.reporter_name || c.reporter || "-",
-  animal_count: c.animal_count ?? "-",
-  status: c.status || "-",
-  location: c.location_address || c.location || "-",
-  severity: c.severity || "-",
-  driver: c.dispatch?.assigned_driver_id || "-",
-  vehicle: c.dispatch?.assigned_vehicle_id || c.dispatch?.vehicle_id || "-",
-  agents: Array.isArray(c.dispatch?.agents) && c.dispatch.agents.length > 0
-    ? c.dispatch.agents.map((a: any) => a.agent_id).join(", ")
+const formatAssigned = (c: Record<string, unknown>) => ({
+  id: String(c.id || c.ticket_number || ""),
+  ticket: String(c.ticket_number || c.id || "-"),
+  reporter: String(c.reporter_name || c.reporter || "-"),
+  animal_count: (c.animal_count ?? "-") as string | number,
+  status: String(c.status || "-"),
+  location: String(c.location_address || c.location || "-"),
+  severity: String(c.severity || "-"),
+  driver: String((c.dispatch as Record<string, unknown>)?.assigned_driver_id || "-"),
+  vehicle: String((c.dispatch as Record<string, unknown>)?.assigned_vehicle_id || (c.dispatch as Record<string, unknown>)?.vehicle_id || "-"),
+  agents: Array.isArray((c.dispatch as Record<string, unknown>)?.agents) && ((c.dispatch as Record<string, unknown>).agents as Record<string, unknown>[]).length > 0
+    ? ((c.dispatch as Record<string, unknown>).agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")
     : "-",
-  created_at: c.created_at ? new Date(c.created_at).toLocaleString() : "-",
+  created_at: c.created_at ? new Date(String(c.created_at)).toLocaleString() : "-",
 });
 
 const RescueAgentDashboard = () => {
@@ -53,7 +65,7 @@ const RescueAgentDashboard = () => {
       recent_calls: [],
     });
 
-  const [assignedCases, setAssignedCases] = useState<any[]>([]);
+  const [assignedCases, setAssignedCases] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,19 +88,19 @@ const RescueAgentDashboard = () => {
 
       const response = await dashboardService.getRescueDashboard();
 
-      const data = response?.data || response || {};
+      const data = (response as { data?: Record<string, unknown> })?.data || (response as Record<string, unknown>) || {};
       setDashboardData({
-        total_calls: data.total_calls ?? data.totalCalls ?? 0,
-        pending: data.pending ?? data.pendingCases ?? 0,
-        dispatched: data.dispatched ?? data.dispatchedCases ?? 0,
-        rescued: data.rescued ?? data.rescuedAnimals ?? 0,
-        recent_calls: Array.isArray(data.recent_calls) ? data.recent_calls : Array.isArray(data.recentCalls) ? data.recentCalls : [],
+        total_calls: Number(data.total_calls ?? data.totalCalls ?? 0),
+        pending: Number(data.pending ?? data.pendingCases ?? 0),
+        dispatched: Number(data.dispatched ?? data.dispatchedCases ?? 0),
+        rescued: Number(data.rescued ?? data.rescuedAnimals ?? 0),
+        recent_calls: Array.isArray(data.recent_calls) ? (data.recent_calls as Record<string, unknown>[]) : Array.isArray(data.recentCalls) ? (data.recentCalls as Record<string, unknown>[]) : [],
       });
-    } catch (err: any) {
-      console.error("Rescue Agent Dashboard Error:", err);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
       setError(
-        err?.response?.data?.detail ||
-        err?.response?.data?.message ||
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
         "Failed to load rescue agent metrics. Access may be restricted."
       );
     } finally {
@@ -97,8 +109,9 @@ const RescueAgentDashboard = () => {
   };
 
   useEffect(() => {
-    fetchDashboard();
-    fetchAssignedCases();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchDashboard();
+    void fetchAssignedCases();
   }, []);
 
   useDataSync(() => {

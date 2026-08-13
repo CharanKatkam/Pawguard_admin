@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
@@ -10,11 +10,12 @@ import userService from "../../services/userService";
 import vehicleService from "../../services/vehicleService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { normalizeRole } from "../../utils/roleUtils";
 
-const unwrapList = (body: any): any[] => {
+const unwrapList = (body: unknown): Record<string, unknown>[] => {
   if (!body) return [];
-  const data = Array.isArray(body) ? body : body.data;
-  return Array.isArray(data) ? data : [];
+  const data = Array.isArray(body) ? body : (body as { data?: unknown }).data;
+  return Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
 };
 
 interface EnrichedDispatch {
@@ -33,15 +34,15 @@ interface EnrichedDispatch {
   vehicle_label: string;
   reported_at: string;
   dispatched_at: string;
-  raw: any;
+  raw: Record<string, unknown>;
   [key: string]: unknown;
 }
 
 const RescueDispatch = () => {
   const [dispatches, setDispatches] = useState<EnrichedDispatch[]>([]);
-  const [rescueCases, setRescueCases] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [rescueCases, setRescueCases] = useState<Record<string, unknown>[]>([]);
+  const [users, setUsers] = useState<Record<string, unknown>[]>([]);
+  const [vehicles, setVehicles] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
@@ -60,13 +61,13 @@ const RescueDispatch = () => {
     };
   });
 
-  const userIdLabel = (id?: string) => {
+  const userIdLabel = useCallback((id?: string) => {
     if (!id) return "";
-    const u = users.find((x) => x.id === id);
-    return u ? u.full_name || u.email || id : id;
-  };
+    const u = users.find((x) => String(x.id) === id);
+    return u ? String(u.full_name || u.email || id) : id;
+  }, [users]);
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -86,47 +87,50 @@ const RescueDispatch = () => {
       setUsers(userList);
       setVehicles(vehicleList);
 
-      const caseById = new Map(caseList.map((c: any) => [c.id, c]));
+      const caseById = new Map(caseList.map((c: Record<string, unknown>) => [String(c.id), c]));
 
-      const formatted: EnrichedDispatch[] = dispatchList.map((d: any) => {
-        const req = d.rescue_request_id ? caseById.get(d.rescue_request_id) : undefined;
-        const stage = dispatchStage({ status: req?.status, dispatch: req?.dispatch });
-        const agents = Array.isArray(d.agents) ? d.agents : [];
+      const formatted: EnrichedDispatch[] = dispatchList.map((d: Record<string, unknown>) => {
+        const req = d.rescue_request_id ? caseById.get(String(d.rescue_request_id)) : undefined;
+        const stage = dispatchStage({ status: req?.status as string, dispatch: req?.dispatch as Record<string, unknown> });
+        const agents = Array.isArray(d.agents) ? (d.agents as Record<string, unknown>[]) : [];
         const vehicle = d.assigned_vehicle_id
-          ? vehicleList.find((v: any) => v.id === d.assigned_vehicle_id)
+          ? vehicleList.find((v: Record<string, unknown>) => String(v.id) === String(d.assigned_vehicle_id))
           : undefined;
         return {
-          id: d.id,
-          dispatch_id: d.id,
-          ticket: req?.ticket_number || d.rescue_request_id || "-",
+          id: String(d.id),
+          dispatch_id: String(d.id),
+          ticket: String(req?.ticket_number || d.rescue_request_id || "-"),
           animal_count: req?.animal_count != null ? String(req.animal_count) : "-",
-          location: req?.location_address || "-",
-          severity: req?.severity || "-",
-          rescue_status: req?.status || "-",
+          location: String(req?.location_address || "-"),
+          severity: String(req?.severity || "-"),
+          rescue_status: String(req?.status || "-"),
           stage_label: stage.label,
           stage_bg: stage.bg,
           stage_color: stage.color,
-          driver_name: userIdLabel(d.assigned_driver_id) || "-",
+          driver_name: userIdLabel(String(d.assigned_driver_id || "")) || "-",
           agent_names:
-            agents.length > 0 ? agents.map((a: any) => userIdLabel(a.agent_id)).join(", ") : "-",
+            agents.length > 0 ? agents.map((a: Record<string, unknown>) => userIdLabel(String(a.agent_id || a.id || ""))).join(", ") : "-",
           vehicle_label:
-            vehicle?.vehicle_number || vehicle?.registration_number || vehicle?.id || d.vehicle_id || "-",
-          reported_at: req?.created_at ? new Date(req.created_at).toLocaleString() : "-",
-          dispatched_at: d.dispatched_at ? new Date(d.dispatched_at).toLocaleString() : "-",
+            String(vehicle?.vehicle_number || vehicle?.registration_number || vehicle?.id || d.vehicle_id || "-"),
+          reported_at: req?.created_at ? new Date(String(req.created_at)).toLocaleString() : "-",
+          dispatched_at: d.dispatched_at ? new Date(String(d.dispatched_at)).toLocaleString() : "-",
           raw: d,
         };
       });
 
       setDispatches(formatted);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to load dispatch operations.");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      setError(e?.response?.data?.detail || "Failed to load dispatch operations.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [userIdLabel]);
 
   useEffect(() => {
-    fetchAll();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreateDispatch = async (e: React.FormEvent) => {
@@ -149,21 +153,20 @@ const RescueDispatch = () => {
       setFormData({ case_id: "", driver_id: "", agent_ids: [], vehicle_id: "", notes: "" });
       fetchAll();
       notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to dispatch rescue team", "error");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      addToast(e?.response?.data?.detail || "Failed to dispatch rescue team", "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const agentCandidates = users.filter((u) => Array.isArray(u.roles) && u.roles.includes("rescue_agent"));
+  const agentCandidates = users.filter((u) => normalizeRole(u) === "rescue_agent");
   const driverCandidates = users.filter(
-    (u) =>
-      Array.isArray(u.roles) &&
-      (u.roles.includes("rescue_agent") || u.roles.includes("rescue_coordinator"))
+    (u) => normalizeRole(u) === "rescue_agent" || normalizeRole(u) === "rescue_coordinator"
   );
   const dispatchableCases = rescueCases.filter(
-    (c: any) => c.status === "verified" || c.status === "dispatched" || c.status === "located"
+    (c: Record<string, unknown>) => c.status === "verified" || c.status === "dispatched" || c.status === "located"
   );
 
   const columns = [
@@ -184,8 +187,8 @@ const RescueDispatch = () => {
     {
       key: "stage_label",
       header: "Dispatch Status",
-      render: (val: string, row: any) => (
-        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: row.stage_bg, color: row.stage_color }}>
+      render: (val: string, row: Record<string, unknown>) => (
+        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: String(row.stage_bg || ""), color: String(row.stage_color || "") }}>
           {val}
         </span>
       ),
@@ -237,7 +240,7 @@ const RescueDispatch = () => {
         <StatCard title="Total Dispatches" value={dispatches.length} icon={<FaTruck />} color="#2563EB" />
         <StatCard
           title="Awaiting Dispatch"
-          value={dispatchableCases.filter((c: any) => c.status === "verified").length}
+          value={dispatchableCases.filter((c: Record<string, unknown>) => c.status === "verified").length}
           icon={<FaClock />}
           color="#F59E0B"
         />
@@ -271,9 +274,9 @@ const RescueDispatch = () => {
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Rescue Case *</label>
             <select required value={formData.case_id} onChange={(e) => setFormData({ ...formData, case_id: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
               <option value="">Select verified rescue case...</option>
-              {dispatchableCases.map((c: any) => (
-                <option key={c.id} value={c.id}>
-                  {c.ticket_number || c.id} — {c.location_address || "no location"}
+              {dispatchableCases.map((c: Record<string, unknown>) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.ticket_number || c.id)} — {String(c.location_address || "no location")}
                 </option>
               ))}
             </select>
@@ -286,50 +289,72 @@ const RescueDispatch = () => {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
               <label style={{ fontSize: "13px", fontWeight: 600 }}>Driver</label>
-              <select value={formData.driver_id} onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
-                <option value="">Not assigned</option>
-                {driverCandidates.map((u) => (
-                  <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
-                ))}
-              </select>
+              {driverCandidates.length > 0 ? (
+                <select value={formData.driver_id} onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+                  <option value="">Not assigned</option>
+                  {driverCandidates.map((u) => (
+                    <option key={String(u.id)} value={String(u.id)}>{String(u.full_name || u.email || u.id)}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="Enter driver name or ID..."
+                  value={formData.driver_id}
+                  onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })}
+                  style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+                />
+              )}
             </div>
             <div>
               <label style={{ fontSize: "13px", fontWeight: 600 }}>Vehicle</label>
               <select value={formData.vehicle_id} onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
                 <option value="">Not assigned</option>
                 {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>{v.vehicle_number || v.registration_number || v.id}</option>
+                  <option key={String(v.id)} value={String(v.id)}>{String(v.vehicle_number || v.registration_number || v.id)}</option>
                 ))}
               </select>
             </div>
           </div>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Field Agents</label>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px" }}>
-              {agentCandidates.length === 0 && (
-                <span style={{ fontSize: "12px", color: "#F59E0B" }}>No rescue agents found in user directory.</span>
-              )}
-              {agentCandidates.map((u) => {
-                const checked = formData.agent_ids.includes(u.id);
-                return (
-                  <label key={u.id} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px" }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() =>
-                        setFormData({
-                          ...formData,
-                          agent_ids: checked
-                            ? formData.agent_ids.filter((x) => x !== u.id)
-                            : [...formData.agent_ids, u.id],
-                        })
-                      }
-                    />
-                    {u.full_name || u.email}
-                  </label>
-                );
-              })}
-            </div>
+            {agentCandidates.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px" }}>
+                {agentCandidates.map((u) => {
+                  const checked = formData.agent_ids.includes(String(u.id));
+                  return (
+                    <label key={String(u.id)} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px" }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setFormData({
+                            ...formData,
+                            agent_ids: checked
+                              ? formData.agent_ids.filter((x) => x !== String(u.id))
+                              : [...formData.agent_ids, String(u.id)],
+                          })
+                        }
+                      />
+                      {String(u.full_name || u.email || u.id)}
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <input
+                type="text"
+                placeholder="Enter field agent name(s) or ID(s), comma-separated..."
+                value={formData.agent_ids.join(", ")}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    agent_ids: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                  })
+                }
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+              />
+            )}
           </div>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Equipment / Notes</label>
