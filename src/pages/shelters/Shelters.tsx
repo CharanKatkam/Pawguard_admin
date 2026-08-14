@@ -120,6 +120,10 @@ const Shelters = () => {
 
   useEffect(() => {
     if (searchParams.get("action") === "add") {
+      setIsRegisterModalOpen(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (searchParams.get("action") === "allocate") {
+      openCageModal();
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [searchParams]);

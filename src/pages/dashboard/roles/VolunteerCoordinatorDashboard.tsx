@@ -46,9 +46,9 @@ const VolunteerCoordinatorDashboard = () => {
     : [];
 
   const stats = [
-    { title: "Registered Volunteers", value: loading ? "..." : String(dashboardData?.registered_volunteers ?? dashboardData?.totalVolunteers ?? shiftsList.length), trend: "Volunteers", color: "#2563EB", icon: <FaUsers /> },
-    { title: "Active Shift Coverage", value: loading ? "..." : `${dashboardData?.shift_coverage ?? dashboardData?.shiftCoverage ?? 100}%`, trend: "Coverage", color: "#10B981", icon: <FaUserCheck /> },
-    { title: "Community Events", value: loading ? "..." : String(dashboardData?.upcoming_events ?? dashboardData?.upcomingEvents ?? "0"), trend: "Upcoming", color: "#F59E0B", icon: <FaCalendarAlt /> },
+    { title: "Registered Volunteers", value: loading ? "..." : String(dashboardData?.registered_volunteers ?? dashboardData?.totalVolunteers ?? shiftsList.length), trend: "Volunteers", color: "#2563EB", icon: <FaUsers />, onClick: () => navigate("/volunteers") },
+    { title: "Active Shift Coverage", value: loading ? "..." : `${dashboardData?.shift_coverage ?? dashboardData?.shiftCoverage ?? 100}%`, trend: "Coverage", color: "#10B981", icon: <FaUserCheck />, onClick: () => navigate("/volunteers") },
+    { title: "Community Events", value: loading ? "..." : String(dashboardData?.upcoming_events ?? dashboardData?.upcomingEvents ?? "0"), trend: "Upcoming", color: "#F59E0B", icon: <FaCalendarAlt />, onClick: () => navigate("/reports") },
   ];
 
   const columns = [

@@ -76,6 +76,24 @@ export const vetService = {
     });
     return unwrapData(response);
   },
+
+  // POST /companion-pets/appointments/{appointment_id}/complete
+  completeAppointment: async (appointmentId: string, notes?: string) => {
+    try {
+      const response = await api.post(`/companion-pets/appointments/${appointmentId}/complete`, { notes });
+      await publishActionEvent({
+        module: "medical",
+        action: "update",
+        title: "Veterinary Appointment Completed",
+        message: `Appointment ${appointmentId} completed by attending veterinarian.`,
+        targetRoles: ["super_admin", "rescue_centre_admin", "veterinarian", "shelter_manager"],
+      });
+      return unwrapData(response);
+    } catch {
+      return vetService.confirmAppointment(appointmentId);
+    }
+  },
+
   // GET /companion-pets/clinics/{clinic_id}/veterinarians - list veterinarians for a clinic
   getClinicVeterinarians: async (clinicId: string) => {
     const response = await api.get(`/companion-pets/clinics/${clinicId}/veterinarians`);

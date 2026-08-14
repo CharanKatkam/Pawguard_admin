@@ -118,6 +118,7 @@ const RescueCentreAdminDashboard = () => {
       trend: "All Rescue Requests",
       color: "#2563EB",
       icon: <FaAmbulance />,
+      onClick: () => navigate("/rescue-requests"),
     },
     {
       title: "Pending Cases",
@@ -125,6 +126,7 @@ const RescueCentreAdminDashboard = () => {
       trend: "Awaiting Action",
       color: "#F59E0B",
       icon: <FaClipboardList />,
+      onClick: () => navigate("/rescue-requests?status=pending"),
     },
     {
       title: "Dispatched Cases",
@@ -132,6 +134,7 @@ const RescueCentreAdminDashboard = () => {
       trend: "Agents Assigned",
       color: "#10B981",
       icon: <FaUsers />,
+      onClick: () => navigate("/rescue-dispatch"),
     },
     {
       title: "Rescued Dogs",
@@ -139,6 +142,7 @@ const RescueCentreAdminDashboard = () => {
       trend: "Successfully Rescued",
       color: "#6366F1",
       icon: <FaPaw />,
+      onClick: () => navigate("/rescues?status=rescued"),
     },
   ];
 

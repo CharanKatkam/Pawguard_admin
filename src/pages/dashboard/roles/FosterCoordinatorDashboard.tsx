@@ -46,10 +46,10 @@ const FosterCoordinatorDashboard = () => {
     : [];
 
   const stats = [
-    { title: "Active Foster Homes", value: loading ? "..." : String(dashboardData?.active_homes ?? dashboardData?.activeHomes ?? "0"), trend: "Active Homes", color: "#2563EB", icon: <FaHome /> },
-    { title: "Pets in Foster Care", value: loading ? "..." : String(dashboardData?.pets_in_care ?? dashboardData?.petsInCare ?? placementsList.length), trend: "Temporary Care", color: "#10B981", icon: <FaPaw /> },
-    { title: "Foster Requests Queue", value: loading ? "..." : String(dashboardData?.pending_requests ?? dashboardData?.pendingRequests ?? "0"), trend: "Pending Match", color: "#F59E0B", icon: <FaUserPlus /> },
-    { title: "Follow-Up Inspections", value: loading ? "..." : String(dashboardData?.follow_ups ?? dashboardData?.followUps ?? "0"), trend: "Scheduled", color: "#6366F1", icon: <FaCalendarCheck /> },
+    { title: "Active Foster Homes", value: loading ? "..." : String(dashboardData?.active_homes ?? dashboardData?.activeHomes ?? "0"), trend: "Active Homes", color: "#2563EB", icon: <FaHome />, onClick: () => navigate("/fosters") },
+    { title: "Pets in Foster Care", value: loading ? "..." : String(dashboardData?.pets_in_care ?? dashboardData?.petsInCare ?? placementsList.length), trend: "Temporary Care", color: "#10B981", icon: <FaPaw />, onClick: () => navigate("/pets") },
+    { title: "Foster Requests Queue", value: loading ? "..." : String(dashboardData?.pending_requests ?? dashboardData?.pendingRequests ?? "0"), trend: "Pending Match", color: "#F59E0B", icon: <FaUserPlus />, onClick: () => navigate("/fosters") },
+    { title: "Follow-Up Inspections", value: loading ? "..." : String(dashboardData?.follow_ups ?? dashboardData?.followUps ?? "0"), trend: "Scheduled", color: "#6366F1", icon: <FaCalendarCheck />, onClick: () => navigate("/fosters") },
   ];
 
   const columns = [

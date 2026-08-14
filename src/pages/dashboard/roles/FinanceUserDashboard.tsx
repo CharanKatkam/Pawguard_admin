@@ -101,10 +101,10 @@ const FinanceUserDashboard = () => {
   const summaryNet = summary?.net_balance ?? summary?.netBalance ?? summary?.net;
 
   const stats = [
-    { title: "Total Revenue / Donations", value: loading ? "..." : summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue), trend: "Donations", color: "#10B981", icon: <FaCoins /> },
-    { title: "Operational Expenses", value: loading ? "..." : summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses), trend: "Expenses", color: "#2563EB", icon: <FaFileInvoiceDollar /> },
-    { title: "Donor Contributions", value: loading ? "..." : String(summaryDonors ?? donorCount), trend: "Donors", color: "#6366F1", icon: <FaHandHoldingHeart /> },
-    { title: "Net Reserve Balance", value: loading ? "..." : summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses), trend: "Balance", color: "#F59E0B", icon: <FaChartLine /> },
+    { title: "Total Revenue / Donations", value: loading ? "..." : summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue), trend: "Donations", color: "#10B981", icon: <FaCoins />, onClick: () => navigate("/finance") },
+    { title: "Operational Expenses", value: loading ? "..." : summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses), trend: "Expenses", color: "#2563EB", icon: <FaFileInvoiceDollar />, onClick: () => navigate("/finance") },
+    { title: "Donor Contributions", value: loading ? "..." : String(summaryDonors ?? donorCount), trend: "Donors", color: "#6366F1", icon: <FaHandHoldingHeart />, onClick: () => navigate("/finance") },
+    { title: "Net Reserve Balance", value: loading ? "..." : summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses), trend: "Balance", color: "#F59E0B", icon: <FaChartLine />, onClick: () => navigate("/finance") },
   ];
 
   const columns = [

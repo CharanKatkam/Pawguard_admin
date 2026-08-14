@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
+import Modal from "../../../components/common/Modal";
 import { useToast } from "../../../context/ToastContext";
 import reportsService from "../../../services/reportsService";
 import {
@@ -14,10 +15,13 @@ import {
   FaExclamationTriangle,
   FaClock,
   FaTruck,
+  FaSearch,
+  FaExternalLinkAlt,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import { useDataSync } from "../../../utils/dataSync";
+import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
 
 interface RescueDashboardData {
   total_calls: number;
@@ -26,6 +30,8 @@ interface RescueDashboardData {
   rescued: number;
   recent_calls: Record<string, unknown>[];
 }
+
+type CardTab = "all" | "assigned" | "pending" | "rescued";
 
 const unwrapList = (v: unknown): Record<string, unknown>[] => {
   if (!v || typeof v !== "object") return [];
@@ -42,59 +48,78 @@ const unwrapList = (v: unknown): Record<string, unknown>[] => {
   return [];
 };
 
-const formatAssigned = (c: Record<string, unknown>) => ({
+const formatCase = (c: Record<string, unknown>) => ({
   id: String(c.id || c.ticket_number || ""),
   ticket: String(c.ticket_number || c.id || "-"),
   reporter: String(c.reporter_name || c.reporter || "-"),
+  phone: String(c.reporter_phone || c.phone || "-"),
   animal_count: (c.animal_count ?? "-") as string | number,
   status: String(c.status || "-"),
   location: String(c.location_address || c.location || "-"),
   severity: String(c.severity || "-"),
+  is_urgent: !!c.is_urgent,
+  rejection_rationale: String(c.rejection_rationale || ""),
+  dispatch: (c.dispatch as Record<string, unknown>) || null,
   created_at: c.created_at ? new Date(String(c.created_at)).toLocaleString() : "-",
+  raw: c,
 });
 
 const RescueCoordinatorDashboard = () => {
   const navigate = useNavigate();
   const { addToast } = useToast();
-  const [dashboardData, setDashboardData] =
-    useState<RescueDashboardData>({
-      total_calls: 0,
-      pending: 0,
-      dispatched: 0,
-      rescued: 0,
-      recent_calls: [],
-    });
+  const [activeCard, setActiveCard] = useState<CardTab>("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
+  const [selectedRequest, setSelectedRequest] = useState<Record<string, unknown> | null>(null);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+
+  const [dashboardData, setDashboardData] = useState<RescueDashboardData>({
+    total_calls: 0,
+    pending: 0,
+    dispatched: 0,
+    rescued: 0,
+    recent_calls: [],
+  });
+
+  const [allCases, setAllCases] = useState<Record<string, unknown>[]>([]);
+  const [assignedCases, setAssignedCases] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [assignedCases, setAssignedCases] = useState<Record<string, unknown>[]>([]);
 
-  // Cases where this coordinator is the assigned coordinator — only those are
-  // shown under "Assigned to You" (backend `assigned_to_me` capability).
-  const fetchAssignedCases = async () => {
-    try {
-      const response = await rescueService.getRescueCases({ assigned_to_me: true });
-      setAssignedCases(unwrapList(response).map(formatAssigned));
-    } catch {
-      setAssignedCases([]);
-    }
-  };
-
-  const fetchDashboard = async () => {
+  const fetchCasesData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await dashboardService.getRescueDashboard();
+      const [dashRes, allRes, assignedRes] = await Promise.allSettled([
+        dashboardService.getRescueDashboard(),
+        rescueService.getRescueCases(),
+        rescueService.getRescueCases({ assigned_to_me: true }),
+      ]);
 
-      const data = (response as { data?: Record<string, unknown> })?.data || (response as Record<string, unknown>) || {};
-      setDashboardData({
-        total_calls: Number(data.total_calls ?? data.totalCalls ?? 0),
-        pending: Number(data.pending ?? data.pendingCases ?? 0),
-        dispatched: Number(data.dispatched ?? data.dispatchedCases ?? 0),
-        rescued: Number(data.rescued ?? data.rescuedAnimals ?? 0),
-        recent_calls: Array.isArray(data.recent_calls) ? (data.recent_calls as Record<string, unknown>[]) : Array.isArray(data.recentCalls) ? (data.recentCalls as Record<string, unknown>[]) : [],
-      });
+      if (dashRes.status === "fulfilled") {
+        const data = (dashRes.value as { data?: Record<string, unknown> })?.data || (dashRes.value as Record<string, unknown>) || {};
+        setDashboardData({
+          total_calls: Number(data.total_calls ?? data.totalCalls ?? 0),
+          pending: Number(data.pending ?? data.pendingCases ?? 0),
+          dispatched: Number(data.dispatched ?? data.dispatchedCases ?? 0),
+          rescued: Number(data.rescued ?? data.rescuedAnimals ?? 0),
+          recent_calls: Array.isArray(data.recent_calls) ? (data.recent_calls as Record<string, unknown>[]) : Array.isArray(data.recentCalls) ? (data.recentCalls as Record<string, unknown>[]) : [],
+        });
+      }
+
+      if (allRes.status === "fulfilled") {
+        setAllCases(unwrapList(allRes.value).map(formatCase));
+      } else {
+        setAllCases([]);
+      }
+
+      if (assignedRes.status === "fulfilled") {
+        setAssignedCases(unwrapList(assignedRes.value).map(formatCase));
+      } else {
+        setAssignedCases([]);
+      }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string; message?: string } } };
       setError(
@@ -108,49 +133,209 @@ const RescueCoordinatorDashboard = () => {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchDashboard();
-    void fetchAssignedCases();
+    void fetchCasesData();
   }, []);
 
   useDataSync(() => {
-    void fetchDashboard();
-    void fetchAssignedCases();
+    void fetchCasesData();
   });
+
+  // Calculate dynamic card counts
+  const totalCount = allCases.length || dashboardData.total_calls;
+  const pendingCount = allCases.filter((c) => /reported|pending|new|verified/i.test(String(c.status || ""))).length || dashboardData.pending;
+  const rescuedCount = allCases.filter((c) => /rescued|located|secured|admitted|completed/i.test(String(c.status || ""))).length || dashboardData.rescued;
+
+  // Filter current active dataset
+  const getDisplayData = () => {
+    let list: Record<string, unknown>[] = [];
+    if (activeCard === "assigned") {
+      list = assignedCases;
+    } else if (activeCard === "pending") {
+      list = allCases.filter((c) => {
+        const s = String(c.status || "").toLowerCase();
+        return s === "reported" || s === "pending" || s === "new" || s === "verified";
+      });
+    } else if (activeCard === "rescued") {
+      list = allCases.filter((c) => {
+        const s = String(c.status || "").toLowerCase();
+        return s === "rescued" || s === "located" || s === "secured" || s === "admitted" || s === "completed";
+      });
+    } else {
+      list = allCases;
+    }
+
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase().trim();
+    return list.filter((r) =>
+      String(r.ticket || "").toLowerCase().includes(q) ||
+      String(r.reporter || "").toLowerCase().includes(q) ||
+      String(r.location || "").toLowerCase().includes(q) ||
+      String(r.severity || "").toLowerCase().includes(q) ||
+      String(r.status || "").toLowerCase().includes(q)
+    );
+  };
+
+  const displayData = getDisplayData();
+
+  const getTableTitle = () => {
+    switch (activeCard) {
+      case "assigned":
+        return "My Assigned Cases";
+      case "pending":
+        return "Pending Rescue Cases";
+      case "rescued":
+        return "Rescued Dogs / Completed Cases";
+      default:
+        return "All Rescue Calls";
+    }
+  };
+
+  const getEmptyMessage = () => {
+    switch (activeCard) {
+      case "assigned":
+        return "No cases are currently assigned to you.";
+      case "pending":
+        return "No pending rescue cases found.";
+      case "rescued":
+        return "No rescued dogs or completed cases found.";
+      default:
+        return "No rescue calls found.";
+    }
+  };
+
+  const handleRowClick = (row: Record<string, unknown>) => {
+    setSelectedRequest(row);
+    setIsViewModalOpen(true);
+  };
+
+  // Status Action Handlers for Modal
+  const handleVerifyRequest = async (id: string) => {
+    try {
+      setIsActionLoading(true);
+      await rescueService.updateRescueCase(id, { status: "verified" });
+      addToast("Rescue incident verified successfully!", "success");
+      setIsViewModalOpen(false);
+      fetchCasesData();
+    } catch {
+      addToast("Failed to verify rescue incident.", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleEscalateRequest = async (id: string) => {
+    try {
+      setIsActionLoading(true);
+      await rescueService.escalateRescue(id, "high_priority", "Urgent escalation from coordinator dashboard.");
+      addToast("Rescue case escalated to high priority!", "info");
+      setIsViewModalOpen(false);
+      fetchCasesData();
+    } catch {
+      addToast("Failed to escalate rescue case.", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleLocatedRequest = async (id: string) => {
+    try {
+      setIsActionLoading(true);
+      await rescueService.markRescueLocated(id);
+      addToast("Animal marked as located by field team!", "info");
+      setIsViewModalOpen(false);
+      fetchCasesData();
+    } catch {
+      addToast("Failed to update status to located.", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleSecuredRequest = async (id: string) => {
+    try {
+      setIsActionLoading(true);
+      await rescueService.markRescueSecured(id);
+      addToast("Animal marked as secured!", "info");
+      setIsViewModalOpen(false);
+      fetchCasesData();
+    } catch {
+      addToast("Failed to update status to secured.", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleAdmittedRequest = async (id: string) => {
+    try {
+      setIsActionLoading(true);
+      await rescueService.markRescueAdmitted(id);
+      addToast("Animal successfully admitted to rescue centre!", "success");
+      setIsViewModalOpen(false);
+      fetchCasesData();
+    } catch {
+      addToast("Failed to admit animal to rescue centre.", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
 
   const stats = [
     {
       title: "Total Rescue Calls",
-      value: loading ? "..." : dashboardData.total_calls,
+      value: loading ? "..." : String(totalCount),
       trend: "All Rescue Requests",
       color: "#EF4444",
       icon: <FaExclamationTriangle />,
+      selected: activeCard === "all",
+      onClick: () => {
+        setActiveCard("all");
+        const el = document.getElementById("rescue-table-section");
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "My Assigned Cases",
-      value: loading ? "..." : assignedCases.length,
+      value: loading ? "..." : String(assignedCases.length),
       trend: "Assigned to You",
       color: "#2563EB",
       icon: <FaClipboardList />,
+      selected: activeCard === "assigned",
+      onClick: () => {
+        setActiveCard("assigned");
+        const el = document.getElementById("rescue-table-section");
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "Pending Cases",
-      value: loading ? "..." : dashboardData.pending,
+      value: loading ? "..." : String(pendingCount),
       trend: "Awaiting Dispatch",
       color: "#F59E0B",
       icon: <FaClock />,
+      selected: activeCard === "pending",
+      onClick: () => {
+        setActiveCard("pending");
+        const el = document.getElementById("rescue-table-section");
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      },
     },
     {
       title: "Dogs Rescued",
-      value: loading ? "..." : dashboardData.rescued,
+      value: loading ? "..." : String(rescuedCount),
       trend: "Successfully Completed",
       color: "#10B981",
       icon: <FaCheckCircle />,
+      selected: activeCard === "rescued",
+      onClick: () => {
+        setActiveCard("rescued");
+        const el = document.getElementById("rescue-table-section");
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      },
     },
   ];
 
   const columns = [
-    { key: "ticket", title: "Ticket" },
+    { key: "ticket", title: "Ticket / ID" },
     { key: "reporter", title: "Reporter" },
     { key: "animal_count", title: "Dogs" },
     { key: "location", title: "Location" },
@@ -174,11 +359,16 @@ const RescueCoordinatorDashboard = () => {
   ];
 
   const rowActions = (row: Record<string, unknown>) => {
-    const isVerified = String(row.status || "").toLowerCase() === "verified";
+    const status = String(row.status || "").toLowerCase();
+    const isVerified = status === "verified";
+    const canAssign = ["verified", "dispatched", "located"].includes(status);
     return (
       <button
-        onClick={() => navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(row.id || ""))}`)}
-        disabled={!["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase())}
+        onClick={(e) => {
+          e.stopPropagation();
+          navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(row.id || ""))}`);
+        }}
+        disabled={!canAssign}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -190,8 +380,8 @@ const RescueCoordinatorDashboard = () => {
           color: "#FFF",
           fontSize: "12px",
           fontWeight: 600,
-          cursor: "pointer",
-          opacity: ["verified", "dispatched", "located"].includes(String(row.status || "").toLowerCase()) ? 1 : 0.45,
+          cursor: canAssign ? "pointer" : "not-allowed",
+          opacity: canAssign ? 1 : 0.45,
         }}
       >
         <FaTruck /> {isVerified ? "Accept & Assign Team" : "Assign Team"}
@@ -201,35 +391,21 @@ const RescueCoordinatorDashboard = () => {
 
   return (
     <div>
+      {/* Hero Banner */}
       <div
         style={{
           marginBottom: "20px",
-          background:
-            "linear-gradient(135deg,#0F172A 0%,#1E293B 100%)",
+          background: "linear-gradient(135deg,#0F172A 0%,#1E293B 100%)",
           padding: "20px 24px",
           borderRadius: "14px",
           color: "#fff",
         }}
       >
-        <h1
-          style={{
-            margin: 0,
-            fontSize: "24px",
-            fontWeight: 800,
-          }}
-        >
+        <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 800 }}>
           Rescue Coordinator Control Center
         </h1>
-
-        <p
-          style={{
-            margin: "6px 0 0",
-            color: "#94A3B8",
-            fontSize: "13px",
-          }}
-        >
-          Emergency response management: dispatch field agents,
-          monitor rescue requests and coordinate rescue operations.
+        <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "13px" }}>
+          Emergency response management: dispatch field agents, monitor rescue requests and coordinate rescue operations.
         </p>
       </div>
 
@@ -250,7 +426,7 @@ const RescueCoordinatorDashboard = () => {
         </div>
       )}
 
-
+      {/* Quick Action Cards */}
       <div
         style={{
           display: "grid",
@@ -264,7 +440,7 @@ const RescueCoordinatorDashboard = () => {
           title="New Emergency"
           subtitle="Log Distress Call"
           color="#EF4444"
-          onClick={() => navigate("/pets")}
+          onClick={() => navigate("/rescue-requests?action=new")}
         />
 
         <QuickActionCard
@@ -291,11 +467,12 @@ const RescueCoordinatorDashboard = () => {
           onClick={async () => {
             addToast("Exporting rescue logs...", "info");
             await reportsService.generateAndDownloadReport({ report_type: "rescue", format: "csv" });
-            addToast("Rescue logs exported successfully!", "success");
+            addToast("Rescue logs exported successfully!", "info");
           }}
         />
       </div>
 
+      {/* Dynamic Interactive Stat Cards */}
       <div
         style={{
           display: "grid",
@@ -309,45 +486,230 @@ const RescueCoordinatorDashboard = () => {
         ))}
       </div>
 
-      <div className="soft-card" style={{ padding: "20px" }}>
+      {/* Dynamic Rescue Operations Table */}
+      <div id="rescue-table-section" className="soft-card" style={{ padding: "20px" }}>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
+            alignItems: "center",
             marginBottom: "16px",
+            flexWrap: "wrap",
+            gap: "12px",
           }}
         >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: "16px",
-              fontWeight: 700,
-            }}
-          >
-            My Assigned Cases
-          </h3>
-
-          {loading && (
-            <span style={{ color: "#2563EB", fontSize: "12px" }}>
-              Loading...
+          <div>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
+              {getTableTitle()}
+            </h3>
+            <span style={{ fontSize: "12px", color: "#64748B" }}>
+              Showing {displayData.length} records matching {activeCard} filter
             </span>
-          )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ position: "relative" }}>
+              <FaSearch style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8", fontSize: "13px" }} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search ticket, reporter, location..."
+                style={{
+                  padding: "8px 12px 8px 32px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  fontSize: "13px",
+                  outline: "none",
+                  width: "240px",
+                }}
+              />
+            </div>
+            {loading && (
+              <span style={{ color: "#2563EB", fontSize: "12px", fontWeight: 600 }}>
+                Loading...
+              </span>
+            )}
+          </div>
         </div>
 
         <DataTable
           columns={columns}
-          data={assignedCases}
+          data={displayData}
           loading={loading}
           error={error}
           onRetry={() => {
-            fetchAssignedCases();
-            fetchDashboard();
+            fetchCasesData();
           }}
-          emptyMessage="No rescue cases are assigned to you yet."
+          emptyMessage={getEmptyMessage()}
           renderRowActions={rowActions}
-          onRowClick={(row) => navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(row.id || ""))}`)}
+          onRowClick={(row) => handleRowClick(row)}
         />
       </div>
+
+      {/* Rescue Request Details Modal */}
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => setIsViewModalOpen(false)}
+        title={`Rescue Request Details${selectedRequest?.ticket ? ` — ${selectedRequest.ticket}` : ""}`}
+      >
+        {selectedRequest && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div>
+              <strong style={{ color: "#475569" }}>Reporter:</strong> {String(selectedRequest.reporter || "-")}
+              {selectedRequest.phone ? ` (${selectedRequest.phone})` : ""}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Location:</strong> {String(selectedRequest.location || "-")}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Priority / Severity:</strong>{" "}
+              <span
+                style={{
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                  color:
+                    selectedRequest.severity === "critical"
+                      ? "#DC2626"
+                      : selectedRequest.severity === "high"
+                      ? "#EA580C"
+                      : selectedRequest.severity === "medium"
+                      ? "#F59E0B"
+                      : "#16A34A",
+                }}
+              >
+                {String(selectedRequest.severity || "-")}
+              </span>
+              {Boolean(selectedRequest.is_urgent) && (
+                <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700 }}>
+                  URGENT
+                </span>
+              )}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Current Status:</strong> {rescueStatusBadge(String(selectedRequest.status || ""))}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Reported At:</strong> {String(selectedRequest.created_at || "-")}
+            </div>
+
+            {selectedRequest.rejection_rationale ? (
+              <div style={{ background: "#FEF2F2", padding: "10px 14px", borderRadius: "8px", border: "1px solid #FCA5A5" }}>
+                <strong style={{ color: "#DC2626" }}>Rejection Rationale:</strong> {String(selectedRequest.rejection_rationale)}
+              </div>
+            ) : null}
+
+            {selectedRequest.dispatch ? (
+              <div style={{ background: "#F5F3FF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #DDD6FE" }}>
+                <strong style={{ color: "#7C3AED" }}>Dispatch & Field Operations</strong>
+                <div style={{ marginTop: "6px", fontSize: "13px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {(selectedRequest.dispatch as Record<string, unknown>).assigned_vehicle_id || (selectedRequest.dispatch as Record<string, unknown>).vehicle_id ? (
+                    <div><strong>Vehicle:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_vehicle_id || (selectedRequest.dispatch as Record<string, unknown>).vehicle_id)}</div>
+                  ) : null}
+                  {(selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id ? (
+                    <div><strong>Driver:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id)}</div>
+                  ) : null}
+                  {(selectedRequest.dispatch as Record<string, unknown>).dispatched_at ? (
+                    <div><strong>Dispatched:</strong> {new Date(String((selectedRequest.dispatch as Record<string, unknown>).dispatched_at)).toLocaleString()}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Status-Specific Action Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+              {["reported", "pending"].includes(String(selectedRequest.status || "").toLowerCase()) && (
+                <>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => handleVerifyRequest(String(selectedRequest.id || ""))}
+                    style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    Verify Incident
+                  </button>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => handleEscalateRequest(String(selectedRequest.id || ""))}
+                    style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    Escalate
+                  </button>
+                </>
+              )}
+
+              {String(selectedRequest.status || "").toLowerCase() === "verified" && (
+                <>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => {
+                      setIsViewModalOpen(false);
+                      navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(selectedRequest.id || ""))}`);
+                    }}
+                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaTruck size={12} /> Accept Case & Dispatch Team
+                  </button>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => handleEscalateRequest(String(selectedRequest.id || ""))}
+                    style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    Escalate
+                  </button>
+                </>
+              )}
+
+              {String(selectedRequest.status || "").toLowerCase() === "dispatched" && (
+                <>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => handleLocatedRequest(String(selectedRequest.id || ""))}
+                    style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    Mark Located
+                  </button>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => handleEscalateRequest(String(selectedRequest.id || ""))}
+                    style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    Escalate
+                  </button>
+                </>
+              )}
+
+              {String(selectedRequest.status || "").toLowerCase() === "located" && (
+                <button
+                  disabled={isActionLoading}
+                  onClick={() => handleSecuredRequest(String(selectedRequest.id || ""))}
+                  style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                >
+                  Mark Secured
+                </button>
+              )}
+
+              {String(selectedRequest.status || "").toLowerCase() === "rescued" && (
+                <button
+                  disabled={isActionLoading}
+                  onClick={() => handleAdmittedRequest(String(selectedRequest.id || ""))}
+                  style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                >
+                  Admit to Centre
+                </button>
+              )}
+
+              {String(selectedRequest.status || "").toLowerCase() === "admitted" && (
+                <button
+                  onClick={() => window.open(`/public/dogs/${(selectedRequest.raw as Record<string, unknown>)?.dog_id || selectedRequest.id}`, "_blank")}
+                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaExternalLinkAlt size={12} /> View Dog Profile
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

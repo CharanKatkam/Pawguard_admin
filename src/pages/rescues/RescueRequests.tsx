@@ -57,11 +57,16 @@ const RescueRequests = () => {
   const { addToast } = useToast();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const tableSectionRef = useRef<HTMLDivElement>(null);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [targetRejectId, setTargetRejectId] = useState<string | null>(null);
+
   const [selectedRequest, setSelectedRequest] = useState<RescueRequestTableRow | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -138,7 +143,14 @@ const RescueRequests = () => {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") === "new") {
+      setIsAddModalOpen(true);
+    }
+    const statusParam = params.get("status");
+    if (statusParam) {
+      setStatusFilter(statusParam.toLowerCase());
+    }
     void fetchRequests();
     void fetchCoordinators();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,16 +199,31 @@ const RescueRequests = () => {
     }
   };
 
-  const handleReject = async (id: string) => {
-    const reason = window.prompt("Rejection reason (optional):") || undefined;
+  const openRejectModal = (req: RescueRequestTableRow) => {
+    setTargetRejectId(req.id);
+    setSelectedRequest(req);
+    setRejectionReason("");
+    setIsRejectModalOpen(true);
+  };
+
+  const handleRejectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetRejectId) return;
     try {
-      await rescueService.rejectRescueRequest(id, reason);
-      addToast("Request rejected.", "info");
+      setIsSubmitting(true);
+      await rescueService.rejectRescueRequest(targetRejectId, rejectionReason || undefined);
+      addToast("Rescue request rejected and closed.", "info");
+      setIsRejectModalOpen(false);
+      setIsViewModalOpen(false);
+      setRejectionReason("");
+      setTargetRejectId(null);
       fetchRequests();
       notifyDataChanged();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      addToast(e?.response?.data?.detail || "Failed to reject request", "error");
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to reject request", "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -343,6 +370,42 @@ const RescueRequests = () => {
         </span>
       ),
     },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (_val: unknown, row: RescueRequestTableRow) => (
+        <div style={{ display: "flex", gap: "6px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedRequest(row);
+              setIsViewModalOpen(true);
+            }}
+            style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+          >
+            View Details
+          </button>
+          {["reported", "pending", "new"].includes(row.status) && (isAdmin || isCoordinator) && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleVerify(row.id, row)}
+                style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFFFFF", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+              >
+                Verify
+              </button>
+              <button
+                type="button"
+                onClick={() => openRejectModal(row)}
+                style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#EF4444", color: "#FFFFFF", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+              >
+                Reject
+              </button>
+            </>
+          )}
+        </div>
+      ),
+    },
   ];
 
   const handleStatCardClick = (status: string) => {
@@ -353,8 +416,29 @@ const RescueRequests = () => {
   };
 
   const filteredRequests = requests.filter((r) => {
-    if (statusFilter === "all") return true;
-    return r.status === statusFilter;
+    const matchesStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "pending"
+        ? ["reported", "pending", "new"].includes(r.status)
+        : statusFilter === "rescued"
+        ? ["rescued", "located", "secured", "admitted", "completed"].includes(r.status)
+        : statusFilter === "rejected"
+        ? ["rejected", "failed", "invalid"].includes(r.status)
+        : r.status === statusFilter;
+
+    if (!matchesStatus) return false;
+    if (!searchQuery.trim()) return true;
+
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      String(r.ticket_number || "").toLowerCase().includes(q) ||
+      String(r.reporter || "").toLowerCase().includes(q) ||
+      String(r.phone || "").toLowerCase().includes(q) ||
+      String(r.location || "").toLowerCase().includes(q) ||
+      String(r.severity || "").toLowerCase().includes(q) ||
+      String(r.status || "").toLowerCase().includes(q)
+    );
   });
 
   return (
@@ -441,6 +525,45 @@ const RescueRequests = () => {
           onClick={() => handleStatCardClick("rejected")}
           selected={statusFilter === "rejected"}
         />
+      </div>
+
+      <div style={{ marginBottom: "16px", display: "flex", gap: "12px", alignItems: "center" }}>
+        <div style={{ position: "relative", flex: 1, maxWidth: "420px" }}>
+          <input
+            type="text"
+            placeholder="Search ticket, reporter, phone, location, status..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 14px 10px 36px",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
+              fontSize: "13px",
+              boxSizing: "border-box",
+            }}
+          />
+          <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }}>
+            🔍
+          </span>
+        </div>
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              background: "#FFFFFF",
+              color: "#64748B",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Clear Search
+          </button>
+        )}
       </div>
 
       <div ref={tableSectionRef}>
@@ -588,14 +711,10 @@ const RescueRequests = () => {
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
-              {selectedRequest.status === "reported" && isAdmin && (
+              {["reported", "pending", "new"].includes(selectedRequest.status) && (isAdmin || isCoordinator) && (
                 <>
-                  <Can permission="approve_rescue_requests">
-                    <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Verify</button>
-                  </Can>
-                  <Can permission="edit_rescue_requests">
-                    <button onClick={() => { handleReject(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Reject</button>
-                  </Can>
+                  <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Verify</button>
+                  <button onClick={() => { openRejectModal(selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Reject</button>
                 </>
               )}
               {selectedRequest.status === "verified" && isAdmin && (
@@ -717,6 +836,31 @@ const RescueRequests = () => {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
             <button type="submit" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Reject Request Confirmation Modal */}
+      <Modal isOpen={isRejectModalOpen} onClose={() => setIsRejectModalOpen(false)} title={`Reject Rescue Request${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}>
+        <form onSubmit={handleRejectSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+            Are you sure you want to reject this rescue request? Rejecting will close the request and update its status to <strong>REJECTED</strong>.
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Rejection Rationale / Reason (optional)</label>
+            <textarea
+              rows={3}
+              placeholder="Enter reason for rejecting this rescue call..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px", fontSize: "13px", boxSizing: "border-box" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", cursor: isSubmitting ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700 }}>
+              {isSubmitting ? "Rejecting..." : "Confirm Rejection"}
+            </button>
           </div>
         </form>
       </Modal>

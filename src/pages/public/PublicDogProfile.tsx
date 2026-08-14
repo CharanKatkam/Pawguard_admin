@@ -10,9 +10,19 @@ import {
   FaInfoCircle,
   FaPhoneAlt,
   FaCheckCircle,
+  FaUserCheck,
+  FaBan,
 } from "react-icons/fa";
 
+export interface PublicOwnerInfo {
+  name?: string;
+  contact?: string;
+  city?: string;
+  [key: string]: unknown;
+}
+
 export interface PublicDogData {
+  id?: string;
   name: string;
   breed: string;
   breed_classification?: string;
@@ -22,9 +32,16 @@ export interface PublicDogData {
   temperament: string | null;
   color: string | null;
   photo_gallery_urls: string[];
-  current_status: string;
+  current_status?: string;
+  status?: string;
   is_adoptable: boolean;
   registration_number: string;
+  safety_tag_status?: string;
+  is_tag_active?: boolean;
+  owner_name?: string;
+  adopter_name?: string;
+  public_owner?: PublicOwnerInfo;
+  [key: string]: unknown;
 }
 
 const PublicDogProfile = () => {
@@ -32,12 +49,12 @@ const PublicDogProfile = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // Extract ID from URL path or query string (?id=..., ?dog_id=..., ?token=...)
+  // Extract ID or Token from URL path or query string (?id=..., ?dog_id=..., ?token=...)
   const targetId =
     pathDogId ||
+    searchParams.get("token") ||
     searchParams.get("id") ||
     searchParams.get("dog_id") ||
-    searchParams.get("token") ||
     "";
 
   const [searchInput, setSearchInput] = useState(targetId);
@@ -59,8 +76,26 @@ const PublicDogProfile = () => {
       setDog(null);
 
       try {
-        const res = await petService.getPublicDogScan(query);
-        const data: PublicDogData = res?.data || res;
+        let data: PublicDogData | null = null;
+
+        // Try direct safety tag token scan first if token query parameter exists
+        if (searchParams.get("token")) {
+          try {
+            const tokenRes = await petService.scanSafetyTag(searchParams.get("token")!);
+            const raw = tokenRes?.data || tokenRes;
+            if (raw && (raw.name || raw.registration_number || raw.pet)) {
+              data = raw.pet || raw;
+            }
+          } catch {
+            /* Fall back to public dog scan */
+          }
+        }
+
+        if (!data) {
+          const res = await petService.getPublicDogScan(query);
+          data = res?.data || res;
+        }
+
         if (isSubscribed) {
           if (data && (data.name || data.registration_number)) {
             setDog(data);
@@ -91,7 +126,7 @@ const PublicDogProfile = () => {
     return () => {
       isSubscribed = false;
     };
-  }, [targetId]);
+  }, [targetId, searchParams]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,7 +135,14 @@ const PublicDogProfile = () => {
     }
   };
 
-  const isLost = dog?.current_status?.toLowerCase() === "lost";
+  const statusStr = String(dog?.current_status || dog?.status || "").toLowerCase();
+  const isLost = statusStr === "lost";
+  const isAdopted = statusStr === "adopted";
+  const isTagDeactivated = dog?.safety_tag_status === "INACTIVE" || dog?.safety_tag_status === "revoked" || dog?.is_tag_active === false;
+
+  // Extract privacy-safe owner details if provided by backend public scan API
+  const publicOwnerName = dog?.public_owner?.name || dog?.owner_name || dog?.adopter_name;
+  const publicOwnerContact = dog?.public_owner?.contact;
 
   return (
     <div
@@ -310,6 +352,26 @@ const PublicDogProfile = () => {
               boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3)",
             }}
           >
+            {/* Tag Deactivated Alert Banner */}
+            {isTagDeactivated && (
+              <div
+                style={{
+                  backgroundColor: "#7F1D1D",
+                  color: "#FECACA",
+                  padding: "14px 20px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  borderBottom: "1px solid #991B1B",
+                }}
+              >
+                <FaBan style={{ fontSize: "18px", flexShrink: 0 }} />
+                <span style={{ fontSize: "13px", fontWeight: 700 }}>
+                  ⚠️ SAFETY TAG DEACTIVATED: This Safety Tag has been deactivated or revoked by shelter administrators.
+                </span>
+              </div>
+            )}
+
             {/* Missing Pet Highlighted Alert Banner */}
             {isLost && (
               <div
@@ -365,28 +427,36 @@ const PublicDogProfile = () => {
                     letterSpacing: "0.03em",
                     backgroundColor: isLost
                       ? "rgba(220, 38, 38, 0.2)"
+                      : isAdopted
+                      ? "rgba(59, 130, 246, 0.25)"
                       : dog.is_adoptable
                       ? "rgba(16, 185, 129, 0.2)"
-                      : "rgba(59, 130, 246, 0.2)",
+                      : "rgba(100, 116, 139, 0.2)",
                     color: isLost
                       ? "#FCA5A5"
+                      : isAdopted
+                      ? "#93C5FD"
                       : dog.is_adoptable
                       ? "#34D399"
-                      : "#93C5FD",
+                      : "#CBD5E1",
                     border: `1px solid ${
                       isLost
                         ? "rgba(239, 68, 68, 0.4)"
+                        : isAdopted
+                        ? "rgba(59, 130, 246, 0.5)"
                         : dog.is_adoptable
                         ? "rgba(16, 185, 129, 0.4)"
-                        : "rgba(59, 130, 246, 0.4)"
+                        : "rgba(100, 116, 139, 0.4)"
                     }`,
                   }}
                 >
                   {isLost
                     ? "Missing / Lost"
+                    : isAdopted
+                    ? "Adoption Status: ADOPTED"
                     : dog.is_adoptable
                     ? "Available for Adoption"
-                    : String(dog.current_status || "In Facility Care").toUpperCase()}
+                    : "In Shelter Care"}
                 </span>
               </div>
             </div>
@@ -456,6 +526,41 @@ const PublicDogProfile = () => {
               </div>
             </div>
 
+            {/* ADOPTED DOG: CURRENT PET OWNER SECTION */}
+            {isAdopted && (
+              <div style={{ padding: "0 24px 24px" }}>
+                <div
+                  style={{
+                    backgroundColor: "#0F172A",
+                    border: "1px solid #3B82F6",
+                    borderRadius: "12px",
+                    padding: "16px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#60A5FA", marginBottom: "8px" }}>
+                    <FaUserCheck style={{ fontSize: "18px" }} />
+                    <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 800 }}>
+                      CURRENT PET OWNER
+                    </h3>
+                  </div>
+
+                  {publicOwnerName ? (
+                    <div style={{ fontSize: "13px", color: "#CBD5E1", display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <div><strong>Owner Name:</strong> {publicOwnerName}</div>
+                      {publicOwnerContact && <div><strong>Contact:</strong> {publicOwnerContact}</div>}
+                      <div style={{ fontSize: "11px", color: "#64748B", marginTop: "4px" }}>
+                        🔒 Exposing only backend-approved public identity records.
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "12px", color: "#94A3B8", fontStyle: "italic" }}>
+                      Public adoption owner information is not currently provided by the backend public API.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Lost & Found Workflow Notice & Action Buttons */}
             <div style={{ padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
               <div
@@ -500,7 +605,7 @@ const PublicDogProfile = () => {
                 >
                   <FaPhoneAlt /> Report Found Pet / Match Sighting
                 </button>
-              ) : dog.is_adoptable ? (
+              ) : !isAdopted && dog.is_adoptable ? (
                 <button
                   onClick={() => navigate("/adoptions")}
                   style={{

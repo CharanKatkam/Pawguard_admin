@@ -46,10 +46,10 @@ const AdoptionCoordinatorDashboard = () => {
     : [];
 
   const stats = [
-    { title: "Adoptions Completed", value: loading ? "..." : String(dashboardData?.adoptions_completed ?? dashboardData?.completedAdoptions ?? "0"), trend: "YoY Progress", color: "#10B981", icon: <FaHeart /> },
-    { title: "Pending Applications", value: loading ? "..." : String(dashboardData?.pending_applications ?? dashboardData?.pendingApplications ?? applicationsList.length), trend: "Queue", color: "#F59E0B", icon: <FaClipboardCheck /> },
-    { title: "Home Visits Scheduled", value: loading ? "..." : String(dashboardData?.home_visits ?? dashboardData?.homeVisits ?? "0"), trend: "Active Visits", color: "#2563EB", icon: <FaUserCheck /> },
-    { title: "Adoptable Dogs", value: loading ? "..." : String(dashboardData?.adoptable_dogs ?? dashboardData?.adoptableDogs ?? "0"), trend: "Ready", color: "#6366F1", icon: <FaFileContract /> },
+    { title: "Adoptions Completed", value: loading ? "..." : String(dashboardData?.adoptions_completed ?? dashboardData?.completedAdoptions ?? "0"), trend: "YoY Progress", color: "#10B981", icon: <FaHeart />, onClick: () => navigate("/adoptions") },
+    { title: "Pending Applications", value: loading ? "..." : String(dashboardData?.pending_applications ?? dashboardData?.pendingApplications ?? applicationsList.length), trend: "Queue", color: "#F59E0B", icon: <FaClipboardCheck />, onClick: () => navigate("/adoptions") },
+    { title: "Home Visits Scheduled", value: loading ? "..." : String(dashboardData?.home_visits ?? dashboardData?.homeVisits ?? "0"), trend: "Active Visits", color: "#2563EB", icon: <FaUserCheck />, onClick: () => navigate("/adoptions") },
+    { title: "Adoptable Dogs", value: loading ? "..." : String(dashboardData?.adoptable_dogs ?? dashboardData?.adoptableDogs ?? "0"), trend: "Ready", color: "#6366F1", icon: <FaFileContract />, onClick: () => navigate("/pets") },
   ];
 
   const columns = [

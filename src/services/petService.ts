@@ -132,6 +132,30 @@ export const petService = {
     return response.data;
   },
 
+  // GET /companion-pets/{pet_id}/safety-tag - authenticated Safety Tag metadata
+  getSafetyTagMetadata: async (petId: string) => {
+    const response = await api.get(`/companion-pets/${petId}/safety-tag`);
+    return response.data;
+  },
+
+  // POST /companion-pets/{pet_id}/safety-tag - provision/generate a new Safety Tag for a pet
+  provisionSafetyTag: async (petId: string) => {
+    const response = await api.post(`/companion-pets/${petId}/safety-tag`);
+    return response.data;
+  },
+
+  // DELETE /companion-pets/{pet_id}/safety-tag - revoke/deactivate a pet's Safety Tag
+  revokeSafetyTag: async (petId: string) => {
+    const response = await api.delete(`/companion-pets/${petId}/safety-tag`);
+    return response.data;
+  },
+
+  // POST /companion-pets/safety-tag/scan - public scan endpoint
+  scanSafetyTag: async (token: string) => {
+    const response = await api.post(`/companion-pets/safety-tag/scan`, { token });
+    return response.data;
+  },
+
   // GET /dogs/{dog_id}/public-scan - privacy-safe public dog QR scan
   getPublicDogScan: async (identifier: string) => {
     let clean = String(identifier || "").trim();
@@ -181,3 +205,4 @@ export const petService = {
 };
 
 export default petService;
+

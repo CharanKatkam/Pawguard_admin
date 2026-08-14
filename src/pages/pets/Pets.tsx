@@ -18,14 +18,14 @@ import {
   FaPrint,
   FaEye,
   FaStethoscope,
-  FaCopy,
   FaSearch,
   FaCheckCircle,
-  FaExternalLinkAlt,
+  FaSync,
 } from "react-icons/fa";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
 
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
 const GENDERS = ["male", "female", "unknown"];
@@ -120,6 +120,16 @@ const Pets = () => {
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
 
+  // Safety Tag lifecycle state
+  const [tagStatus, setTagStatus] = useState<string>("ACTIVE");
+  const [tagMetadata, setTagMetadata] = useState<Record<string, unknown> | null>(null);
+  const [rawToken, setRawToken] = useState<string | null>(null);
+  const [isProvisioning, setIsProvisioning] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
+  const [isDeactivateConfirmOpen, setIsDeactivateConfirmOpen] = useState(false);
+  const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
+  const [isRefreshingScanData, setIsRefreshingScanData] = useState(false);
+
   // Manual Token Lookup modal state
   const [isTokenLookupModalOpen, setIsTokenLookupModalOpen] = useState(false);
   const [inputToken, setInputToken] = useState("");
@@ -138,7 +148,7 @@ const Pets = () => {
   const unwrapList = (v: any) =>
     Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-  const dogId = (dog: any) => dog?.id || dog?.dog_id || "";
+  const dogId = (dog: any) => dog?.companion_pet_id || dog?.companion_pet?.id || dog?.id || dog?.dog_id || "";
 
   const formatDog = (dog: any) => ({
     ...dog,
@@ -226,6 +236,7 @@ const Pets = () => {
 
   useEffect(() => {
     if (searchParams.get("action") === "register") {
+      setIsRegisterModalOpen(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [searchParams]);
@@ -353,57 +364,64 @@ const Pets = () => {
     setQrBlob(null);
     setQrImageUrl(null);
     setQrError(null);
+    setTagMetadata(null);
+    setRawToken(null);
+    setTagStatus("INACTIVE");
     setIsQrModalOpen(true);
+
     try {
       setQrLoading(true);
-      const blob = await petService.getDogQrImage(id);
-      if (blob.size === 0) {
-        setQrError("The QR service returned an empty image. No QR could be generated for this dog.");
-        return;
-      }
 
-      // Check if blob is a JSON error response returned by server
-      if (blob.type === "application/json" || blob.type.includes("json")) {
-        const text = await blob.text();
-        try {
-          const parsed = JSON.parse(text);
-          const rawMsg = String(parsed?.error?.message || parsed?.detail || parsed?.message || "");
-          if (rawMsg.includes("FRONTEND_BASE_URL")) {
-            setQrError("Backend Configuration Error: The server QR generator requires FRONTEND_BASE_URL environment configuration on the backend deployment.");
-          } else {
-            setQrError(rawMsg || "Failed to generate QR from backend.");
+      // Check session or local storage for raw_token / QR image generated during provisioning
+      const savedToken = localStorage.getItem(`pawguard_safety_tag_token_${id}`) || sessionStorage.getItem(`pawguard_safety_tag_token_${id}`);
+      const savedQrDataUrl = localStorage.getItem(`pawguard_safety_tag_qr_${id}`);
+
+      if (savedToken || savedQrDataUrl) {
+        if (savedToken) setRawToken(savedToken);
+        const qrUrl = savedQrDataUrl || (savedToken ? await generateQrDataUrl(savedToken) : null);
+        if (qrUrl) {
+          setQrImageUrl(qrUrl);
+          if (savedToken) {
+            const blob = await generateQrBlob(savedToken);
+            setQrBlob(blob);
           }
-          return;
-        } catch {
-          /* not JSON, process as image below */
+          setTagStatus("ACTIVE");
         }
       }
 
-      setQrBlob(blob);
-      setQrImageUrl(URL.createObjectURL(blob));
+      // Fetch metadata from GET /api/v1/companion-pets/{pet_id}/safety-tag
+      try {
+        const metaRes = await petService.getSafetyTagMetadata(id);
+        const metaData = metaRes?.data || metaRes;
+        if (metaData) {
+          setTagMetadata(metaData);
+          if (metaData.status) {
+            setTagStatus(String(metaData.status).toUpperCase());
+          }
+        }
+      } catch (metaErr: unknown) {
+        const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
+        const status = e?.response?.status;
+        const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
+
+        if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
+          setQrError("Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.");
+        } else if (status === 403) {
+          setQrError("Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.");
+        } else if (apiMsg) {
+          setQrError(String(apiMsg));
+        }
+      }
     } catch (err: unknown) {
-      let msg = "Failed to retrieve QR code from backend service. Please check network connection.";
-      const e = err as { response?: { data?: unknown; status?: number } };
-      if (e?.response?.data instanceof Blob) {
-        try {
-          const text = await e.response.data.text();
-          const parsed = JSON.parse(text);
-          msg = parsed?.error?.message || parsed?.detail || parsed?.message || msg;
-        } catch {
-          /* use fallback msg */
-        }
-      } else if (e?.response?.data && typeof e.response.data === "object") {
-        const obj = e.response.data as Record<string, unknown>;
-        const errObj = obj.error as Record<string, unknown> | undefined;
-        msg = String(errObj?.message || obj.detail || obj.message || msg);
-      }
-
-      if (msg.includes("FRONTEND_BASE_URL")) {
-        msg = "Backend Configuration Error: The backend server requires FRONTEND_BASE_URL environment setup on Render/deployment server.";
+      let msg = "Failed to load Safety Tag metadata from backend service.";
+      const e = err as { response?: { data?: { error?: { message?: string }; message?: string }; status?: number } };
+      const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
+      if (apiMsg) msg = String(apiMsg);
+      if (e?.response?.status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
+        msg = "Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.";
       } else if (e?.response?.status === 403) {
-        msg = "Unauthorized: Your role does not have permission (shelter:update) to generate QR tags for shelter animals.";
+        msg = "Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.";
       }
-
       setQrError(msg);
     } finally {
       setQrLoading(false);
@@ -411,29 +429,121 @@ const Pets = () => {
   };
 
   const closeQrModal = () => {
-    if (qrImageUrl) URL.revokeObjectURL(qrImageUrl);
+    if (qrImageUrl && qrImageUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(qrImageUrl);
+    }
     setQrImageUrl(null);
     setQrBlob(null);
     setQrDog(null);
     setQrError(null);
+    setTagMetadata(null);
+    setRawToken(null);
+    setTagStatus("INACTIVE");
     setIsQrModalOpen(false);
+  };
+
+  const handleRefreshScanData = async () => {
+    if (!qrDog) return;
+    const id = dogId(qrDog);
+    if (!id) return;
+    setIsRefreshingScanData(true);
+    try {
+      const metaRes = await petService.getSafetyTagMetadata(id);
+      const metaData = metaRes?.data || metaRes;
+      if (metaData) {
+        setTagMetadata(metaData);
+        if (metaData.status) {
+          setTagStatus(String(metaData.status).toUpperCase());
+        }
+      }
+      addToast("Scan activity data refreshed from backend.", "success");
+    } catch {
+      addToast("Could not refresh scan activity data from backend.", "error");
+    } finally {
+      setIsRefreshingScanData(false);
+    }
+  };
+
+  const handleProvisionTag = async () => {
+    if (!qrDog) return;
+    const id = dogId(qrDog);
+    if (!id) return;
+    setIsProvisioning(true);
+    setQrError(null);
+
+    try {
+      // POST /api/v1/companion-pets/{pet_id}/safety-tag
+      const res = await petService.provisionSafetyTag(id);
+      const data = res?.data || res || {};
+      const token = data.raw_token || data.token || data.rawToken;
+
+      if (!token) {
+        throw new Error("Backend provisioning response did not include data.raw_token.");
+      }
+
+      // Store raw_token and rendered QR image in persistent storage
+      setRawToken(token);
+      sessionStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+      localStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+
+      // Generate client-side QR image directly encoding raw_token
+      const qrDataUrl = await generateQrDataUrl(token);
+      const blob = await generateQrBlob(token);
+
+      localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrDataUrl);
+      setQrImageUrl(qrDataUrl);
+      setQrBlob(blob);
+      setTagStatus("ACTIVE");
+      setTagMetadata({
+        token_prefix: data.token_prefix || String(token).slice(0, 8),
+        status: "ACTIVE",
+        created_at: new Date().toISOString(),
+        scans_count: 0,
+      });
+
+      setIsReProvisionConfirmOpen(false);
+      addToast(res?.message || `Safety Tag Provisioned! QR generated directly from raw_token.`, "success");
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { message?: string; response?: { data?: { error?: { message?: string }; message?: string } } };
+      const msg = e?.response?.data?.error?.message || e?.response?.data?.message || e?.message || "Failed to provision Safety Tag.";
+      addToast(msg, "error");
+      setQrError(msg);
+    } finally {
+      setIsProvisioning(false);
+    }
+  };
+
+  const handleDeactivateTag = async () => {
+    if (!qrDog) return;
+    const id = dogId(qrDog);
+    if (!id) return;
+    setIsDeactivating(true);
+    try {
+      const res = await petService.revokeSafetyTag(id);
+      addToast(res?.message || `Safety Tag deactivated for pet ${qrDog.name || id}.`, "success");
+      setTagStatus("INACTIVE");
+      setRawToken(null);
+      setQrImageUrl(null);
+      setQrBlob(null);
+      sessionStorage.removeItem(`pawguard_safety_tag_token_${id}`);
+      localStorage.removeItem(`pawguard_safety_tag_token_${id}`);
+      localStorage.removeItem(`pawguard_safety_tag_qr_${id}`);
+      setIsDeactivateConfirmOpen(false);
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: { message?: string }; message?: string } } };
+      const msg = e?.response?.data?.error?.message || e?.response?.data?.message || "Failed to deactivate Safety Tag.";
+      addToast(msg, "error");
+    } finally {
+      setIsDeactivating(false);
+    }
   };
 
   const handleDownloadQr = () => {
     if (!qrImageUrl || !qrDog) return;
-    const reg = qrDog.registration_number || qrDog.id || "dog";
-    const safeReg = String(reg).replace(/[^a-zA-Z0-9-_]/g, "_");
-    triggerDownload(qrImageUrl, `PawGuard_QR_${safeReg}.png`);
-  };
-
-  const handleCopyToken = (tokenStr: string) => {
-    if (!tokenStr) return;
-    try {
-      navigator.clipboard.writeText(tokenStr);
-      addToast("Safety token copied to clipboard!", "success");
-    } catch {
-      addToast(`Token: ${tokenStr}`, "info");
-    }
+    const dogName = qrDog.name ? String(qrDog.name).replace(/[^a-zA-Z0-9-_]/g, "_") : "Pet";
+    triggerDownload(qrImageUrl, `PawGuard_SafetyTag_${dogName}.png`);
   };
 
   const handleVerifyToken = async (e?: React.FormEvent) => {
@@ -511,14 +621,14 @@ const Pets = () => {
   };
 
   const handlePrintQr = async () => {
-    if (!qrBlob || !qrDog) return;
+    if ((!qrImageUrl && !qrBlob) || !qrDog) return;
     try {
-      const dataUrl = await blobToDataUrl(qrBlob);
+      const dataUrl = qrImageUrl || (qrBlob ? await blobToDataUrl(qrBlob) : "");
       const name = String(qrDog.name || "Dog");
       const registration = String(qrDog.registration_number || qrDog.id || "-");
       const breed = String(qrDog.breed || "-");
       const status = String(qrDog.status || "-");
-      const token = petService.formatSafetyToken(qrDog);
+      const tokenDisplay = rawToken || (tagMetadata?.token_prefix ? `${String(tagMetadata.token_prefix)}...` : petService.formatSafetyToken(qrDog));
       const win = window.open("", "_blank", "width=440,height=680");
       if (!win) {
         addToast("Popup blocked. Allow popups to print the QR code.", "error");
@@ -543,14 +653,14 @@ const Pets = () => {
           <body>
             <div class="card">
               <h1>PawGuard</h1>
-              <div class="sub">Official Dog Safety Tag</div>
+              <div class="sub">Official Pet Safety Tag</div>
               <p class="meta"><strong>Dog Name:</strong> ${escapeHtml(name)} &bull; <strong>Breed:</strong> ${escapeHtml(breed)}</p>
               <p class="meta"><strong>Dog ID:</strong> ${escapeHtml(registration)} &bull; <strong>Status:</strong> ${escapeHtml(status)}</p>
               <img class="qr" src="${dataUrl}" alt="Safety Tag QR Code"
                    onload="setTimeout(function(){ window.print(); }, 250);" />
-              <div class="token-box">TOKEN: ${escapeHtml(token)}</div>
-              <p class="meta">Scan QR or enter token at PawGuard portal to identify dog</p>
-              <div class="footer">PawGuard Rescue &amp; Shelter Management Network &bull; 1:1 Unified Token</div>
+              <div class="token-box">TOKEN: ${escapeHtml(String(tokenDisplay))}</div>
+              <p class="meta">Scan QR to view pet safety information</p>
+              <div class="footer">PawGuard Rescue &amp; Shelter Network &bull; Authoritative Safety Tag</div>
             </div>
           </body>
         </html>
@@ -1515,8 +1625,8 @@ const Pets = () => {
       <Modal
         isOpen={isQrModalOpen}
         onClose={closeQrModal}
-        title={qrDog?.name ? `QR Code — ${qrDog.name}` : "Dog Safety Tag & QR Code"}
-        maxWidth="500px"
+        title={qrDog?.name ? `Safety Tag & QR Code — ${qrDog.name}` : "Dog Safety Tag & QR Code"}
+        maxWidth="520px"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {qrDog && (
@@ -1537,25 +1647,82 @@ const Pets = () => {
                 </span>
                 <span
                   style={{
-                    padding: "4px 10px",
+                    padding: "4px 12px",
                     borderRadius: "999px",
                     fontSize: "11px",
-                    fontWeight: 700,
-                    background: "#EFF6FF",
-                    color: "#1E40AF",
-                    textTransform: "capitalize",
+                    fontWeight: 800,
+                    letterSpacing: "0.03em",
+                    background: tagStatus === "ACTIVE" ? "#DCFCE7" : "#FEE2E2",
+                    color: tagStatus === "ACTIVE" ? "#166534" : "#991B1B",
+                    border: tagStatus === "ACTIVE" ? "1px solid #86EFAC" : "1px solid #FCA5A5",
+                    textTransform: "uppercase",
                   }}
                 >
-                  Status: {qrDog.status || "Shelter"}
+                  Tag Status: {tagStatus}
                 </span>
               </div>
               <div style={{ fontSize: "13px", color: "#475569" }}>
-                <strong>Dog ID:</strong> <span style={{ fontFamily: "monospace" }}>{qrDog.registration_number || qrDog.id || "-"}</span>
+                <strong>Dog ID:</strong> <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{qrDog.registration_number || qrDog.id || "-"}</span>
               </div>
               <div style={{ fontSize: "13px", color: "#475569" }}>
                 <strong>Breed:</strong> {qrDog.breed || "-"} &nbsp;|&nbsp;{" "}
                 <strong>Gender:</strong> {qrDog.gender ? qrDog.gender.charAt(0).toUpperCase() + qrDog.gender.slice(1) : "-"}
               </div>
+
+              {tagMetadata && typeof tagMetadata === "object" && (
+                <div style={{ marginTop: "4px", paddingTop: "8px", borderTop: "1px dashed #CBD5E1", fontSize: "12px", color: "#64748B", display: "flex", justifyContent: "space-between" }}>
+                  <span>Created: {String(tagMetadata.created_at || tagMetadata.created_date || "Active").slice(0, 10)}</span>
+                  {Boolean(tagMetadata.token_prefix) && <span>Prefix: {String(tagMetadata.token_prefix)}</span>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SCAN ACTIVITY WATCH SECTION */}
+          {qrDog && (
+            <div
+              style={{
+                width: "100%",
+                background: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+                borderRadius: "10px",
+                padding: "12px 16px",
+                boxSizing: "border-box",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div style={{ textAlign: "left" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>
+                  Scan Activity
+                </div>
+                <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
+                  <strong>Total Scans:</strong> {String(tagMetadata?.scans_count ?? tagMetadata?.scan_count ?? 0)} &bull;{" "}
+                  <strong>Last Scanned:</strong> {tagMetadata?.last_scanned_at ? String(tagMetadata.last_scanned_at).slice(0, 16).replace("T", " ") : "Never"}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleRefreshScanData}
+                disabled={isRefreshingScanData}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "7px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  color: "#334155",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: isRefreshingScanData ? "not-allowed" : "pointer",
+                }}
+              >
+                <FaSync style={{ animation: isRefreshingScanData ? "spin 1s linear infinite" : "none" }} />
+                {isRefreshingScanData ? "Refreshing..." : "Refresh Scan Data"}
+              </button>
             </div>
           )}
 
@@ -1573,7 +1740,7 @@ const Pets = () => {
                 }}
               />
               <div style={{ marginTop: "12px", fontSize: "13px", color: "#64748B", fontWeight: 500 }}>
-                Fetching unique QR code from backend...
+                Fetching unique Safety Tag metadata from backend...
               </div>
             </div>
           )}
@@ -1608,7 +1775,7 @@ const Pets = () => {
                   cursor: "pointer",
                 }}
               >
-                Retry QR Generation
+                Retry Request
               </button>
             </div>
           )}
@@ -1617,156 +1784,355 @@ const Pets = () => {
             <div
               style={{
                 background: "#F8FAFC",
-                border: "1px dashed #CBD5E1",
-                color: "#64748B",
-                padding: "36px 20px",
-                borderRadius: "10px",
-                fontSize: "14px",
-                fontWeight: 600,
+                border: "1px solid #CBD5E1",
+                color: "#334155",
+                padding: "24px 20px",
+                borderRadius: "12px",
+                fontSize: "13px",
                 textAlign: "center",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "12px",
+                boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
               }}
             >
-              No QR code available for this dog yet.
+              {tagStatus === "ACTIVE" ? (
+                <>
+                  <div style={{ fontSize: "15px", fontWeight: 800, color: "#1E293B" }}>
+                    ℹ️ QR CODE NOT AVAILABLE ON THIS BROWSER
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "420px", lineHeight: 1.5 }}>
+                    Safety Tag is <strong>ACTIVE</strong> on backend, but the original QR token was issued previously and cannot be recovered after provisioning. To generate a new QR code for this pet, re-provision the Safety Tag below.
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsReProvisionConfirmOpen(true)}
+                      disabled={isProvisioning}
+                      style={{
+                        flex: 1,
+                        padding: "11px 16px",
+                        borderRadius: "8px",
+                        border: "none",
+                        background: "#6D28D9",
+                        color: "#FFFFFF",
+                        fontWeight: 700,
+                        fontSize: "13px",
+                        cursor: isProvisioning ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {isProvisioning ? "Provisioning..." : "Re-Provision Safety Tag"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsDeactivateConfirmOpen(true)}
+                      style={{
+                        flex: 1,
+                        padding: "11px 16px",
+                        borderRadius: "8px",
+                        border: "1px solid #FCA5A5",
+                        background: "#FEF2F2",
+                        color: "#991B1B",
+                        fontWeight: 700,
+                        fontSize: "13px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Deactivate Tag
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>
+                    This pet does not have an active Safety Tag yet.
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>
+                    Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleProvisionTag}
+                    disabled={isProvisioning}
+                    style={{
+                      padding: "11px 24px",
+                      borderRadius: "8px",
+                      border: "none",
+                      background: "#6D28D9",
+                      color: "#FFFFFF",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: isProvisioning ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
+                  </button>
+                </>
+              )}
             </div>
           )}
 
           {!qrLoading && !qrError && qrImageUrl && (
             <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "14px" }}>
-              {/* LARGE QR CODE */}
+              {tagStatus === "INACTIVE" && (
+                <div
+                  style={{
+                    width: "100%",
+                    background: "#FEF2F2",
+                    border: "1px solid #FCA5A5",
+                    color: "#991B1B",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    textAlign: "center",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  ⚠️ Safety Tag is INACTIVE. Scans will no longer resolve until re-provisioned.
+                </div>
+              )}
+
+              {/* PROMINENT CENTERED QR CODE */}
               <div
                 style={{
-                  padding: "16px",
+                  padding: "18px",
                   border: "2px solid #E2E8F0",
                   borderRadius: "16px",
                   background: "#FFFFFF",
-                  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.06)",
+                  boxShadow: "0 4px 14px rgba(15, 23, 42, 0.06)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  opacity: tagStatus === "INACTIVE" ? 0.4 : 1,
                 }}
               >
                 <img
                   src={qrImageUrl}
-                  alt={`QR Code tag for ${qrDog?.name || "Dog"}`}
+                  alt={`Safety Tag QR Code for ${qrDog?.name || "Dog"}`}
                   style={{ width: "240px", height: "240px", imageRendering: "pixelated", display: "block" }}
                 />
+                <div style={{ marginTop: "10px", fontSize: "12px", color: "#64748B", fontWeight: 600 }}>
+                  Scan this QR code to view pet safety information.
+                </div>
               </div>
 
-              {/* UNIQUE SAFETY TOKEN DISPLAY */}
-              {qrDog && (
-                <div
-                  style={{
-                    width: "100%",
-                    background: "#F1F5F9",
-                    border: "1px solid #CBD5E1",
-                    borderRadius: "10px",
-                    padding: "12px 16px",
-                    boxSizing: "border-box",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <div style={{ textAlign: "left" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>
-                      Unique Safety Token
-                    </div>
-                    <div style={{ fontSize: "15px", fontWeight: 800, color: "#6D28D9", fontFamily: "monospace", marginTop: "2px" }}>
-                      {petService.formatSafetyToken(qrDog)}
-                    </div>
-                  </div>
+              {/* ACTION BUTTONS */}
+              {tagStatus === "ACTIVE" ? (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", width: "100%" }}>
                   <button
                     type="button"
-                    onClick={() => handleCopyToken(petService.formatSafetyToken(qrDog))}
+                    onClick={handleDownloadQr}
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
+                      justifyContent: "center",
                       gap: "6px",
-                      padding: "8px 14px",
-                      borderRadius: "6px",
-                      border: "1px solid #C4B5FD",
-                      background: "#FFFFFF",
-                      color: "#6D28D9",
-                      fontSize: "12px",
+                      padding: "11px 14px",
+                      borderRadius: "8px",
+                      border: "none",
+                      background: "#6D28D9",
+                      color: "#FFF",
                       fontWeight: 700,
+                      fontSize: "13px",
                       cursor: "pointer",
                     }}
                   >
-                    <FaCopy /> Copy Token
+                    <FaDownload /> Download QR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintQr}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                      padding: "11px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid #C4B5FD",
+                      background: "#FFFFFF",
+                      color: "#6D28D9",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <FaPrint /> Print Safety Tag
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsReProvisionConfirmOpen(true)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                      padding: "11px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid #CBD5E1",
+                      background: "#FFFFFF",
+                      color: "#334155",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Re-Provision Tag
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsDeactivateConfirmOpen(true)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                      padding: "11px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid #FCA5A5",
+                      background: "#FEF2F2",
+                      color: "#991B1B",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Deactivate Tag
+                  </button>
+                </div>
+              ) : (
+                <div style={{ width: "100%" }}>
+                  <button
+                    type="button"
+                    onClick={handleProvisionTag}
+                    disabled={isProvisioning}
+                    style={{
+                      width: "100%",
+                      padding: "12px 16px",
+                      borderRadius: "8px",
+                      border: "none",
+                      background: "#6D28D9",
+                      color: "#FFF",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: isProvisioning ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {isProvisioning ? "Re-Provisioning..." : "Re-Provision Safety Tag"}
                   </button>
                 </div>
               )}
-
-              {/* ACTION BUTTONS */}
-              <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "center" }}>
-                <button
-                  type="button"
-                  onClick={handleDownloadQr}
-                  style={{
-                    flex: 1,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                    padding: "11px 16px",
-                    borderRadius: "8px",
-                    border: "none",
-                    background: "#6D28D9",
-                    color: "#FFF",
-                    fontWeight: 700,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
-                >
-                  <FaDownload /> Download QR
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePrintQr}
-                  style={{
-                    flex: 1,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                    padding: "11px 16px",
-                    borderRadius: "8px",
-                    border: "1px solid #C4B5FD",
-                    background: "#FFFFFF",
-                    color: "#6D28D9",
-                    fontWeight: 700,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
-                >
-                  <FaPrint /> Print Safety Tag
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const id = dogId(qrDog);
-                    if (id) {
-                      window.open(`/public-scan/${id}`, "_blank");
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                    padding: "11px 16px",
-                    borderRadius: "8px",
-                    border: "1px solid #2563EB",
-                    background: "#EFF6FF",
-                    color: "#2563EB",
-                    fontWeight: 700,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
-                >
-                  <FaExternalLinkAlt /> Preview Public Scan
-                </button>
-              </div>
             </div>
           )}
+        </div>
+      </Modal>
+
+      {/* Re-Provision Confirmation Modal */}
+      <Modal
+        isOpen={isReProvisionConfirmOpen}
+        onClose={() => setIsReProvisionConfirmOpen(false)}
+        title="Re-Provision Safety Tag?"
+        maxWidth="450px"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px 0" }}>
+          <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+            Re-provisioning this Safety Tag will generate a <strong>NEW raw token</strong> and invalidate the existing QR code tag for <strong>{qrDog?.name || "this pet"}</strong>.
+            <br />
+            <br />
+            The current QR code will no longer resolve for public scans. Continue?
+          </div>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setIsReProvisionConfirmOpen(false)}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: "#FFFFFF",
+                color: "#475569",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleProvisionTag}
+              disabled={isProvisioning}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "8px",
+                border: "none",
+                background: "#6D28D9",
+                color: "#FFFFFF",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: isProvisioning ? "not-allowed" : "pointer",
+              }}
+            >
+              {isProvisioning ? "Re-Provisioning..." : "Confirm Re-Provision"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Deactivate Safety Tag Confirmation Modal */}
+      <Modal
+        isOpen={isDeactivateConfirmOpen}
+        onClose={() => setIsDeactivateConfirmOpen(false)}
+        title="Deactivate Safety Tag?"
+        maxWidth="440px"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px 0" }}>
+          <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+            Are you sure you want to deactivate the Safety Tag for <strong>{qrDog?.name || "this pet"}</strong>?
+            <br />
+            <br />
+            Once deactivated, public QR scans will no longer resolve to this pet's profile until a new tag is provisioned.
+          </div>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setIsDeactivateConfirmOpen(false)}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: "#FFFFFF",
+                color: "#475569",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDeactivateTag}
+              disabled={isDeactivating}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "8px",
+                border: "none",
+                background: "#DC2626",
+                color: "#FFFFFF",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: isDeactivating ? "not-allowed" : "pointer",
+              }}
+            >
+              {isDeactivating ? "Deactivating..." : "Confirm Deactivation"}
+            </button>
+          </div>
         </div>
       </Modal>
 

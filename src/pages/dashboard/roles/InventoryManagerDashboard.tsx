@@ -49,10 +49,10 @@ const InventoryManagerDashboard = () => {
   useDataSync(fetchInventory);
 
   const stats = [
-    { title: "Total Inventory Units", value: loading ? "..." : String(summaryData?.total_items ?? summaryData?.totalItems ?? inventoryData.length), trend: "Categories", color: "#2563EB", icon: <FaBoxes /> },
-    { title: "Medicines & Vaccines", value: loading ? "..." : String(summaryData?.medicines_stock ?? summaryData?.medicinesStock ?? "0"), trend: "Medical Stock", color: "#10B981", icon: <FaPills /> },
-    { title: "Low Stock Alerts", value: loading ? "..." : String(summaryData?.low_stock_alerts ?? summaryData?.lowStockAlerts ?? "0"), trend: "Action Required", color: "#EF4444", icon: <FaExclamationTriangle /> },
-    { title: "Active Vendors", value: loading ? "..." : String(summaryData?.active_vendors ?? summaryData?.activeVendors ?? "0"), trend: "Suppliers", color: "#6366F1", icon: <FaTruck /> },
+    { title: "Total Inventory Units", value: loading ? "..." : String(summaryData?.total_items ?? summaryData?.totalItems ?? inventoryData.length), trend: "Categories", color: "#2563EB", icon: <FaBoxes />, onClick: () => navigate("/inventory") },
+    { title: "Medicines & Vaccines", value: loading ? "..." : String(summaryData?.medicines_stock ?? summaryData?.medicinesStock ?? "0"), trend: "Medical Stock", color: "#10B981", icon: <FaPills />, onClick: () => navigate("/inventory") },
+    { title: "Low Stock Alerts", value: loading ? "..." : String(summaryData?.low_stock_alerts ?? summaryData?.lowStockAlerts ?? "0"), trend: "Action Required", color: "#EF4444", icon: <FaExclamationTriangle />, onClick: () => navigate("/inventory") },
+    { title: "Active Vendors", value: loading ? "..." : String(summaryData?.active_vendors ?? summaryData?.activeVendors ?? "0"), trend: "Suppliers", color: "#6366F1", icon: <FaTruck />, onClick: () => navigate("/shelters") },
   ];
 
   const columns = [

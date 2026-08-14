@@ -29,6 +29,7 @@ import adoptionService, { toAdoptionStatus } from "../../services/adoptionServic
 import dogService from "../../services/dogService";
 import petService from "../../services/petService";
 import medicalService from "../../services/medicalService";
+import { generateQrDataUrl } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const StatusBadge = ({ status }: { status: string }) => {
@@ -123,38 +124,118 @@ const Adoptions = () => {
   // Unique Dog QR Code Modal state
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrDog, setQrDog] = useState<Record<string, unknown> | null>(null);
-  const [, setQrBlob] = useState<Blob | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
+  const [tagStatus, setTagStatus] = useState<string>("INACTIVE");
+  const [rawToken, setRawToken] = useState<string | null>(null);
+  const [isProvisioning, setIsProvisioning] = useState(false);
+
+  const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
 
   const openQrModal = async (dog: Record<string, unknown> | null) => {
     if (!dog) return;
-    const targetDogId = String(dog.id || dog.dog_id || dog.petId || dog.registration_number || "");
-    if (!targetDogId) {
-      addToast("Could not determine the dog record to generate a QR for.", "error");
+    const id = String(dog.companion_pet_id || (dog.companion_pet as any)?.id || dog.id || dog.dog_id || dog.petId || "");
+    if (!id) {
+      addToast("Could not determine the pet record ID for Safety Tag provisioning.", "error");
       return;
     }
+
     setQrDog(dog);
-    setQrBlob(null);
     setQrImageUrl(null);
     setQrError(null);
+    setRawToken(null);
+    setTagStatus("INACTIVE");
     setIsQrModalOpen(true);
+
     try {
       setQrLoading(true);
-      const blob = await petService.getDogQrImage(targetDogId);
-      if (blob && blob.size > 0 && !blob.type.includes("json")) {
-        setQrBlob(blob);
-        setQrImageUrl(URL.createObjectURL(blob));
-      } else {
-        const publicScanUrl = `${window.location.origin}/public-scan/${encodeURIComponent(targetDogId)}`;
-        setQrImageUrl(`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(publicScanUrl)}`);
+
+      // Check session or local storage strictly for authoritative raw_token
+      const savedToken =
+        localStorage.getItem(`pawguard_safety_tag_token_${id}`) ||
+        sessionStorage.getItem(`pawguard_safety_tag_token_${id}`);
+      const savedQrDataUrl = localStorage.getItem(`pawguard_safety_tag_qr_${id}`);
+
+      if (savedToken || savedQrDataUrl) {
+        if (savedToken) setRawToken(savedToken);
+        const qrUrl = savedQrDataUrl || (savedToken ? await generateQrDataUrl(savedToken) : null);
+        if (qrUrl) {
+          setQrImageUrl(qrUrl);
+          setTagStatus("ACTIVE");
+        }
       }
-    } catch {
-      const publicScanUrl = `${window.location.origin}/public-scan/${encodeURIComponent(targetDogId)}`;
-      setQrImageUrl(`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(publicScanUrl)}`);
+
+      // Check backend metadata for Safety Tag status
+      try {
+        const metaRes = await petService.getSafetyTagMetadata(id);
+        const metaData = metaRes?.data || metaRes;
+        if (metaData?.status) {
+          setTagStatus(String(metaData.status).toUpperCase());
+        }
+      } catch (metaErr: unknown) {
+        const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
+        const status = e?.response?.status;
+        const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
+
+        if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
+          setQrError("Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.");
+        } else if (apiMsg) {
+          setQrError(String(apiMsg));
+        }
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
+      const status = e?.response?.status;
+      const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
+      if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
+        setQrError("Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.");
+      } else {
+        setQrError(apiMsg || "Failed to load Safety Tag metadata.");
+      }
     } finally {
       setQrLoading(false);
+    }
+  };
+
+  const handleProvisionTag = async () => {
+    if (!qrDog) return;
+    const id = String(qrDog.id || qrDog.dog_id || qrDog.petId || "");
+    if (!id) return;
+
+    setIsProvisioning(true);
+    setQrError(null);
+
+    try {
+      // POST /api/v1/companion-pets/{pet_id}/safety-tag
+      const res = await petService.provisionSafetyTag(id);
+      const data = res?.data || res || {};
+      const token = data.raw_token || data.token || data.rawToken;
+
+      if (!token) {
+        throw new Error("Backend provisioning response did not include data.raw_token.");
+      }
+
+      setRawToken(token);
+      sessionStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+      localStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+
+      const qrDataUrl = await generateQrDataUrl(token);
+      localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrDataUrl);
+
+      setQrImageUrl(qrDataUrl);
+      setTagStatus("ACTIVE");
+      setIsReProvisionConfirmOpen(false);
+
+      addToast("Safety Tag Provisioned! QR generated directly from raw_token.", "success");
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { message?: string; response?: { data?: { error?: { message?: string }; message?: string } } };
+      const msg = e?.response?.data?.error?.message || e?.response?.data?.message || e?.message || "Failed to provision Safety Tag.";
+      addToast(msg, "error");
+      setQrError(msg);
+    } finally {
+      setIsProvisioning(false);
     }
   };
 
@@ -163,19 +244,19 @@ const Adoptions = () => {
       URL.revokeObjectURL(qrImageUrl);
     }
     setQrImageUrl(null);
-    setQrBlob(null);
     setQrDog(null);
     setQrError(null);
+    setRawToken(null);
+    setTagStatus("INACTIVE");
     setIsQrModalOpen(false);
   };
 
   const handleDownloadQr = () => {
     if (!qrImageUrl || !qrDog) return;
-    const reg = qrDog.registration_number || qrDog.id || "dog";
-    const safeReg = String(reg).replace(/[^a-zA-Z0-9-_]/g, "_");
+    const name = String(qrDog.name || "dog").replace(/[^a-zA-Z0-9-_]/g, "_");
     const link = document.createElement("a");
     link.href = qrImageUrl;
-    link.download = `PawGuard_QR_${safeReg}.png`;
+    link.download = `PawGuard_SafetyTag_${name}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1449,11 +1530,11 @@ const Adoptions = () => {
         </div>
       </Modal>
 
-      {/* Unique Dog QR Code Modal */}
+      {/* Unique Dog Safety Tag QR Code Modal */}
       <Modal
         isOpen={isQrModalOpen}
         onClose={closeQrModal}
-        title={`Unique Dog Safety QR — ${String(qrDog?.name || selectedApp?.petName || "Dog")}`}
+        title={`Official Safety Tag & QR Code — ${String(qrDog?.name || selectedApp?.petName || "Dog")}`}
         maxWidth="520px"
       >
         {qrDog && (
@@ -1463,44 +1544,62 @@ const Adoptions = () => {
                 {String(qrDog.name || selectedApp?.petName || "Unnamed Dog")}
               </h3>
               <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                Dog Registration / Tag ID:{" "}
-                <strong style={{ fontFamily: "monospace", color: "#2563EB" }}>
-                  {String(qrDog.registration_number || qrDog.id || "-")}
-                </strong>
+                Dog ID: <strong style={{ fontFamily: "monospace", color: "#2563EB" }}>{String(qrDog.registration_number || qrDog.id || "-")}</strong>
               </div>
             </div>
 
-            {/* QR Code Container */}
-            <div
-              style={{
-                background: "#F8FAFC",
-                border: "2px dashed #CBD5E1",
-                borderRadius: "16px",
-                padding: "20px",
-                width: "240px",
-                height: "240px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                position: "relative",
-              }}
-            >
-              {qrLoading ? (
-                <div style={{ color: "#2563EB", fontWeight: 600, fontSize: "14px" }}>Generating QR Code...</div>
-              ) : qrImageUrl ? (
-                <img
-                  src={qrImageUrl}
-                  alt="Dog Public Profile QR Code"
-                  style={{ width: "200px", height: "200px", objectFit: "contain" }}
-                />
-              ) : (
-                <div style={{ color: "#EF4444", fontSize: "12px", padding: "10px" }}>{qrError || "Unable to display QR code."}</div>
+            {/* Tag Status & Token Display Banner */}
+            <div style={{ width: "100%", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "10px 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "12px", color: "#64748B", fontWeight: 600 }}>Safety Tag Status:</span>
+                <span style={{ padding: "2px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 800, background: tagStatus === "ACTIVE" ? "#DCFCE7" : "#FEE2E2", color: tagStatus === "ACTIVE" ? "#166534" : "#991B1B", border: tagStatus === "ACTIVE" ? "1px solid #86EFAC" : "1px solid #FCA5A5" }}>
+                  {tagStatus}
+                </span>
+              </div>
+              {rawToken && (
+                <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#6D28D9", marginTop: "6px", fontWeight: 700 }}>
+                  Safety Token: {rawToken}
+                </div>
               )}
             </div>
 
-            <p style={{ margin: 0, fontSize: "13px", color: "#475569", fontWeight: 600 }}>
-              Scan this QR code to view this dog's public profile.
-            </p>
+            {/* QR Loading or Render or Error or Warning */}
+            {qrLoading ? (
+              <div style={{ color: "#2563EB", fontWeight: 600, fontSize: "14px", padding: "40px 0" }}>Loading Safety Tag metadata...</div>
+            ) : qrError ? (
+              <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", padding: "14px 16px", borderRadius: "10px", fontSize: "13px", fontWeight: 600, width: "100%", boxSizing: "border-box" }}>
+                ⚠️ {qrError}
+              </div>
+            ) : qrImageUrl ? (
+              <div style={{ padding: "16px", border: "2px solid #E2E8F0", borderRadius: "16px", background: "#FFFFFF" }}>
+                <img src={qrImageUrl} alt="Dog Safety Tag QR Code" style={{ width: "200px", height: "200px", objectFit: "contain" }} />
+                <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748B", fontWeight: 600 }}>Scan QR to resolve public safety profile.</div>
+              </div>
+            ) : (
+              <div style={{ background: "#F8FAFC", border: "1px solid #CBD5E1", color: "#334155", padding: "24px 20px", borderRadius: "12px", fontSize: "13px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", width: "100%", boxSizing: "border-box", boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)" }}>
+                {tagStatus === "ACTIVE" ? (
+                  <>
+                    <div style={{ fontSize: "15px", fontWeight: 800, color: "#1E293B" }}>
+                      ℹ️ QR CODE NOT AVAILABLE ON THIS BROWSER
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "420px", lineHeight: 1.5 }}>
+                      Safety Tag is <strong>ACTIVE</strong> on backend, but the original QR token was issued previously and cannot be recovered after provisioning. To generate a new QR code for this pet, re-provision the Safety Tag below.
+                    </div>
+                    <button type="button" onClick={() => setIsReProvisionConfirmOpen(true)} disabled={isProvisioning} style={{ width: "100%", padding: "11px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
+                      {isProvisioning ? "Provisioning..." : "Re-Provision Safety Tag"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>This pet does not have an active Safety Tag yet.</div>
+                    <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.</div>
+                    <button type="button" onClick={handleProvisionTag} disabled={isProvisioning} style={{ width: "100%", padding: "11px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
+                      {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "8px" }}>
@@ -1508,52 +1607,54 @@ const Adoptions = () => {
                 <button
                   type="button"
                   onClick={handleDownloadQr}
-                  style={{
-                    flex: 1,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                    padding: "10px 16px",
-                    borderRadius: "8px",
-                    border: "none",
-                    background: "#6D28D9",
-                    color: "#FFFFFF",
-                    fontWeight: 700,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
+                  style={{ flex: 1, padding: "10px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
                 >
                   <FaDownload /> Download QR
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  const dogId = String(qrDog.id || qrDog.registration_number || "");
-                  if (dogId) window.open(`/public-scan/${dogId}`, "_blank");
-                }}
-                style={{
-                  flex: 1,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "6px",
-                  padding: "10px 16px",
-                  borderRadius: "8px",
-                  border: "1px solid #2563EB",
-                  background: "#EFF6FF",
-                  color: "#2563EB",
-                  fontWeight: 700,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
-                <FaExternalLinkAlt /> Open Public Profile
-              </button>
+              {rawToken && (
+                <button
+                  type="button"
+                  onClick={() => window.open(`/scan-pet?token=${rawToken}`, "_blank")}
+                  style={{ flex: 1, padding: "10px 16px", borderRadius: "8px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#2563EB", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                >
+                  <FaExternalLinkAlt /> Open Public Scan
+                </button>
+              )}
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Re-Provision Confirmation Modal */}
+      <Modal
+        isOpen={isReProvisionConfirmOpen}
+        onClose={() => setIsReProvisionConfirmOpen(false)}
+        title="Re-Provision Safety Tag?"
+        maxWidth="450px"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px 0" }}>
+          <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+            This will generate a <strong>NEW Safety Tag token</strong> and invalidate the existing QR code for <strong>{String(qrDog?.name || "this pet")}</strong>. Any previously printed QR code will stop working. Continue?
+          </div>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setIsReProvisionConfirmOpen(false)}
+              style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleProvisionTag}
+              disabled={isProvisioning}
+              style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700 }}
+            >
+              {isProvisioning ? "Re-Provisioning..." : "Confirm Re-Provision"}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

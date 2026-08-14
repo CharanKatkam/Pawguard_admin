@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Column } from "../../components/common/DataTable";
 import DataTable from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
@@ -11,6 +12,7 @@ import {
   FaCheck,
   FaBan,
   FaSearch,
+  FaStethoscope,
 } from "react-icons/fa";
 import vetService from "../../services/vetService";
 import dogService from "../../services/dogService";
@@ -51,6 +53,7 @@ const badgeStyle = (bg: string, color: string): React.CSSProperties => ({
 });
 
 const VetAppointments = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"directory" | "appointments">("appointments");
 
   // Vet directory state
@@ -149,7 +152,7 @@ const VetAppointments = () => {
 
   const ownerName = (r: Row): string => {
     const val = pick(r, "owner_name", "user_name", "reporter_name", "owner_id", "user_id", "created_by");
-    return str(val) || "Mobile App User";
+    return str(val) || "PawGuard User";
   };
 
   const vetName = (r: Row): string => {
@@ -274,6 +277,16 @@ const VetAppointments = () => {
     { key: "vet", title: "Requested / Assigned Vet", render: (_, r) => vetName(r) },
     { key: "starts_at", title: "Date & Time", render: (v) => formatDate(v) },
     { key: "reason", title: "Reason for Visit", render: (v) => str(v) || "-" },
+    {
+      key: "source",
+      title: "Source / Channel",
+      render: (_, r) => {
+        const src = pick(r, "source", "channel", "platform", "booking_source");
+        return src ? (
+          <span style={badgeStyle("#EFF6FF", "#1D4ED8")}>{String(src).toUpperCase()}</span>
+        ) : null;
+      },
+    },
     { key: "notes", title: "Notes", render: (v) => str(v) || "-" },
     { key: "status", title: "Status", render: (v) => renderStatus(str(v)) },
   ];
@@ -284,6 +297,28 @@ const VetAppointments = () => {
     const canCancel = status !== "cancelled" && status !== "completed" && status !== "no_show";
     return (
       <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+        {(status === "requested" || status === "pending" || status === "confirmed") && (
+          <Can permission="edit_medical">
+            <button
+              onClick={() => navigate("/dashboard/veterinarian")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "none",
+                background: "#2563EB",
+                color: "#FFFFFF",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <FaStethoscope /> Consultation
+            </button>
+          </Can>
+        )}
         {(status === "requested" || status === "pending") && (
           <Can permission="edit_medical">
             <button
@@ -362,7 +397,7 @@ const VetAppointments = () => {
           Veterinary Appointments & Directory
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Received veterinary appointments submitted via the PawGuard Mobile App, clinic directory, and doctor inspection.
+          Received veterinary appointments submitted by PawGuard users through supported web and mobile channels.
         </p>
       </div>
 
@@ -377,7 +412,7 @@ const VetAppointments = () => {
         <QuickActionCard
           icon={<FaCalendarAlt />}
           title="Received Appointments"
-          subtitle="View mobile bookings"
+          subtitle="View user bookings"
           color="#10B981"
           onClick={() => setActiveTab("appointments")}
         />
@@ -411,10 +446,10 @@ const VetAppointments = () => {
           >
             <div>
               <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-                Received Mobile Appointments
+                Received Appointments
               </h3>
               <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748B" }}>
-                Appointments submitted by users through the Mobile App and routed via backend API.
+                Appointments submitted by PawGuard users through supported web and mobile channels.
               </p>
             </div>
             {appointmentsLoading && (
@@ -431,7 +466,7 @@ const VetAppointments = () => {
             error={appointmentsError}
             onRetry={() => void fetchAppointments()}
             renderRowActions={appointmentRowActions}
-            emptyMessage="No appointments received from the mobile app yet."
+            emptyMessage="No appointments received yet."
           />
         </div>
       )}
