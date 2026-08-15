@@ -78,12 +78,13 @@ const PublicDogProfile = () => {
       try {
         let data: PublicDogData | null = null;
 
-        // Try direct safety tag token scan first if token query parameter exists
-        if (searchParams.get("token")) {
+        // Try direct safety tag token scan first (via searchParams token or scanned raw_token query)
+        const tokenToScan = searchParams.get("token") || query;
+        if (tokenToScan) {
           try {
-            const tokenRes = await petService.scanSafetyTag(searchParams.get("token")!);
+            const tokenRes = await petService.scanSafetyTag(tokenToScan);
             const raw = tokenRes?.data || tokenRes;
-            if (raw && (raw.name || raw.registration_number || raw.pet)) {
+            if (raw && (raw.name || raw.registration_number || raw.pet || raw.id)) {
               data = raw.pet || raw;
             }
           } catch {

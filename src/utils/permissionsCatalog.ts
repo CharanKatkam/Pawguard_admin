@@ -197,6 +197,10 @@ const MODULE_ALIASES: Record<string, string> = {
   "lost-found": "lost_found",
   lost_and_found: "lost_found",
   audit: "audit_logs",
+  safety_tag: "animals",
+  safety_tags: "animals",
+  safetytag: "animals",
+  "safety-tag": "animals",
 };
 
 /** Backend action keys → frontend `PERMISSION_ACTIONS` keys. */

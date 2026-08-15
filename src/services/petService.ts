@@ -107,9 +107,10 @@ export const petService = {
     return response.data;
   },
 
-  // GET /dogs/{dog_id}/qr-image - staff-only dog profile QR image (image blob).
-  // Dynamically passes the production-safe frontend origin to ensure the QR code
-  // builds valid public scan URLs without relying on server-side environment overrides.
+  /**
+   * @deprecated Legacy backend QR image endpoint. PawGuard now uses client-side QR generation
+   * encoding the authoritative raw_token returned from POST /dogs/{dog_id}/safety-tag.
+   */
   getDogQrImage: async (dogId: string): Promise<Blob> => {
     const frontendBaseUrl =
       (import.meta.env.VITE_FRONTEND_BASE_URL as string) ||
@@ -132,21 +133,23 @@ export const petService = {
     return response.data;
   },
 
-  // GET /companion-pets/{pet_id}/safety-tag - authenticated Safety Tag metadata
-  getSafetyTagMetadata: async (petId: string) => {
-    const response = await api.get(`/companion-pets/${petId}/safety-tag`);
+  // GET /dogs/{dog_id}/safety-tag - authenticated Safety Tag metadata for Dog Master record
+  getSafetyTagMetadata: async (dogId: string) => {
+    const response = await api.get(`/dogs/${dogId}/safety-tag`);
     return response.data;
   },
 
-  // POST /companion-pets/{pet_id}/safety-tag - provision/generate a new Safety Tag for a pet
-  provisionSafetyTag: async (petId: string) => {
-    const response = await api.post(`/companion-pets/${petId}/safety-tag`);
+  // POST /dogs/{dog_id}/safety-tag - provision/generate a new permanent Safety Tag for a Dog Master record
+  // Pass forceReissue=true to force re-issuance (POST /dogs/{dog_id}/safety-tag?force_reissue=true)
+  provisionSafetyTag: async (dogId: string, forceReissue = false) => {
+    const url = forceReissue ? `/dogs/${dogId}/safety-tag?force_reissue=true` : `/dogs/${dogId}/safety-tag`;
+    const response = await api.post(url);
     return response.data;
   },
 
-  // DELETE /companion-pets/{pet_id}/safety-tag - revoke/deactivate a pet's Safety Tag
-  revokeSafetyTag: async (petId: string) => {
-    const response = await api.delete(`/companion-pets/${petId}/safety-tag`);
+  // DELETE /dogs/{dog_id}/safety-tag - revoke/deactivate a Dog Master record's Safety Tag
+  revokeSafetyTag: async (dogId: string) => {
+    const response = await api.delete(`/dogs/${dogId}/safety-tag`);
     return response.data;
   },
 
@@ -187,18 +190,12 @@ export const petService = {
 
   /**
    * Returns the exact, unaltered backend-authoritative safety token for a dog record.
-   * Priority: dog.raw_token -> dog.registration_number -> dog.id
+   * Strictly returns raw_token if available, otherwise "-". Never substitutes registration_number or dog.id as a token.
    */
   formatSafetyToken: (dog?: { id?: string; registration_number?: string; raw_token?: string } | null): string => {
     if (!dog) return "-";
     if (dog.raw_token && typeof dog.raw_token === "string" && dog.raw_token.trim()) {
       return dog.raw_token.trim().toUpperCase();
-    }
-    if (dog.registration_number && typeof dog.registration_number === "string" && dog.registration_number.trim() && dog.registration_number !== "-") {
-      return dog.registration_number.trim().toUpperCase();
-    }
-    if (dog.id && typeof dog.id === "string" && dog.id.trim()) {
-      return dog.id.trim();
     }
     return "-";
   },

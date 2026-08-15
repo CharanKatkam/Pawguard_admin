@@ -143,7 +143,7 @@ const ShelterManagerDashboard = () => {
   const unwrapList = (v: any) =>
     Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-  const dogId = (dog: any) => dog?.companion_pet_id || dog?.companion_pet?.id || dog?.id || dog?.dog_id || "";
+  const dogId = (dog: any) => dog?.dog_id || dog?.id || dog?.original_dog_id || dog?.companion_pet?.original_dog_id || dog?.companion_pet_id || dog?.companion_pet?.id || "";
 
   const formatDog = (dog: any) => {
     const id = dogId(dog);
@@ -419,13 +419,13 @@ const ShelterManagerDashboard = () => {
     setRawToken(null);
   };
 
-  const handleProvisionTag = async () => {
+  const handleProvisionTag = async (forceReissue = false) => {
     if (!qrDog) return;
     const id = dogId(qrDog);
     if (!id) return;
     setIsProvisioning(true);
     try {
-      const res = await petService.provisionSafetyTag(id);
+      const res = await petService.provisionSafetyTag(id, forceReissue);
       const data = res?.data || res || {};
       const token = data.raw_token || data.token || data.rawToken;
 
@@ -1543,7 +1543,7 @@ const ShelterManagerDashboard = () => {
                 <>
                   <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>This pet does not have an active Safety Tag yet.</div>
                   <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.</div>
-                  <button type="button" onClick={handleProvisionTag} disabled={isProvisioning} style={{ padding: "11px 24px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
+                  <button type="button" onClick={() => handleProvisionTag()} disabled={isProvisioning} style={{ padding: "11px 24px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
                     {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
                   </button>
                 </>
@@ -1568,7 +1568,7 @@ const ShelterManagerDashboard = () => {
                   <button type="button" onClick={() => setIsDeactivateConfirmOpen(true)} style={{ padding: "11px", borderRadius: "8px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Deactivate Tag</button>
                 </div>
               ) : (
-                <button type="button" onClick={handleProvisionTag} disabled={isProvisioning} style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px" }}>
+                <button type="button" onClick={() => handleProvisionTag(true)} disabled={isProvisioning} style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px" }}>
                   {isProvisioning ? "Re-Provisioning..." : "Re-Provision Safety Tag"}
                 </button>
               )}
@@ -1585,7 +1585,7 @@ const ShelterManagerDashboard = () => {
           </div>
           <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
             <button type="button" onClick={() => setIsReProvisionConfirmOpen(false)} style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
-            <button type="button" onClick={handleProvisionTag} disabled={isProvisioning} style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700 }}>
+            <button type="button" onClick={() => handleProvisionTag(true)} disabled={isProvisioning} style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700 }}>
               {isProvisioning ? "Re-Provisioning..." : "Confirm Re-Provision"}
             </button>
           </div>

@@ -60,6 +60,25 @@ export const dogService = {
     const response = await api.delete(`/dogs/${dogId}`);
     return response.data;
   },
+
+  // GET /dogs/{dog_id}/safety-tag - authenticated Safety Tag metadata for Dog Master record
+  getSafetyTagMetadata: async (dogId: string) => {
+    const response = await api.get(`/dogs/${dogId}/safety-tag`);
+    return response.data;
+  },
+
+  // POST /dogs/{dog_id}/safety-tag - provision/generate a permanent Safety Tag for a Dog Master record
+  provisionSafetyTag: async (dogId: string, forceReissue = false) => {
+    const url = forceReissue ? `/dogs/${dogId}/safety-tag?force_reissue=true` : `/dogs/${dogId}/safety-tag`;
+    const response = await api.post(url);
+    return response.data;
+  },
+
+  // DELETE /dogs/{dog_id}/safety-tag - revoke/deactivate a Dog Master record's Safety Tag
+  revokeSafetyTag: async (dogId: string) => {
+    const response = await api.delete(`/dogs/${dogId}/safety-tag`);
+    return response.data;
+  },
 };
 
 export default dogService;

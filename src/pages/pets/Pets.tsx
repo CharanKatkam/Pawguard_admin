@@ -148,7 +148,7 @@ const Pets = () => {
   const unwrapList = (v: any) =>
     Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-  const dogId = (dog: any) => dog?.companion_pet_id || dog?.companion_pet?.id || dog?.id || dog?.dog_id || "";
+  const dogId = (dog: any) => dog?.dog_id || dog?.id || dog?.original_dog_id || dog?.companion_pet?.original_dog_id || dog?.companion_pet_id || dog?.companion_pet?.id || "";
 
   const formatDog = (dog: any) => ({
     ...dog,
@@ -389,8 +389,16 @@ const Pets = () => {
         }
       }
 
-      // Fetch metadata from GET /api/v1/companion-pets/{pet_id}/safety-tag
+      // Fetch metadata from GET /api/v1/dogs/{dog_id}/safety-tag
       try {
+        console.log("[SAFETY TAG FINAL DEBUG]", {
+          dogId: dog?.id,
+          dog_id: (dog as any)?.dog_id,
+          original_dog_id: (dog as any)?.original_dog_id,
+          registration_number: dog?.registration_number,
+          resolvedId: id,
+          resolvedIdLength: String(id).length
+        });
         const metaRes = await petService.getSafetyTagMetadata(id);
         const metaData = metaRes?.data || metaRes;
         if (metaData) {
@@ -405,7 +413,8 @@ const Pets = () => {
         const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
 
         if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-          setQrError("Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.");
+          setTagStatus("INACTIVE");
+          setQrError(null);
         } else if (status === 403) {
           setQrError("Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.");
         } else if (apiMsg) {
@@ -418,7 +427,7 @@ const Pets = () => {
       const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
       if (apiMsg) msg = String(apiMsg);
       if (e?.response?.status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-        msg = "Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.";
+        msg = "Dog Master record not found. A valid Dog Master record must exist on the backend before a Safety Tag can be provisioned.";
       } else if (e?.response?.status === 403) {
         msg = "Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.";
       }
@@ -464,7 +473,13 @@ const Pets = () => {
     }
   };
 
-  const handleProvisionTag = async () => {
+  const handleCopyToken = () => {
+    if (!rawToken) return;
+    navigator.clipboard.writeText(rawToken);
+    addToast("Safety Tag token copied to clipboard!", "success");
+  };
+
+  const handleProvisionTag = async (forceReissue = false) => {
     if (!qrDog) return;
     const id = dogId(qrDog);
     if (!id) return;
@@ -472,8 +487,8 @@ const Pets = () => {
     setQrError(null);
 
     try {
-      // POST /api/v1/companion-pets/{pet_id}/safety-tag
-      const res = await petService.provisionSafetyTag(id);
+      // POST /api/v1/dogs/{dog_id}/safety-tag (or ?force_reissue=true)
+      const res = await petService.provisionSafetyTag(id, forceReissue);
       const data = res?.data || res || {};
       const token = data.raw_token || data.token || data.rawToken;
 
@@ -1675,6 +1690,32 @@ const Pets = () => {
                   {Boolean(tagMetadata.token_prefix) && <span>Prefix: {String(tagMetadata.token_prefix)}</span>}
                 </div>
               )}
+
+              {rawToken && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: "8px", padding: "8px 12px", marginTop: "6px" }}>
+                  <div style={{ fontSize: "12px", color: "#1E40AF" }}>
+                    <span style={{ fontWeight: 600 }}>Raw Token: </span>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{rawToken}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyToken}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #93C5FD",
+                      background: "#FFFFFF",
+                      color: "#1D4ED8",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Copy Token
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1853,7 +1894,7 @@ const Pets = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={handleProvisionTag}
+                    onClick={() => handleProvisionTag()}
                     disabled={isProvisioning}
                     style={{
                       padding: "11px 24px",
@@ -2009,7 +2050,7 @@ const Pets = () => {
                 <div style={{ width: "100%" }}>
                   <button
                     type="button"
-                    onClick={handleProvisionTag}
+                    onClick={() => handleProvisionTag(true)}
                     disabled={isProvisioning}
                     style={{
                       width: "100%",
@@ -2065,7 +2106,7 @@ const Pets = () => {
             </button>
             <button
               type="button"
-              onClick={handleProvisionTag}
+              onClick={() => handleProvisionTag(true)}
               disabled={isProvisioning}
               style={{
                 padding: "9px 16px",

@@ -135,9 +135,9 @@ const Adoptions = () => {
 
   const openQrModal = async (dog: Record<string, unknown> | null) => {
     if (!dog) return;
-    const id = String(dog.companion_pet_id || (dog.companion_pet as any)?.id || dog.id || dog.dog_id || dog.petId || "");
+    const id = String(dog.dog_id || dog.original_dog_id || (dog.companion_pet as any)?.original_dog_id || dog.id || (dog.companion_pet as any)?.id || dog.companion_pet_id || "");
     if (!id) {
-      addToast("Could not determine the pet record ID for Safety Tag provisioning.", "error");
+      addToast("Could not determine the Dog Master ID for Safety Tag provisioning.", "error");
       return;
     }
 
@@ -179,7 +179,7 @@ const Adoptions = () => {
         const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
 
         if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-          setQrError("Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.");
+          setQrError("Dog Master record not found. A valid Dog Master record must exist on the backend before a Safety Tag can be provisioned.");
         } else if (apiMsg) {
           setQrError(String(apiMsg));
         }
@@ -189,7 +189,7 @@ const Adoptions = () => {
       const status = e?.response?.status;
       const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
       if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-        setQrError("Companion Pet record not found. A Companion Pet record must exist on the backend before a Safety Tag can be provisioned.");
+        setQrError("Dog Master record not found. A valid Dog Master record must exist on the backend before a Safety Tag can be provisioned.");
       } else {
         setQrError(apiMsg || "Failed to load Safety Tag metadata.");
       }
@@ -198,17 +198,17 @@ const Adoptions = () => {
     }
   };
 
-  const handleProvisionTag = async () => {
+  const handleProvisionTag = async (forceReissue = false) => {
     if (!qrDog) return;
-    const id = String(qrDog.id || qrDog.dog_id || qrDog.petId || "");
+    const id = String(qrDog.dog_id || qrDog.original_dog_id || (qrDog.companion_pet as any)?.original_dog_id || qrDog.id || (qrDog.companion_pet as any)?.id || qrDog.companion_pet_id || "");
     if (!id) return;
 
     setIsProvisioning(true);
     setQrError(null);
 
     try {
-      // POST /api/v1/companion-pets/{pet_id}/safety-tag
-      const res = await petService.provisionSafetyTag(id);
+      // POST /api/v1/dogs/{dog_id}/safety-tag (or ?force_reissue=true)
+      const res = await petService.provisionSafetyTag(id, forceReissue);
       const data = res?.data || res || {};
       const token = data.raw_token || data.token || data.rawToken;
 
@@ -1593,7 +1593,7 @@ const Adoptions = () => {
                   <>
                     <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>This pet does not have an active Safety Tag yet.</div>
                     <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.</div>
-                    <button type="button" onClick={handleProvisionTag} disabled={isProvisioning} style={{ width: "100%", padding: "11px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
+                    <button type="button" onClick={() => handleProvisionTag()} disabled={isProvisioning} style={{ width: "100%", padding: "11px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
                       {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
                     </button>
                   </>
@@ -1647,7 +1647,7 @@ const Adoptions = () => {
             </button>
             <button
               type="button"
-              onClick={handleProvisionTag}
+              onClick={() => handleProvisionTag(true)}
               disabled={isProvisioning}
               style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700 }}
             >
