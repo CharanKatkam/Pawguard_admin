@@ -389,6 +389,7 @@ export const MODULE_VIEW_PERMISSIONS: Record<string, string> = {
   "/rescue-requests": "view_rescue_requests",
   "/rescue-dispatch": "view_rescue_dispatch",
   "/pets": "view_animals",
+  "/shelter-dogs": "view_animals",
   "/medical-records": "view_medical",
   "/vet-directory": "view_medical",
   "/medical-reminders": "view_medical",
@@ -428,6 +429,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
         { name: "Dog Management", path: "/pets", iconType: "pets" },
         { name: "Shelter Management", path: "/shelters", iconType: "shelters" },
+        { name: "Shelter Dogs", path: "/shelter-dogs", iconType: "pets" },
         { name: "Adoptions", path: "/adoptions", iconType: "adoptions" },
         { name: "Foster Care", path: "/fosters", iconType: "fosters" },
         { name: "Volunteers", path: "/volunteers", iconType: "volunteers" },
@@ -455,6 +457,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
         { name: "Dog Management", path: "/pets", iconType: "pets" },
         { name: "Shelter Management", path: "/shelters", iconType: "shelters" },
+        { name: "Shelter Dogs", path: "/shelter-dogs", iconType: "pets" },
         { name: "Staff & Users", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
@@ -503,10 +506,10 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "Shelter Facilities", path: "/shelters", iconType: "shelters" },
+        { name: "Shelter Dogs", path: "/shelter-dogs", iconType: "pets" },
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
         { name: "Shelter Staff", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
-        { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
         { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
 
 

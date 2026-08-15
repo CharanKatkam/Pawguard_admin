@@ -57,6 +57,7 @@ export const notificationService = {
     message: string;
     type?: string;
     targetRoles?: string[];
+    actionUrl?: string;
   }): Promise<void> => {
     const user = getCurrentUser();
     const userId = (user as any)?.id;
@@ -65,7 +66,7 @@ export const notificationService = {
         title: payload.title,
         body: payload.message,
         notification_type: payload.type || "general",
-        action_url: null,
+        action_url: payload.actionUrl || null,
         send_email: false,
         target_roles: payload.targetRoles,
       });
@@ -79,7 +80,7 @@ export const notificationService = {
       title: payload.title,
       body: payload.message,
       notification_type: payload.type || "general",
-      action_url: null,
+      action_url: payload.actionUrl || null,
       send_email: false,
     });
   },

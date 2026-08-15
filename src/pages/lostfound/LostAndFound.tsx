@@ -230,11 +230,13 @@ interface RegistryMatch {
   [key: string]: unknown;
 }
 
+export type NavigationTab = "overview" | "lost" | "found" | "matches" | "reunion_stories";
+
 const LostAndFound = () => {
   const { addToast } = useToast();
   const { can, role } = usePermissions();
 
-  const [activeTab, setActiveTab] = useState<ReportKind>("lost");
+  const [activeTab, setActiveTab] = useState<NavigationTab>("lost");
   const [reports, setReports] = useState<RegistryReport[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -247,6 +249,13 @@ const LostAndFound = () => {
   const [cardFilter, setCardFilter] = useState<CardFilter>("total");
 
   const [stats, setStats] = useState({ total: 0, lost: 0, found: 0, resolved: 0 });
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const [reunionStories, setReunionStories] = useState<any[]>([]);
+  const [reunionLoading, setReunionLoading] = useState(false);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -358,9 +367,24 @@ const LostAndFound = () => {
 
   const fetchStats = useCallback(async () => {
     try {
-      // The backend caps page_size at 100, so requesting 1000 records fails
-      // (422). Use a single row per call and read `meta.total`, plus a
-      // status-filtered call for the resolved count — all real backend data.
+      const backendStats = await lostFoundService.getLostFoundStats();
+      if (backendStats && typeof backendStats === "object" && (backendStats.total_lost !== undefined || backendStats.total_found !== undefined)) {
+        const lost = Number(backendStats.total_lost) || 0;
+        const found = Number(backendStats.total_found) || 0;
+        const resolved = Number(backendStats.total_reunions) || Number(backendStats.total_matches) || 0;
+        setStats({
+          total: lost + found,
+          lost,
+          found,
+          resolved,
+        });
+        return;
+      }
+    } catch {
+      /* fallback below */
+    }
+
+    try {
       const [lostRes, foundRes, lostResolvedRes, foundResolvedRes] = await Promise.all([
         lostFoundService.getLostReports({ page: 1, page_size: 1 }),
         lostFoundService.getFoundReports({ page: 1, page_size: 1 }),
@@ -376,7 +400,7 @@ const LostAndFound = () => {
         resolved: lostResolvedRes.meta.total + foundResolvedRes.meta.total,
       });
     } catch {
-      // Statistics are best-effort; list errors surface through the table state.
+      // Statistics best effort
     }
   }, []);
 
@@ -405,9 +429,64 @@ const LostAndFound = () => {
     return () => window.clearTimeout(timer);
   }, [fetchStats]);
 
-  const handleTabChange = (tab: ReportKind) => {
+  const fetchReunionStories = useCallback(async () => {
+    try {
+      setReunionLoading(true);
+      const stories = await lostFoundService.getReunionStories();
+      setReunionStories(stories);
+    } catch {
+      setReunionStories([]);
+    } finally {
+      setReunionLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "reunion_stories") {
+      void fetchReunionStories();
+    }
+  }, [activeTab, fetchReunionStories]);
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(reports.map((r) => r.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleToggleSelectOne = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      setBulkDeleting(true);
+      const targetKind = activeTab === "found" ? "found" : "lost";
+      await lostFoundService.bulkDeleteReports(selectedIds, targetKind);
+      addToast(`Successfully deleted ${selectedIds.length} ${targetKind} report(s).`, "success");
+      setSelectedIds([]);
+      setIsBulkDeleteModalOpen(false);
+      reloadAll();
+      notifyDataChanged();
+    } catch (err) {
+      addToast(extractError(err, "Failed to bulk delete reports"), "error");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const handleTabChange = (tab: NavigationTab) => {
     setActiveTab(tab);
-    setCardFilter(tab);
+    if (tab === "lost" || tab === "found") {
+      setCardFilter(tab);
+    } else if (tab === "overview") {
+      setCardFilter("total");
+    }
+    setSelectedIds([]);
     setPage(1);
   };
 
@@ -421,8 +500,9 @@ const LostAndFound = () => {
   const openDetails = (row: RegistryReport) => {
     setSelectedReport(row);
     const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
+    const fallbackKind: ReportKind = activeTab === "found" ? "found" : "lost";
     setSelectedReportKind(
-      rowKind === "found" || rowKind === "lost" ? rowKind : activeTab
+      rowKind === "found" || rowKind === "lost" ? rowKind : fallbackKind
     );
   };
 
@@ -566,7 +646,8 @@ const LostAndFound = () => {
   const openMatches = (report: RegistryReport) => {
     setSelectedReport(report);
     const rowKind = (report as RegistryReport & { _kind?: unknown })._kind;
-    const kind = rowKind === "found" || rowKind === "lost" ? rowKind : activeTab;
+    const fallbackKind: ReportKind = activeTab === "found" ? "found" : "lost";
+    const kind: ReportKind = rowKind === "found" || rowKind === "lost" ? rowKind : fallbackKind;
     setSelectedReportKind(kind);
     void refetchMatches(report.id, kind, true);
   };
@@ -799,11 +880,26 @@ const LostAndFound = () => {
     { key: "status", header: "Status", render: (val) => statusBadge(val) },
   ];
 
-  const columns = combined
+  const selectColumn: Column = {
+    key: "_select",
+    header: "Select",
+    render: (_v, row) => (
+      <input
+        type="checkbox"
+        checked={selectedIds.includes(row.id)}
+        onChange={() => handleToggleSelectOne(row.id)}
+        style={{ cursor: "pointer" }}
+      />
+    ),
+  };
+
+  const rawColumns = combined
     ? combinedColumns
     : activeTab === "lost"
       ? lostColumns
       : foundColumns;
+
+  const columns = can("lost_found", "delete") ? [selectColumn, ...rawColumns] : rawColumns;
 
   const hasActiveFilters = Boolean(search || statusFilter);
 
@@ -997,8 +1093,25 @@ const LostAndFound = () => {
             borderRadius: "10px",
             padding: "4px",
             gap: "4px",
+            flexWrap: "wrap",
           }}
         >
+          <button
+            onClick={() => handleTabChange("overview")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: "8px",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 700,
+              cursor: "pointer",
+              background: activeTab === "overview" ? "#FFFFFF" : "transparent",
+              color: activeTab === "overview" ? "#2563EB" : "#475569",
+              boxShadow: activeTab === "overview" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+            }}
+          >
+            Overview
+          </button>
           <button
             onClick={() => handleTabChange("lost")}
             style={{
@@ -1013,7 +1126,7 @@ const LostAndFound = () => {
               boxShadow: activeTab === "lost" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
             }}
           >
-            Lost Pet Reports
+            Lost Reports
           </button>
           <button
             onClick={() => handleTabChange("found")}
@@ -1029,26 +1142,60 @@ const LostAndFound = () => {
               boxShadow: activeTab === "found" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
             }}
           >
-            Found Pet Reports
+            Found Reports
+          </button>
+          <button
+            onClick={() => handleTabChange("matches")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: "8px",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 700,
+              cursor: "pointer",
+              background: activeTab === "matches" ? "#FFFFFF" : "transparent",
+              color: activeTab === "matches" ? "#2563EB" : "#475569",
+              boxShadow: activeTab === "matches" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+            }}
+          >
+            Matches
+          </button>
+          <button
+            onClick={() => handleTabChange("reunion_stories")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: "8px",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 700,
+              cursor: "pointer",
+              background: activeTab === "reunion_stories" ? "#FFFFFF" : "transparent",
+              color: activeTab === "reunion_stories" ? "#2563EB" : "#475569",
+              boxShadow: activeTab === "reunion_stories" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+            }}
+          >
+            Reunion Stories
           </button>
         </div>
 
-        <select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            if (cardFilter === "resolved") setCardFilter("total");
-            setPage(1);
-          }}
-          style={{ ...commonInputStyle, width: "auto", minWidth: "150px" }}
-        >
-          <option value="">All Statuses</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {titleCase(s)}
-            </option>
-          ))}
-        </select>
+        {activeTab !== "reunion_stories" && (
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              if (cardFilter === "resolved") setCardFilter("total");
+              setPage(1);
+            }}
+            style={{ ...commonInputStyle, width: "auto", minWidth: "150px" }}
+          >
+            <option value="">All Statuses</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {titleCase(s)}
+              </option>
+            ))}
+          </select>
+        )}
 
         {hasActiveFilters && (
           <button
@@ -1072,68 +1219,143 @@ const LostAndFound = () => {
             Clear Filters
           </button>
         )}
+
+        {reports.length > 0 && can("lost_found", "delete") && activeTab !== "reunion_stories" && (
+          <button
+            onClick={() => handleToggleSelectAll(selectedIds.length !== reports.length)}
+            style={{
+              padding: "8px 14px",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
+              background: "#FFFFFF",
+              color: "#475569",
+              fontSize: "13px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {selectedIds.length === reports.length ? "Deselect All" : "Select All"}
+          </button>
+        )}
       </div>
 
-      <div
-        style={{
-          fontSize: "13px",
-          fontWeight: 700,
-          color: "#64748B",
-          margin: "0 0 10px",
-        }}
-      >
-        {cardFilter === "resolved"
-          ? "Viewing: Resolved / reunited records"
-          : cardFilter === "lost"
-            ? "Viewing: Lost dog reports"
-            : cardFilter === "found"
-              ? "Viewing: Found dog reports"
-              : "Viewing: All lost & found records"}
-      </div>
+      {selectedIds.length > 0 && can("lost_found", "delete") && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 16px",
+            marginBottom: "12px",
+            background: "#FEF2F2",
+            border: "1px solid #FCA5A5",
+            borderRadius: "8px",
+          }}
+        >
+          <span style={{ fontSize: "13px", fontWeight: 700, color: "#991B1B" }}>
+            {selectedIds.length} report(s) selected
+          </span>
+          <button
+            onClick={() => setIsBulkDeleteModalOpen(true)}
+            style={{
+              background: "#DC2626",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: "6px",
+              padding: "6px 12px",
+              fontSize: "12px",
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              cursor: "pointer",
+            }}
+          >
+            <FaTrash size={12} /> Bulk Delete Selected ({selectedIds.length})
+          </button>
+        </div>
+      )}
 
-      <DataTable
-        data={reports}
-        columns={columns}
-        loading={loading}
-        error={error}
-        onRetry={() => void fetchReports()}
-        emptyMessage={
-          hasActiveFilters
-            ? "No reports match the current filters."
-            : "No active lost or found pet reports."
-        }
-        module="lost_found"
-        serverMode
-        totalCount={totalCount}
-        page={page}
-        onPageChange={setPage}
-        pageSize={PAGE_SIZE}
-        searchValue={search}
-        onSearchChange={setSearch}
-        renderRowActions={(row: RegistryReport) => {
-          const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
-          const kind = rowKind === "found" || rowKind === "lost" ? rowKind : activeTab;
-          return (
-            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => openDetails(row)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  padding: "5px 9px",
-                  borderRadius: "6px",
-                  border: "1px solid #93C5FD",
-                  background: "#EFF6FF",
-                  color: "#1D4ED8",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                <FaEye size={12} /> View
-              </button>
+      {activeTab === "reunion_stories" ? (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+              Reunion &amp; Success Stories
+            </h2>
+          </div>
+
+          {reunionLoading ? (
+            <div style={{ padding: "40px", textAlign: "center", color: "#64748B" }}>
+              <FaSpinner className="spin" size={24} />
+              <p style={{ marginTop: "8px" }}>Loading reunion stories...</p>
+            </div>
+          ) : reunionStories.length === 0 ? (
+            <div style={{ padding: "40px", textAlign: "center", background: "#F8FAFC", borderRadius: "12px", color: "#64748B" }}>
+              <FaHandshake size={32} style={{ color: "#94A3B8", marginBottom: "8px" }} />
+              <h3 style={{ fontSize: "16px", margin: "0 0 4px 0", color: "#334155" }}>No Reunion Stories Yet</h3>
+              <p style={{ fontSize: "14px", margin: 0 }}>Reunion stories from resolved matches will appear here.</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" }}>
+              {reunionStories.map((story) => (
+                <div
+                  key={story.id || Math.random()}
+                  style={{
+                    background: "#FFFFFF",
+                    border: "1px solid #E2E8F0",
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                  }}
+                >
+                  {story.hero_image_url && (
+                    <img
+                      src={story.hero_image_url}
+                      alt={story.title}
+                      style={{ width: "100%", height: "160px", objectFit: "cover" }}
+                    />
+                  )}
+                  <div style={{ padding: "16px" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#0F172A", margin: "0 0 8px 0" }}>
+                      {story.title}
+                    </h3>
+                    <p style={{ fontSize: "13px", color: "#475569", margin: "0 0 12px 0", lineHeight: "1.4" }}>
+                      {story.summary || story.body}
+                    </p>
+                    <div style={{ fontSize: "11px", color: "#94A3B8" }}>
+                      Published: {formatDate(story.published_at || story.created_at)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : activeTab === "matches" ? (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+              Pet Match Verification &amp; Claims Workspace
+            </h2>
+          </div>
+          <p style={{ fontSize: "14px", color: "#64748B", marginTop: "-8px", marginBottom: "16px" }}>
+            Select any report from the registry to view potential automated matches, submit/review ownership claims, or resolve matches.
+          </p>
+          <DataTable
+            data={reports}
+            columns={columns}
+            loading={loading}
+            error={error}
+            onRetry={() => void fetchReports()}
+            module="lost_found"
+            serverMode
+            totalCount={totalCount}
+            page={page}
+            onPageChange={setPage}
+            pageSize={PAGE_SIZE}
+            searchValue={search}
+            onSearchChange={setSearch}
+            renderRowActions={(row: RegistryReport) => (
               <button
                 type="button"
                 onClick={() => openMatches(row)}
@@ -1141,7 +1363,7 @@ const LostAndFound = () => {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "4px",
-                  padding: "5px 9px",
+                  padding: "5px 10px",
                   borderRadius: "6px",
                   border: "1px solid #C084FC",
                   background: "#F3E8FF",
@@ -1151,37 +1373,132 @@ const LostAndFound = () => {
                   cursor: "pointer",
                 }}
               >
-                <FaHandshake size={12} /> Matches
+                <FaHandshake size={12} /> View Matches
               </button>
-              {kind === "lost" && (
+            )}
+          />
+        </div>
+      ) : (
+        <DataTable
+          data={reports}
+          columns={columns}
+          loading={loading}
+          error={error}
+          onRetry={() => void fetchReports()}
+          emptyMessage={
+            hasActiveFilters
+              ? "No reports match the current filters."
+              : "No active lost or found pet reports."
+          }
+          module="lost_found"
+          serverMode
+          totalCount={totalCount}
+          page={page}
+          onPageChange={setPage}
+          pageSize={PAGE_SIZE}
+          searchValue={search}
+          onSearchChange={setSearch}
+          renderRowActions={(row: RegistryReport) => {
+            const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
+            const kind = rowKind === "found" || rowKind === "lost" ? rowKind : (activeTab === "found" ? "found" : "lost");
+            return (
+              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedReport(row);
-                    setSelectedReportKind("lost");
-                    void handleBroadcast();
-                  }}
+                  onClick={() => openDetails(row)}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "4px",
                     padding: "5px 9px",
                     borderRadius: "6px",
-                    border: "1px solid #BFDBFE",
+                    border: "1px solid #93C5FD",
                     background: "#EFF6FF",
-                    color: "#2563EB",
+                    color: "#1D4ED8",
                     fontSize: "12px",
                     fontWeight: 600,
                     cursor: "pointer",
                   }}
                 >
-                  <FaBroadcastTower size={12} /> Broadcast
+                  <FaEye size={12} /> View
                 </button>
-              )}
-            </div>
-          );
-        }}
-      />
+                <button
+                  type="button"
+                  onClick={() => openMatches(row)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "5px 9px",
+                    borderRadius: "6px",
+                    border: "1px solid #C084FC",
+                    background: "#F3E8FF",
+                    color: "#7E22CE",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaHandshake size={12} /> Matches
+                </button>
+                {kind === "lost" && (
+                  <Can permission="broadcast_lost_found">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedReport(row);
+                        setSelectedReportKind("lost");
+                        void handleBroadcast();
+                      }}
+                      disabled={broadcasting && selectedReport?.id === row.id}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "5px 9px",
+                        borderRadius: "6px",
+                        border: "1px solid #FCD34D",
+                        background: "#FEF3C7",
+                        color: "#B45309",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <FaBroadcastTower size={12} /> Broadcast
+                    </button>
+                  </Can>
+                )}
+                <Can permission="delete_lost_found">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedReport(row);
+                      setSelectedReportKind(kind);
+                      setIsDeleteConfirmOpen(true);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      padding: "5px 9px",
+                      borderRadius: "6px",
+                      border: "1px solid #FCA5A5",
+                      background: "#FEF2F2",
+                      color: "#DC2626",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <FaTrash size={12} /> Delete
+                  </button>
+                </Can>
+              </div>
+            );
+          }}
+        />
+      )}
 
       {selectedReport && (
         <Modal
@@ -2165,6 +2482,54 @@ const LostAndFound = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={isBulkDeleteModalOpen}
+        onClose={() => setIsBulkDeleteModalOpen(false)}
+        title={`Bulk Delete ${selectedIds.length} Reports`}
+      >
+        <div style={{ textAlign: "center", padding: "16px" }}>
+          <FaTrash size={36} style={{ color: "#EF4444", marginBottom: "12px" }} />
+          <h4 style={{ margin: "0 0 8px", fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
+            Delete {selectedIds.length} Selected {activeTab === "found" ? "Found" : "Lost"} Pet Reports?
+          </h4>
+          <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#64748B", lineHeight: 1.5 }}>
+            Are you sure you want to permanently bulk delete the selected {selectedIds.length} report(s)?
+            This operation sends a bulk request to the backend and cannot be undone.
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button
+              onClick={() => setIsBulkDeleteModalOpen(false)}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #CBD5E1",
+                background: "#FFF",
+                color: "#475569",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkDeleteConfirm}
+              disabled={bulkDeleting}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                background: "#DC2626",
+                color: "#FFF",
+                border: "none",
+                cursor: bulkDeleting ? "wait" : "pointer",
+                fontWeight: 700,
+              }}
+            >
+              {bulkDeleting ? "Deleting..." : `Delete ${selectedIds.length} Reports`}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

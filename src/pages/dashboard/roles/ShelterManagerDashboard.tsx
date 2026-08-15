@@ -681,17 +681,17 @@ const ShelterManagerDashboard = () => {
   const occupancyText = total_capacity > 0 ? `${Math.round((in_shelter_dogs / total_capacity) * 100)}%` : "N/A";
 
   const stats = [
-    { title: "Shelter Dogs", value: loading ? "..." : dashboardData.total_dogs, trend: `${dashboardData.adoptable_dogs} Adoptable`, color: "#2563EB", icon: <FaHome /> },
+    { title: "Shelter Dogs", value: loading ? "..." : dashboardData.total_dogs, trend: `${dashboardData.adoptable_dogs} Adoptable`, color: "#2563EB", icon: <FaHome />, onClick: () => navigate("/shelter-dogs") },
     { title: "Kennels", value: loading ? "..." : dashboardData.total_kennels, trend: "Registered Kennels", color: "#10B981", icon: <FaBed /> },
     { title: "Occupancy", value: loading ? "..." : occupancyText, trend: `${in_shelter_dogs} In Care / ${total_capacity} Capacity`, color: "#F59E0B", icon: <FaPaw /> },
-    { title: "Facilities", value: loading ? "..." : dashboardData.total_facilities, trend: "Shelter Centers", color: "#6366F1", icon: <FaUsers /> },
+    { title: "Facilities", value: loading ? "..." : dashboardData.total_facilities, trend: "Shelter Centers", color: "#6366F1", icon: <FaUsers />, onClick: () => navigate("/shelters") },
   ];
 
   const dogColumns = [
     {
       key: "name",
       title: "Dog Name & ID",
-      render: (row: any) => (
+      render: (_val: any, row: any) => (
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.name}</div>
           <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>ID: {row.registration_number}</div>
@@ -701,7 +701,7 @@ const ShelterManagerDashboard = () => {
     {
       key: "rescue_id",
       title: "Rescue ID",
-      render: (row: any) => (
+      render: (_val: any, row: any) => (
         <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#475569", fontWeight: 600 }}>
           {row.rescue_id}
         </span>
@@ -710,7 +710,7 @@ const ShelterManagerDashboard = () => {
     {
       key: "breed",
       title: "Breed & Sex",
-      render: (row: any) => (
+      render: (_val: any, row: any) => (
         <div>
           <div style={{ fontWeight: 600, color: "#334155" }}>{row.breed}</div>
           <div style={{ fontSize: "12px", color: "#64748B" }}>
@@ -723,7 +723,7 @@ const ShelterManagerDashboard = () => {
     {
       key: "medical_status",
       title: "Medical Status",
-      render: (row: any) => (
+      render: (_val: any, row: any) => (
         <span
           style={{
             padding: "3px 10px",
@@ -742,7 +742,7 @@ const ShelterManagerDashboard = () => {
     {
       key: "adoption_status",
       title: "Adoption Readiness",
-      render: (row: any) => (
+      render: (_val: any, row: any) => (
         <span
           style={{
             padding: "3px 10px",
@@ -760,7 +760,7 @@ const ShelterManagerDashboard = () => {
     {
       key: "tag_status_label",
       title: "Safety Tag",
-      render: (row: any) => (
+      render: (_val: any, row: any) => (
         <span
           style={{
             padding: "3px 10px",

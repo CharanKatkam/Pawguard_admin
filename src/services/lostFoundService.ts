@@ -235,6 +235,61 @@ export const lostFoundService = {
     });
     return response.data;
   },
+
+  getLostFoundStats: async () => {
+    try {
+      const response = await api.get("/admin/dashboard/lost-found-stats");
+      const data = response?.data?.data || response?.data;
+      return typeof data === "object" && data ? data : {};
+    } catch {
+      return {};
+    }
+  },
+
+  getLostReportById: async (id: string): Promise<LostReport> => {
+    const response = await api.get(`/lost-found/lost/${id}`);
+    return response.data?.data || response.data;
+  },
+
+  getFoundReportById: async (id: string): Promise<FoundReport> => {
+    const response = await api.get(`/lost-found/found/${id}`);
+    return response.data?.data || response.data;
+  },
+
+  bulkDeleteReports: async (ids: string[], kind: ReportKind = "lost") => {
+    const endpoint = kind === "found" ? "/lost-found/found/bulk/delete" : "/lost-found/lost/bulk/delete";
+    const response = await api.post(endpoint, { ids });
+    return response.data;
+  },
+
+  getReunionStories: async (): Promise<any[]> => {
+    try {
+      const response = await api.get("/lost-found/reunion-stories");
+      const list = Array.isArray(response?.data?.data)
+        ? response.data.data
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+      return list;
+    } catch {
+      try {
+        const fallback = await api.get("/lost-found/stories");
+        const list = Array.isArray(fallback?.data?.data)
+          ? fallback.data.data
+          : Array.isArray(fallback?.data)
+          ? fallback.data
+          : [];
+        return list;
+      } catch {
+        return [];
+      }
+    }
+  },
+
+  submitPetSighting: async (data: Record<string, unknown>) => {
+    const response = await api.post("/lost-found/sighting", data);
+    return response.data;
+  },
 };
 
 export default lostFoundService;

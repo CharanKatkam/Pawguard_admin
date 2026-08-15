@@ -31,11 +31,20 @@ const NotificationDropdown = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleMarkAsRead = async (notificationId: string) => {
-    try {
-      await markAsRead(notificationId);
-    } catch (err) {
-      console.error("Error marking notification as read:", err);
+  const handleNotificationClick = async (item: NotificationItem) => {
+    if (!item.read) {
+      void markAsRead(item.id);
+    }
+    setIsOpen(false);
+    const targetUrl = item.data?.action_url || (item as any).action_url;
+    if (targetUrl) {
+      navigate(targetUrl);
+    } else if (item.type === "medical") {
+      navigate("/veterinarian-dashboard?tab=shelter_requests");
+    } else if (item.type === "adoption") {
+      navigate("/adoptions");
+    } else if ((item.type as string) === "shelter") {
+      navigate("/shelter-dogs");
     }
   };
 
@@ -276,7 +285,7 @@ const NotificationDropdown = () => {
               notifications.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => !item.read && handleMarkAsRead(item.id)}
+                  onClick={() => handleNotificationClick(item)}
                   style={{
                     padding: "12px 16px",
                     borderBottom: "1px solid #F1F5F9",
@@ -285,7 +294,7 @@ const NotificationDropdown = () => {
                     gap: "12px",
                     alignItems: "flex-start",
                     transition: "background 0.15s ease",
-                    cursor: !item.read ? "pointer" : "default",
+                    cursor: "pointer",
                   }}
                   onMouseEnter={(e) => {
                     if (!item.read) {

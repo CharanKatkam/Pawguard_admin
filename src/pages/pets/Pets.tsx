@@ -796,7 +796,15 @@ const Pets = () => {
 
   const columns = [
     { key: "registration_number", title: "Dog ID" },
-    { key: "name", title: "Dog Name" },
+    {
+      key: "name",
+      title: "Dog Name",
+      render: (v: string) => (
+        <span style={{ fontWeight: 600, color: "#0F172A", wordBreak: "break-word", maxWidth: "240px", display: "inline-block" }}>
+          {v || "-"}
+        </span>
+      ),
+    },
     { key: "breed", title: "Breed" },
     {
       key: "gender",

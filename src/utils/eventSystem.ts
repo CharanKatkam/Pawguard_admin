@@ -23,6 +23,7 @@ export interface ActionEventPayload {
   message: string;
   user?: string;
   targetRoles?: UserRole[];
+  actionUrl?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -66,6 +67,7 @@ export async function publishActionEvent(payload: ActionEventPayload): Promise<v
       message: payload.message,
       type: (payload.module as any) || "system",
       targetRoles: payload.targetRoles,
+      actionUrl: payload.actionUrl,
     });
   } catch {
     // Fallback handled gracefully

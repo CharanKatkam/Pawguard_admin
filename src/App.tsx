@@ -8,6 +8,7 @@ import Dashboard from "./pages/dashboard/Dashboard";
 import Users from "./pages/users/Users";
 import Pets from "./pages/pets/Pets";
 import Shelters from "./pages/shelters/Shelters";
+import ShelterDogs from "./pages/shelters/ShelterDogs";
 import Adoptions from "./pages/adoptions/Adoptions";
 import Reports from "./pages/reports/Reports";
 import Settings from "./pages/settings/Settings";
@@ -172,6 +173,7 @@ function App() {
               }
             >
               <Route path="/pets" element={<Pets />} />
+              <Route path="/shelter-dogs" element={<ShelterDogs />} />
             </Route>
 
             <Route

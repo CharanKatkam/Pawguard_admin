@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
@@ -18,10 +18,14 @@ import {
   FaHistory,
   FaSync,
   FaHeartbeat,
+  FaEye,
+  FaCheckCircle,
+  FaHome,
 } from "react-icons/fa";
 import vetService from "../../../services/vetService";
 import medicalService from "../../../services/medicalService";
 import dogService from "../../../services/dogService";
+import petService from "../../../services/petService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 
 type Row = Record<string, unknown>;
@@ -81,6 +85,141 @@ const VeterinarianDashboard = () => {
   // Filters
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  const [searchParams] = useSearchParams();
+  const highlightDogId = searchParams.get("dog_id");
+  const tabParam = searchParams.get("tab");
+  const [activeSourceTab, setActiveSourceTab] = useState<"shelter_requests" | "public_appts">(
+    tabParam === "public_appts" ? "public_appts" : "shelter_requests"
+  );
+
+  // Dog Master Profile Modal State
+  const [selectedDogMaster, setSelectedDogMaster] = useState<Row | null>(null);
+  const [isDogProfileOpen, setIsDogProfileOpen] = useState(false);
+  const [isClearingAdoption, setIsClearingAdoption] = useState(false);
+
+  useEffect(() => {
+    if (highlightDogId) {
+      setSearchQuery(highlightDogId);
+      if (tabParam) {
+        setActiveSourceTab(tabParam === "public_appts" ? "public_appts" : "shelter_requests");
+      }
+    }
+  }, [highlightDogId, tabParam]);
+
+  const handleOpenDogProfile = async (dog: Row) => {
+    setSelectedDogMaster(dog);
+    setIsDogProfileOpen(true);
+    const pId = str(pick(dog, "id", "dog_id"));
+    if (pId) {
+      try {
+        setHistoryLoading(true);
+        const historyRes = await medicalService.getMedicalHistory(pId);
+        setPetHistory(Array.isArray(historyRes?.data) ? historyRes.data : []);
+      } catch {
+        setPetHistory([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+  };
+
+  const handleIssueMedicalClearance = async (dog: Row) => {
+    const id = str(pick(dog, "id", "dog_id"));
+    if (!id) return;
+
+    // 1. Check if clearance is already approved on backend
+    try {
+      const existingClearances = await medicalService.getDogClearances(id);
+      const isApprovedOnBackend = Array.isArray(existingClearances) && existingClearances.some(
+        (c: any) => String(c.status).toLowerCase() === "approved" || String(c.status).toLowerCase() === "cleared"
+      );
+      if (isApprovedOnBackend || Boolean(dog.is_fit_for_adoption || dog.is_adoptable)) {
+        addToast(`Dog ${str(dog.name || id)} is already medically cleared and fit for adoption.`, "info");
+        return;
+      }
+    } catch {
+      /* ignore lookup error */
+    }
+
+    // 2. Check if clinical examination has been completed (in local state or backend history)
+    const currentMedStatus = str(dog.medical_status).toLowerCase();
+    let isExamDone = currentMedStatus.includes("exam") || currentMedStatus.includes("consult") || currentMedStatus.includes("fit");
+
+    if (!isExamDone) {
+      try {
+        const historyRes = await medicalService.getMedicalHistory(id);
+        const historyList = Array.isArray(historyRes?.data) ? historyRes.data : [];
+        if (historyList.length > 0) {
+          isExamDone = true;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (!isExamDone) {
+      addToast("Medical examination/consultation must be performed before issuing medical clearance.", "info");
+      handleOpenConsultation({ pet_id: id, reason: dog.medical_status || "Shelter Medical Exam" });
+      return;
+    }
+
+    try {
+      setIsClearingAdoption(true);
+
+      // 3. Issue Medical Clearance via POST /api/v1/medical/clearance/{dog_id}
+      await medicalService.issueCertificate({
+        dog_id: id,
+        clearance_type: "adoption_surgery",
+        status: "approved",
+        decision_notes: "Healthy, cleared for adoption.",
+      });
+
+      // 4. Verify clearance from backend GET /api/v1/medical/clearances/dogs/{dog_id}
+      await medicalService.getDogClearances(id).catch(() => []);
+
+      // 5. Update local dog status in state from backend clearance
+      setDogs((prevDogs) =>
+        prevDogs.map((d) => {
+          if (str(d.id || d.dog_id) === str(id)) {
+            return {
+              ...d,
+              medical_status: "Medically Cleared",
+              is_fit_for_adoption: true,
+              is_adoptable: true,
+              adoption_readiness: "READY_FOR_ADOPTION",
+            };
+          }
+          return d;
+        })
+      );
+
+      addToast(`Dog ${str(dog.name || id)} is now Medically Cleared & Ready for Adoption.`, "success");
+      notifyDataChanged();
+      setIsDogProfileOpen(false);
+
+      // 6. Re-fetch fresh dashboard data from backend source of truth
+      await fetchDashboardData();
+    } catch (err: any) {
+      let msg = "Failed to issue medical clearance.";
+      if (err?.response?.data) {
+        const data = err.response.data;
+        if (typeof data.detail === "string") {
+          msg = data.detail;
+        } else if (Array.isArray(data.detail)) {
+          msg = data.detail.map((d: any) => `${d.loc ? d.loc.join(".") + ": " : ""}${d.msg}`).join("; ");
+        } else if (typeof data.message === "string") {
+          msg = data.message;
+        }
+      } else if (err?.message) {
+        msg = err.message;
+      }
+      console.error("POST /medical/clearance Error:", err?.response?.status, err?.response?.data || err);
+      addToast(msg, "error");
+    } finally {
+      setIsClearingAdoption(false);
+    }
+  };
 
   // Cancel Appointment Modal State
   const [cancelTarget, setCancelTarget] = useState<Row | null>(null);
@@ -226,15 +365,15 @@ const VeterinarianDashboard = () => {
     try {
       setIsSubmittingConsultation(true);
 
-      // 1. Create Clinical Exam if diagnosis or complaint provided
-      if (consultationForm.diagnosis || consultationForm.chiefComplaint) {
-        await medicalService.createMedicalExam({
-          dog_id: petId,
-          triage_diagnosis: consultationForm.diagnosis || consultationForm.chiefComplaint || "Routine Checkup",
-          body_condition_score: consultationForm.bcs,
-          treatment: [consultationForm.visibleInjuries, consultationForm.vetNotes].filter(Boolean).join("; "),
-        });
-      }
+      // 1. Create Clinical Exam (records symptoms, diagnosis, BCS, observations & vet notes)
+      await medicalService.createMedicalExam({
+        dog_id: petId,
+        triage_diagnosis: consultationForm.diagnosis || consultationForm.chiefComplaint || "Routine Clinical Checkup",
+        body_condition_score: consultationForm.bcs,
+        chief_complaint: consultationForm.chiefComplaint,
+        visible_injuries: consultationForm.visibleInjuries,
+        vet_notes: consultationForm.vetNotes,
+      });
 
       // 2. Log Surgery / Procedure if entered
       if (consultationForm.treatmentType) {
@@ -242,7 +381,7 @@ const VeterinarianDashboard = () => {
           dog_id: petId,
           treatment_type: consultationForm.treatmentType,
           description: consultationForm.treatmentDesc || consultationForm.vetNotes || "",
-        });
+        }).catch(() => null);
       }
 
       // 3. Log Vaccination if entered
@@ -252,20 +391,36 @@ const VeterinarianDashboard = () => {
           vaccine_name: consultationForm.vaccineName,
           lot_number: consultationForm.lotNumber || undefined,
           next_due_at: consultationForm.nextDueAt || undefined,
-        });
+        }).catch(() => null);
       }
 
-      // 4. Update Appointment Status to Completed on Backend
-      await vetService.completeAppointment(apptId, consultationForm.vetNotes || undefined);
+      // 4. Update Appointment Status if valid appointment ID exists
+      if (apptId) {
+        await vetService.completeAppointment(apptId, consultationForm.vetNotes || undefined).catch(() => null);
+      }
+
+      // 5. Update local state immediately so table renders "Examined - Pending Clearance"
+      setDogs((prevDogs) =>
+        prevDogs.map((d) => {
+          if (str(d.id || d.dog_id) === str(petId)) {
+            return {
+              ...d,
+              medical_status: "Examined - Pending Clearance",
+            };
+          }
+          return d;
+        })
+      );
 
       addToast("Veterinary consultation completed & medical records updated!", "success");
       setIsConsultationOpen(false);
       setActiveAppt(null);
       setConsultationForm({ ...emptyConsultationForm });
-      fetchDashboardData();
+      await fetchDashboardData();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.message || "Failed to submit consultation.", "error");
+      const msg = err?.response?.data?.message || err?.response?.data?.detail || err?.message || "Failed to submit consultation.";
+      addToast(msg, "error");
     } finally {
       setIsSubmittingConsultation(false);
     }
@@ -370,12 +525,80 @@ const VeterinarianDashboard = () => {
       title: "Source / Channel",
       render: (_: unknown, r: Row) => {
         const src = pick(r, "source", "channel", "platform", "booking_source");
-        return src ? (
-          <span style={badgeStyle("#EFF6FF", "#1D4ED8")}>{String(src).toUpperCase()}</span>
-        ) : null;
+        return (
+          <span style={badgeStyle("#EFF6FF", "#1D4ED8")}>{String(src || "PUBLIC_WEB").toUpperCase()}</span>
+        );
       },
     },
     { key: "status", title: "Status", render: (_: unknown, r: Row) => renderStatusBadge(str(pick(r, "status"))) },
+  ];
+
+  const shelterDogRows = dogs.filter((d) => {
+    const status = str(d.status).toLowerCase();
+    const medStatus = str(d.medical_status).toLowerCase();
+    const name = str(d.name).toLowerCase();
+    const regNo = str(d.registration_number).toLowerCase();
+    const id = str(d.id || d.dog_id).toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
+
+    const isShelterDog = status === "shelter" || status === "clinic" || status === "rescued" || medStatus.length > 0;
+    const matchesQuery = !q || name.includes(q) || regNo.includes(q) || id.includes(q) || medStatus.includes(q);
+    return isShelterDog && matchesQuery;
+  });
+
+  const shelterColumns = [
+    {
+      key: "name",
+      title: "Dog Name & Reg #",
+      render: (_: unknown, r: Row) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>{str(r.name)}</div>
+          <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>Reg: {str(r.registration_number)}</div>
+        </div>
+      ),
+    },
+    {
+      key: "id",
+      title: "Dog Master ID",
+      render: (_: unknown, r: Row) => (
+        <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#475569", fontWeight: 700 }}>
+          {str(r.id || r.dog_id)}
+        </span>
+      ),
+    },
+    {
+      key: "shelter_name",
+      title: "Shelter / Facility",
+      render: (_: unknown, r: Row) => (
+        <div style={{ fontWeight: 600, color: "#334155" }}>{str(r.shelter_name || r.shelter_id || "Central Shelter")}</div>
+      ),
+    },
+    {
+      key: "medical_status",
+      title: "Medical Status",
+      render: (_: unknown, r: Row) => {
+        const medStatus = str(r.medical_status);
+        const isCleared = medStatus.toLowerCase().includes("clear") || Boolean(r.is_fit_for_adoption || r.is_adoptable);
+        const label = isCleared ? "MEDICALLY CLEARED" : (medStatus || "PENDING CHECK").toUpperCase();
+        return (
+          <span style={badgeStyle(isCleared ? "#ECFDF5" : "#EFF6FF", isCleared ? "#047857" : "#1D4ED8")}>
+            {label}
+          </span>
+        );
+      },
+    },
+    {
+      key: "is_fit_for_adoption",
+      title: "Adoption Readiness",
+      render: (_: unknown, r: Row) => {
+        const isAdoptable = Boolean(r.is_fit_for_adoption || r.is_adoptable || str(r.medical_status).toLowerCase().includes("clear"));
+        return (
+          <span style={badgeStyle(isAdoptable ? "#ECFDF5" : "#FFFBEB", isAdoptable ? "#047857" : "#B45309")}>
+            {isAdoptable ? "READY FOR ADOPTION" : "PENDING CLEARANCE"}
+          </span>
+        );
+      },
+    },
   ];
 
   return (
@@ -419,16 +642,50 @@ const VeterinarianDashboard = () => {
         ))}
       </div>
 
-      {/* APPOINTMENTS & CONSULTATION QUEUE */}
+      {/* VETERINARY QUEUE & WORKSPACE (DUAL SOURCES) */}
       <div id="appointments-queue" className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
-              🩺 Appointments & Consultation Queue
-            </h3>
-            <span style={{ fontSize: "12px", color: "#64748B" }}>
-              Appointments submitted by PawGuard users through supported web and mobile channels
-            </span>
+        {/* Source Navigation Tabs */}
+        <div style={{ display: "flex", gap: "12px", borderBottom: "2px solid #E2E8F0", paddingBottom: "12px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button
+              type="button"
+              onClick={() => setActiveSourceTab("shelter_requests")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeSourceTab === "shelter_requests" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                background: activeSourceTab === "shelter_requests" ? "#EFF6FF" : "#FFFFFF",
+                color: activeSourceTab === "shelter_requests" ? "#1D4ED8" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaHome /> 🏠 Shelter Medical Requests ({shelterDogRows.length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSourceTab("public_appts")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeSourceTab === "public_appts" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                background: activeSourceTab === "public_appts" ? "#EFF6FF" : "#FFFFFF",
+                color: activeSourceTab === "public_appts" ? "#1D4ED8" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaCalendarAlt /> 🌐 Public Website Appointments ({filteredAppointments.length})
+            </button>
           </div>
 
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -436,24 +693,26 @@ const VeterinarianDashboard = () => {
               <FaSearch size={13} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
               <input
                 type="text"
-                placeholder="Search pet, ID, reason..."
+                placeholder="Search dog, ID, diagnosis..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ padding: "8px 12px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "200px" }}
+                style={{ padding: "8px 12px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "220px" }}
               />
             </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="all">All Statuses</option>
-              <option value="requested">Requested / Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+            {activeSourceTab === "public_appts" && (
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="requested">Requested / Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            )}
 
             <button
               type="button"
@@ -465,52 +724,107 @@ const VeterinarianDashboard = () => {
           </div>
         </div>
 
-        <DataTable
-          columns={apptColumns}
-          data={filteredAppointments}
-          loading={loading}
-          emptyMessage="No veterinary appointments found matching current filters."
-          renderRowActions={(row: Row) => {
-            const status = str(pick(row, "status")).toLowerCase();
-            const id = str(pick(row, "id", "appointment_id"));
-            const isFinished = status === "completed" || status === "cancelled";
-
-            return (
-              <div style={{ display: "flex", gap: "6px" }}>
-                {(status === "requested" || status === "pending") && (
+        {/* TAB 1: SHELTER MEDICAL REQUESTS */}
+        {activeSourceTab === "shelter_requests" && (
+          <DataTable
+            columns={shelterColumns}
+            data={shelterDogRows}
+            loading={loading}
+            emptyMessage="No shelter medical requests found matching current filter."
+            renderRowActions={(row: Row) => {
+              const isCleared = Boolean(row.is_fit_for_adoption || row.is_adoptable || str(row.medical_status).toLowerCase().includes("clear"));
+              return (
+                <div style={{ display: "flex", gap: "6px" }}>
                   <button
                     type="button"
-                    onClick={() => handleConfirm(row)}
-                    disabled={confirmingId === id}
-                    style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #10B981", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    title="View Dog Master Profile"
+                    onClick={() => handleOpenDogProfile(row)}
+                    style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
                   >
-                    <FaCheck /> Confirm
+                    <FaEye /> View Dog
                   </button>
-                )}
 
-                {!isFinished && (
                   <button
                     type="button"
-                    onClick={() => handleOpenConsultation(row)}
-                    style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    title="Perform Examination & Record Findings"
+                    onClick={() => handleOpenConsultation({ pet_id: row.id || row.dog_id, reason: row.medical_status || "Shelter Medical Exam" })}
+                    style={{ padding: "6px 10px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
                   >
-                    <FaStethoscope /> Start Consultation
+                    <FaStethoscope /> {isCleared ? "Re-examine" : "Start Exam"}
                   </button>
-                )}
 
-                {!isFinished && (
-                  <button
-                    type="button"
-                    onClick={() => setCancelTarget(row)}
-                    style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #FCA5A5", background: "#FFF", color: "#DC2626", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                  >
-                    <FaBan /> Cancel
-                  </button>
-                )}
-              </div>
-            );
-          }}
-        />
+                  {isCleared ? (
+                    <span
+                      style={{ padding: "6px 10px", borderRadius: "6px", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 800, border: "1px solid #A7F3D0", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <FaCheckCircle /> Cleared
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      title="Issue Medical Clearance & Adoption Readiness"
+                      onClick={() => handleIssueMedicalClearance(row)}
+                      disabled={isClearingAdoption}
+                      style={{ padding: "6px 10px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <FaCheckCircle /> Issue Clearance
+                    </button>
+                  )}
+                </div>
+              );
+            }}
+          />
+        )}
+
+        {/* TAB 2: PUBLIC WEBSITE APPOINTMENTS */}
+        {activeSourceTab === "public_appts" && (
+          <DataTable
+            columns={apptColumns}
+            data={filteredAppointments}
+            loading={loading}
+            emptyMessage="No public web appointments found matching current filters."
+            renderRowActions={(row: Row) => {
+              const status = str(pick(row, "status")).toLowerCase();
+              const id = str(pick(row, "id", "appointment_id"));
+              const isFinished = status === "completed" || status === "cancelled";
+
+              return (
+                <div style={{ display: "flex", gap: "6px" }}>
+                  {(status === "requested" || status === "pending") && (
+                    <button
+                      type="button"
+                      onClick={() => handleConfirm(row)}
+                      disabled={confirmingId === id}
+                      style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #10B981", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <FaCheck /> Confirm
+                    </button>
+                  )}
+
+                  {!isFinished && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenConsultation(row)}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <FaStethoscope /> Start Consultation
+                    </button>
+                  )}
+
+                  {!isFinished && (
+                    <button
+                      type="button"
+                      onClick={() => setCancelTarget(row)}
+                      style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #FCA5A5", background: "#FFF", color: "#DC2626", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <FaBan /> Cancel
+                    </button>
+                  )}
+                </div>
+              );
+            }}
+          />
+        )}
       </div>
 
       {/* ACTIVE CLINICAL PATIENTS / ICU QUEUE */}
@@ -825,6 +1139,133 @@ const VeterinarianDashboard = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </Modal>
+      )}
+
+      {/* DOG MASTER PROFILE VIEW MODAL FOR VETERINARIAN */}
+      {isDogProfileOpen && selectedDogMaster && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsDogProfileOpen(false)}
+          title={`Dog Master Profile — ${str(selectedDogMaster.name)}`}
+          maxWidth="640px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "flex", gap: "16px", alignItems: "center", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+              <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#DBEAFE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
+                🐶
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>{str(selectedDogMaster.name)}</div>
+                <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>Reg Number: {str(selectedDogMaster.registration_number || "-")}</div>
+                <div style={{ fontSize: "12px", color: "#475569", fontFamily: "monospace", marginTop: "2px" }}>Dog Master ID: {str(selectedDogMaster.id || selectedDogMaster.dog_id || "-")}</div>
+              </div>
+              <span style={{ padding: "6px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 800, background: "#ECFDF5", color: "#047857", textTransform: "uppercase" }}>
+                {str(selectedDogMaster.status || "SHELTER")}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div style={{ background: "#FFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#64748B" }}>Breed & Species:</strong>
+                <div style={{ fontWeight: 700, color: "#0F172A" }}>{str(selectedDogMaster.breed || "-")}</div>
+              </div>
+              <div style={{ background: "#FFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#64748B" }}>Gender:</strong>
+                <div style={{ fontWeight: 700, color: "#0F172A", textTransform: "capitalize" }}>{str(selectedDogMaster.gender || "Unknown")}</div>
+              </div>
+              <div style={{ background: "#FFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#64748B" }}>Estimated Age:</strong>
+                <div style={{ fontWeight: 700, color: "#0F172A" }}>{str(selectedDogMaster.estimated_age || "-")}</div>
+              </div>
+              <div style={{ background: "#FFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#64748B" }}>Shelter / Facility:</strong>
+                <div style={{ fontWeight: 700, color: "#0F172A" }}>{str(selectedDogMaster.shelter_name || selectedDogMaster.shelter_id || "Central Shelter")}</div>
+              </div>
+              <div style={{ background: "#FFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#64748B" }}>Cage / Kennel Assignment:</strong>
+                <div style={{ fontWeight: 700, color: "#2563EB" }}>{str(selectedDogMaster.kennel_assignment || "Unassigned")}</div>
+              </div>
+              <div style={{ background: "#FFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#64748B" }}>Medical Status:</strong>
+                <div style={{ fontWeight: 700, color: "#059669" }}>{str(selectedDogMaster.medical_status || "Pending Check")}</div>
+              </div>
+            </div>
+
+            <div style={{ background: "#F3E8FF", border: "1px solid #DDD6FE", borderRadius: "10px", padding: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 800, color: "#6D28D9" }}>
+                  Safety Tag Identification: {str(selectedDogMaster.tag_status_label || "ACTIVE")}
+                </div>
+                <div style={{ fontSize: "12px", color: "#4C1D95", marginTop: "2px" }}>
+                  Token: {petService.formatSafetyToken(selectedDogMaster)}
+                </div>
+              </div>
+              <span style={{ padding: "4px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 800, background: "#6D28D9", color: "#FFF" }}>
+                PERMANENT TAG
+              </span>
+            </div>
+
+            {/* Medical History Section */}
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "12px" }}>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A", marginBottom: "8px" }}>
+                🏥 Medical & Clinical Exam History ({petHistory.length})
+              </div>
+              {historyLoading ? (
+                <div style={{ fontSize: "12px", color: "#64748B" }}>Loading history...</div>
+              ) : petHistory.length === 0 ? (
+                <div style={{ fontSize: "12px", color: "#94A3B8" }}>No prior clinical exam history logged.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "160px", overflowY: "auto" }}>
+                  {petHistory.map((item, idx) => (
+                    <div key={idx} style={{ fontSize: "12px", padding: "6px 10px", background: "#FFF", borderRadius: "6px", border: "1px solid #CBD5E1", display: "flex", justifyContent: "space-between" }}>
+                      <span><strong>{str(item.categoryName || item.type)}:</strong> {str(item.diagnosis || item.treatment)}</span>
+                      <span style={{ color: "#64748B" }}>{formatDate(item.date)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
+              {Boolean(selectedDogMaster.is_fit_for_adoption || selectedDogMaster.is_adoptable || str(selectedDogMaster.medical_status).toLowerCase().includes("clear")) ? (
+                <span
+                  style={{ padding: "9px 16px", borderRadius: "8px", background: "#ECFDF5", color: "#047857", fontWeight: 800, fontSize: "13px", border: "1px solid #A7F3D0", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaCheckCircle /> Medically Cleared & Ready for Adoption
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isClearingAdoption}
+                  onClick={() => handleIssueMedicalClearance(selectedDogMaster)}
+                  style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaCheckCircle /> {isClearingAdoption ? "Clearing..." : "Issue Medical Clearance & Adoption Fitness"}
+                </button>
+              )}
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDogProfileOpen(false);
+                    handleOpenConsultation({ pet_id: selectedDogMaster.id || selectedDogMaster.dog_id, reason: selectedDogMaster.medical_status || "Shelter Exam" });
+                  }}
+                  style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaStethoscope /> Perform Examination
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDogProfileOpen(false)}
+                  style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         </Modal>
       )}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   FaBell,
   FaEnvelopeOpen,
@@ -60,6 +60,7 @@ const typeColor = (type: string): string => {
 
 const Notifications = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [isSendModalOpen, setIsSendModalOpen] = useState(() => searchParams.get("action") === "send");
   const { addToast } = useToast();
   const {
@@ -79,9 +80,21 @@ const Notifications = () => {
     }
   }, [searchParams]);
 
-  const handleOpen = async (id: string) => {
+  const handleOpen = async (n: any) => {
     try {
-      await markAsRead(id);
+      if (!n.read) {
+        await markAsRead(n.id);
+      }
+      const targetUrl = n.data?.action_url || n.action_url;
+      if (targetUrl) {
+        navigate(targetUrl);
+      } else if (n.type === "medical") {
+        navigate("/veterinarian-dashboard?tab=shelter_requests");
+      } else if (n.type === "adoption") {
+        navigate("/adoptions");
+      } else if (n.type === "shelter") {
+        navigate("/shelter-dogs");
+      }
     } catch {
       /* ignore */
     }
@@ -197,6 +210,7 @@ const Notifications = () => {
               return (
                 <li
                   key={n.id}
+                  onClick={() => handleOpen(n)}
                   style={{
                     display: "flex",
                     gap: "14px",
@@ -205,6 +219,7 @@ const Notifications = () => {
                     borderRadius: "12px",
                     background: n.read ? "#F8FAFC" : "#EFF6FF",
                     border: `1px solid ${n.read ? "#E2E8F0" : "#BFDBFE"}`,
+                    cursor: "pointer",
                   }}
                 >
                   <div
@@ -238,15 +253,15 @@ const Notifications = () => {
                   <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                     {!n.read && (
                       <button
-                        onClick={() => handleOpen(n.id)}
-                        title="Mark as read"
+                        onClick={(e) => { e.stopPropagation(); handleOpen(n); }}
+                        title="Mark as read & open"
                         style={{ border: "1px solid #E2E8F0", background: "#FFFFFF", color: "#2563EB", padding: "8px", borderRadius: "8px", cursor: "pointer", fontSize: 13 }}
                       >
                         <FaEnvelopeOpen />
                       </button>
                     )}
                     <button
-                      onClick={() => handleDelete(n.id)}
+                      onClick={(e) => { e.stopPropagation(); handleDelete(n.id); }}
                       title="Delete"
                       style={{ border: "1px solid #FECACA", background: "#FEF2F2", color: "#EF4444", padding: "8px", borderRadius: "8px", cursor: "pointer", fontSize: 13 }}
                     >

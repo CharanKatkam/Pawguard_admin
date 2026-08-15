@@ -173,18 +173,35 @@ export const medicalService = {
   createMedicalExam: async (data: Record<string, unknown>) => {
     const dogId = pick(data, "dog_id", "dogId", "petName");
     if (!dogId) throw new Error("Dog selection is required to record a clinical exam.");
+
+    const diagnosis = pick(data, "triage_diagnosis", "diagnosis", "chiefComplaint") || "Routine Clinical Checkup";
+    const bcs = Number(pick(data, "body_condition_score", "bodyConditionScore", "bcs")) || 5;
+
+    const notesParts: string[] = [];
+    const chiefComplaint = pick(data, "chief_complaint", "chiefComplaint");
+    if (chiefComplaint) notesParts.push(`Complaint: ${chiefComplaint}`);
+    const visibleInjuries = pick(data, "visible_injuries", "visibleInjuries", "treatment");
+    if (visibleInjuries) notesParts.push(`Exam: ${visibleInjuries}`);
+    const vetNotes = pick(data, "vet_notes", "vetNotes", "notes");
+    if (vetNotes) notesParts.push(`Notes: ${vetNotes}`);
+
     const payload: Record<string, unknown> = {
       dog_id: dogId,
-      triage_diagnosis: pick(data, "triage_diagnosis", "diagnosis"),
-      body_condition_score: Number(pick(data, "body_condition_score", "bodyConditionScore")) || 5,
+      triage_diagnosis: String(diagnosis),
+      body_condition_score: bcs,
     };
-    if (data.treatment) payload.visible_injuries = data.treatment;
+    if (notesParts.length > 0) {
+      payload.visible_injuries = notesParts.join("; ");
+    } else if (data.treatment) {
+      payload.visible_injuries = String(data.treatment);
+    }
+
     const response = await api.post("/medical/exams", payload);
     await publishActionEvent({
       module: "medical",
       action: "create",
       title: "Clinical Medical Exam Created",
-      message: `Clinical examination recorded for patient ${dogId}.`,
+      message: `Clinical examination recorded for patient ${dogId}. Diagnosis: ${diagnosis}.`,
       targetRoles: ["super_admin", "veterinarian", "rescue_centre_admin", "shelter_manager"],
     });
     return response.data;
@@ -219,12 +236,23 @@ export const medicalService = {
   issueCertificate: async (data: Record<string, unknown>) => {
     const dogId = pick(data, "dog_id", "dogId", "petName");
     if (!dogId) throw new Error("Dog selection is required to issue a clearance certificate.");
+
+    const rawStatus = String(pick(data, "status", "certStatus") || "approved").toLowerCase();
+    const status = (rawStatus === "denied" || rawStatus === "pending") ? rawStatus : "approved";
+    const clearanceType = String(pick(data, "clearance_type", "clearanceType", "certType") || "adoption_surgery");
+    const notes = pick(data, "decision_notes", "notes") || "Healthy, cleared for adoption.";
+
     const payload: Record<string, unknown> = {
-      clearance_type: pick(data, "clearance_type", "clearanceType", "certType") || "health_clearance",
-      status: pick(data, "status", "certStatus") || "pending",
-      decision_notes: pick(data, "decision_notes", "notes"),
+      clearance_type: clearanceType,
+      status: status,
+      decision_notes: String(notes),
     };
+    if (data.expires_at) {
+      payload.expires_at = String(data.expires_at);
+    }
+
     const response = await api.post(`/medical/clearance/${dogId}`, payload);
+
     await publishActionEvent({
       module: "medical",
       action: "approve",
