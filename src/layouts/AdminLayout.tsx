@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { FaArrowLeft, FaShieldAlt } from "react-icons/fa";
 import Sidebar from "../components/dashboard/Sidebar";
@@ -11,8 +11,29 @@ import {
 
 const AdminLayout = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobileScreen(mobile);
+      if (!mobile) {
+        setIsMobileDrawerOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (isMobileScreen) {
+      setIsMobileDrawerOpen(false);
+    }
+  }, [location.pathname, isMobileScreen]);
 
   // "Active dashboard" context for Super Admin viewing another role's dashboard.
   const currentRole = getCurrentUserRole();
@@ -20,7 +41,17 @@ const AdminLayout = () => {
   const viewingRoleDashboard =
     currentRole === "super_admin" && activeDashRole && activeDashRole !== "super_admin";
 
-  const sidebarWidth = isSidebarCollapsed ? 70 : 260;
+  const desktopSidebarWidth = isSidebarCollapsed ? 70 : 260;
+  const marginLeft = isMobileScreen ? 0 : desktopSidebarWidth;
+  const containerWidth = isMobileScreen ? "100%" : `calc(100% - ${desktopSidebarWidth}px)`;
+
+  const handleToggleSidebar = () => {
+    if (isMobileScreen) {
+      setIsMobileDrawerOpen((prev) => !prev);
+    } else {
+      setIsSidebarCollapsed((prev) => !prev);
+    }
+  };
 
   return (
     <div
@@ -30,30 +61,38 @@ const AdminLayout = () => {
         display: "flex",
         width: "100%",
         overflow: "hidden",
+        position: "relative",
       }}
     >
-      {/* Fixed Sidebar */}
-      <Sidebar collapsed={isSidebarCollapsed} />
+      {/* Sidebar */}
+      <Sidebar
+        collapsed={isSidebarCollapsed}
+        isMobileScreen={isMobileScreen}
+        isMobileOpen={isMobileDrawerOpen}
+        onCloseMobile={() => setIsMobileDrawerOpen(false)}
+      />
 
       {/* Main Container */}
       <div
         style={{
-          marginLeft: `${sidebarWidth}px`,
+          marginLeft: `${marginLeft}px`,
           height: "100vh",
-          width: `calc(100% - ${sidebarWidth}px)`,
+          width: containerWidth,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
           transition: "margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
         }}
       >
-        {/* Compact Header */}
+        {/* Header */}
         <Header
           isSidebarCollapsed={isSidebarCollapsed}
-          onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          isMobileScreen={isMobileScreen}
+          isMobileDrawerOpen={isMobileDrawerOpen}
+          onToggleSidebar={handleToggleSidebar}
         />
 
-        {/* Super Admin module-view context bar: active dashboard ≠ auth role */}
+        {/* Super Admin module-view context bar */}
         {viewingRoleDashboard && (
           <div
             style={{
@@ -62,7 +101,7 @@ const AdminLayout = () => {
               justifyContent: "space-between",
               gap: "12px",
               flexWrap: "wrap",
-              padding: "10px 24px",
+              padding: isMobileScreen ? "8px 12px" : "10px 24px",
               background: "#EFF6FF",
               borderBottom: "1px solid #BFDBFE",
               fontSize: "13px",
@@ -80,11 +119,7 @@ const AdminLayout = () => {
                 }}
               >
                 <FaShieldAlt size={12} />
-                Active Dashboard: {getRoleTitle(activeDashRole)}
-              </span>
-              <span style={{ opacity: 0.7 }}>·</span>
-              <span style={{ fontWeight: 600 }}>
-                Logged in as: {getRoleTitle(currentRole)}
+                Active: {getRoleTitle(activeDashRole)}
               </span>
             </div>
             <button
@@ -96,18 +131,15 @@ const AdminLayout = () => {
                 background: "#2563EB",
                 color: "#FFFFFF",
                 border: "none",
-                padding: "7px 14px",
+                padding: "6px 12px",
                 borderRadius: "8px",
                 fontWeight: 600,
-                fontSize: "12.5px",
+                fontSize: "12px",
                 cursor: "pointer",
-                transition: "background 0.15s ease",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#1D4ED8")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "#2563EB")}
             >
               <FaArrowLeft size={11} />
-              Back to Super Admin
+              Super Admin
             </button>
           </div>
         )}
@@ -116,9 +148,9 @@ const AdminLayout = () => {
         <main
           style={{
             flex: 1,
-            padding: "24px",
+            padding: isMobileScreen ? "12px" : "24px",
             overflowY: "auto",
-            overflowX: "auto",
+            overflowX: "hidden",
             maxWidth: "1600px",
             width: "100%",
             boxSizing: "border-box",

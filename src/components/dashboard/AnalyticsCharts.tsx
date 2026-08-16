@@ -61,7 +61,7 @@ const ChartCard = ({ title, subtitle, hasData, children, height = 260 }: ChartCa
   >
     <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0F172A" }}>{title}</h4>
     <p style={{ margin: "3px 0 0", fontSize: "11.5px", color: "#94A3B8" }}>{subtitle}</p>
-    <div style={{ width: "100%", height, marginTop: "12px" }}>
+    <div style={{ width: "100%", minWidth: 0, height, marginTop: "12px" }}>
       {hasData ? (
         children
       ) : (

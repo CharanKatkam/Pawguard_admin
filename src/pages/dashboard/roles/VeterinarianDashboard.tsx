@@ -646,7 +646,7 @@ const VeterinarianDashboard = () => {
       <div id="appointments-queue" className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
         {/* Source Navigation Tabs */}
         <div style={{ display: "flex", gap: "12px", borderBottom: "2px solid #E2E8F0", paddingBottom: "12px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
               type="button"
               onClick={() => setActiveSourceTab("shelter_requests")}

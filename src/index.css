@@ -196,11 +196,42 @@ button:active {
   animation: dashShimmer 1.4s ease infinite;
 }
 
-.dash-spin {
-  animation: dashSpin 0.8s linear infinite;
-}
-
 @keyframes dashSpin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* Global Mobile Responsiveness & Overflow Prevention */
+html, body, #root {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+img, video, canvas, svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.table-responsive-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.word-break-all {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 767px) {
+  .page-title {
+    font-size: 22px;
+  }
+  .section-title {
+    font-size: 18px;
+  }
+  .card-value {
+    font-size: 22px;
+  }
 }

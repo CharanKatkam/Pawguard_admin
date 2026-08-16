@@ -223,19 +223,20 @@ const DataTable: React.FC<DataTableProps> = ({
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "16px",
-          gap: "16px",
+          gap: "12px",
           flexWrap: "wrap",
         }}
       >
-        <div style={{ position: "relative", minWidth: "260px" }}>
+        {/* Search */}
+        <div style={{ position: "relative", width: "100%", maxWidth: "320px", flex: "1 1 200px" }}>
           <FaSearch
-            size={14}
             style={{
               position: "absolute",
               left: "12px",
               top: "50%",
               transform: "translateY(-50%)",
               color: "#94A3B8",
+              fontSize: "14px",
             }}
           />
           <input
@@ -253,9 +254,8 @@ const DataTable: React.FC<DataTableProps> = ({
             style={{
               width: "100%",
               padding: "9px 12px 9px 36px",
-              borderRadius: "10px",
-              border: "1px solid #E2E8F0",
-              background: "#F8FAFC",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
               fontSize: "13px",
               outline: "none",
               boxSizing: "border-box",
@@ -268,11 +268,8 @@ const DataTable: React.FC<DataTableProps> = ({
         </div>
       </div>
 
-      {/* Responsive Table */}
-      {/* Horizontal overflow is handled by AdminLayout <main> (overflowX: auto).
-          This wrapper ensures the table can expand beyond viewport width while
-          the sticky header stays aligned with body columns during horizontal scroll. */}
-      <div style={{ overflowX: "auto", width: "100%" }}>
+      {/* Responsive Table Wrapper */}
+      <div style={{ overflowX: "auto", width: "100%", maxWidth: "100%", WebkitOverflowScrolling: "touch" }}>
         <table
           style={{
             width: "100%",

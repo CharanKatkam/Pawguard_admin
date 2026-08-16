@@ -6,6 +6,7 @@ import {
   FaSignOutAlt,
   FaChevronLeft,
   FaChevronRight,
+  FaBars,
   FaUserCheck,
   FaShieldAlt,
   FaEnvelope,
@@ -20,6 +21,8 @@ import Modal from "../common/Modal";
 interface HeaderProps {
   onToggleSidebar?: () => void;
   isSidebarCollapsed?: boolean;
+  isMobileScreen?: boolean;
+  isMobileDrawerOpen?: boolean;
 }
 
 const getPageTitle = (pathname: string): string => {
@@ -49,35 +52,35 @@ const getPageTitle = (pathname: string): string => {
   if (path.includes("/rescue-requests")) return "Rescue Requests";
   if (path.includes("/rescue-dispatch")) return "Rescue Dispatch";
   if (path.includes("/pets")) return "Dog Management";
-  if (path.includes("/medical-records")) return "Medical Management";
-  if (path.includes("/medical-reminders")) return "Vaccination & Medication Reminders";
-
+  if (path.includes("/shelter-dogs")) return "Shelter Dogs";
   if (path.includes("/shelters")) return "Shelter Management";
   if (path.includes("/adoptions")) return "Adoption Management";
-  if (path.includes("/fosters")) return "Foster Management";
+  if (path.includes("/fosters")) return "Foster Care";
   if (path.includes("/volunteers")) return "Volunteer Management";
-  if (path.includes("/lost-and-found")) return "Lost & Found";
+  if (path.includes("/medical-records")) return "Medical Suite";
+  if (path.includes("/vet-directory")) return "Vet Directory & Appointments";
+  if (path.includes("/medical-reminders")) return "Vaccine & Med Reminders";
   if (path.includes("/inventory")) return "Inventory Management";
-  if (path.includes("/finance")) return "Donations & Finance";
-  if (path.includes("/vehicles")) return "Vehicle Management";
+  if (path.includes("/finance")) return "Donations & Financials";
+  if (path.includes("/vehicles")) return "Vehicle Fleet";
+  if (path.includes("/lost-and-found")) return "Lost & Found Registry";
   if (path.includes("/reports")) return "Reports & Analytics";
-  if (path.includes("/settings")) return "Settings";
   if (path.includes("/roles-permissions")) return "Roles & Permissions";
-  if (path.includes("/audit-logs")) return "Audit Logs";
-  if (path.includes("/certificates")) return "Certificates";
+  if (path.includes("/audit-logs")) return "Audit Trail Logs";
+  if (path.includes("/certificates")) return "Vaccines & Certificates";
+  if (path.includes("/notifications")) return "System Notifications";
+  if (path.includes("/settings")) return "System Settings";
 
-  const segments = pathname.split("/").filter(Boolean);
-  if (segments.length > 0) {
-    const raw = segments[segments.length - 1].replace(/-/g, " ");
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }
-
-  return "Dashboard";
+  return "PawGuard Platform";
 };
 
-const Header = ({ onToggleSidebar, isSidebarCollapsed }: HeaderProps) => {
-  const navigate = useNavigate();
+const Header = ({
+  onToggleSidebar,
+  isSidebarCollapsed = false,
+  isMobileScreen = false,
+}: HeaderProps) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const user = getCurrentUser();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
@@ -113,13 +116,13 @@ const Header = ({ onToggleSidebar, isSidebarCollapsed }: HeaderProps) => {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "0 24px",
+          padding: isMobileScreen ? "0 12px" : "0 24px",
           borderBottom: "1px solid #E2E8F0",
           boxShadow: "0 1px 3px rgba(15, 23, 42, 0.05)",
         }}
       >
         {/* Left: Sidebar Toggle + Current Page Title ONLY */}
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobileScreen ? "8px" : "16px", minWidth: 0 }}>
           <button
             onClick={onToggleSidebar}
             style={{
@@ -134,21 +137,32 @@ const Header = ({ onToggleSidebar, isSidebarCollapsed }: HeaderProps) => {
               color: "#475569",
               cursor: "pointer",
               transition: "all 0.15s ease",
+              flexShrink: 0,
             }}
-            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+            title={isMobileScreen ? "Open Menu" : isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
-            {isSidebarCollapsed ? <FaChevronLeft size={16} /> : <FaChevronRight size={16} />}
+            {isMobileScreen ? (
+              <FaBars size={18} />
+            ) : isSidebarCollapsed ? (
+              <FaChevronRight size={16} />
+            ) : (
+              <FaChevronLeft size={16} />
+            )}
           </button>
 
           {/* Clean Page Title */}
           <h2
             style={{
               margin: 0,
-              fontSize: "16px",
+              fontSize: isMobileScreen ? "14px" : "16px",
               fontWeight: 700,
               color: "#0F172A",
-              lineHeight: 1,
+              lineHeight: 1.2,
               letterSpacing: "-0.01em",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: isMobileScreen ? "150px" : "320px",
             }}
           >
             {pageTitle}

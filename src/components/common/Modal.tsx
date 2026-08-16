@@ -44,7 +44,7 @@ export const Modal: React.FC<ModalProps> = ({
         alignItems: "center",
         justifyContent: "center",
         zIndex: 1000,
-        padding: "16px",
+        padding: "12px",
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -54,7 +54,7 @@ export const Modal: React.FC<ModalProps> = ({
         style={{
           background: "#FFFFFF",
           borderRadius: "16px",
-          width: "100%",
+          width: "min(100%, calc(100vw - 24px))",
           maxWidth: maxWidth,
           maxHeight: "90vh",
           display: "flex",
@@ -66,20 +66,23 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Header */}
         <div
           style={{
-            padding: "20px 24px",
+            padding: "16px 20px",
             borderBottom: "1px solid #E2E8F0",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             background: "#F8FAFC",
+            gap: "12px",
           }}
         >
           <h3
             style={{
               margin: 0,
-              fontSize: "18px",
+              fontSize: "16px",
               fontWeight: 700,
               color: "#0F172A",
+              wordBreak: "break-word",
+              lineHeight: 1.3,
             }}
           >
             {title}
@@ -97,6 +100,7 @@ export const Modal: React.FC<ModalProps> = ({
               alignItems: "center",
               justifyContent: "center",
               borderRadius: "8px",
+              flexShrink: 0,
             }}
           >
             <FaTimes />
@@ -106,9 +110,10 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Content */}
         <div
           style={{
-            padding: "24px",
+            padding: "16px 20px",
             overflowY: "auto",
             flex: 1,
+            wordBreak: "break-word",
           }}
         >
           {children}
@@ -118,12 +123,13 @@ export const Modal: React.FC<ModalProps> = ({
         {footer && (
           <div
             style={{
-              padding: "16px 24px",
+              padding: "12px 20px",
               borderTop: "1px solid #E2E8F0",
               background: "#F8FAFC",
               display: "flex",
               justifyContent: "flex-end",
-              gap: "12px",
+              flexWrap: "wrap",
+              gap: "8px",
             }}
           >
             {footer}

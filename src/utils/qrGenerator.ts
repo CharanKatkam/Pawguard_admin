@@ -13,7 +13,17 @@ export const generateQrDataUrl = async (token: string, size = 300): Promise<stri
     throw new Error("Cannot generate QR code for an empty token.");
   }
 
-  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(cleanToken)}&margin=10`;
+  const publicFrontendUrl = (
+    (import.meta.env.VITE_PUBLIC_FRONTEND_URL as string) ||
+    "https://pawguard-public-web.vercel.app"
+  ).replace(/\/+$/, "");
+
+  const qrContent =
+    cleanToken.startsWith("http://") || cleanToken.startsWith("https://")
+      ? cleanToken
+      : `${publicFrontendUrl}/scan?token=${encodeURIComponent(cleanToken)}`;
+
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(qrContent)}&margin=10`;
 
   try {
     const res = await fetch(qrApiUrl);

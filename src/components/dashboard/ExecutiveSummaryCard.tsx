@@ -109,19 +109,21 @@ const ExecutiveSummaryCard = ({
           {icon}
         </div>
       </div>
-      <div style={{ marginTop: "14px", display: "flex", alignItems: "baseline", gap: "8px" }}>
+      <div style={{ marginTop: "14px", display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" }}>
         <span
           style={{
-            fontSize: "28px",
+            fontSize: "clamp(20px, 5vw, 28px)",
             fontWeight: 800,
             color: "#0F172A",
             letterSpacing: "-0.02em",
-            lineHeight: 1,
+            lineHeight: 1.1,
+            wordBreak: "break-word",
+            maxWidth: "100%",
           }}
         >
           {formattedValue}
         </span>
-        <FaArrowRight size={12} style={{ color: "#CBD5E1" }} />
+        <FaArrowRight size={12} style={{ color: "#CBD5E1", flexShrink: 0 }} />
       </div>
       {subtitle && (
         <p
@@ -129,6 +131,7 @@ const ExecutiveSummaryCard = ({
             margin: "8px 0 0",
             fontSize: "12px",
             color: "#64748B",
+            wordBreak: "break-word",
           }}
         >
           {subtitle}

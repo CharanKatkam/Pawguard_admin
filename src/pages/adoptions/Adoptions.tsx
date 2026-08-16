@@ -29,7 +29,7 @@ import adoptionService, { toAdoptionStatus } from "../../services/adoptionServic
 import dogService from "../../services/dogService";
 import petService from "../../services/petService";
 import medicalService from "../../services/medicalService";
-import { generateQrDataUrl } from "../../utils/qrGenerator";
+import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const StatusBadge = ({ status }: { status: string }) => {
@@ -124,12 +124,15 @@ const Adoptions = () => {
   // Unique Dog QR Code Modal state
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrDog, setQrDog] = useState<Record<string, unknown> | null>(null);
+  const [qrBlob, setQrBlob] = useState<Blob | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
   const [tagStatus, setTagStatus] = useState<string>("INACTIVE");
+  const [tagMetadata, setTagMetadata] = useState<Record<string, unknown> | null>(null);
   const [rawToken, setRawToken] = useState<string | null>(null);
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const [manualTokenInput, setManualTokenInput] = useState("");
 
   const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
 
@@ -145,33 +148,53 @@ const Adoptions = () => {
     setQrImageUrl(null);
     setQrError(null);
     setRawToken(null);
+    setManualTokenInput("");
     setTagStatus("INACTIVE");
     setIsQrModalOpen(true);
 
     try {
       setQrLoading(true);
 
-      // Check session or local storage strictly for authoritative raw_token
-      const savedToken =
-        localStorage.getItem(`pawguard_safety_tag_token_${id}`) ||
-        sessionStorage.getItem(`pawguard_safety_tag_token_${id}`);
-      const savedQrDataUrl = localStorage.getItem(`pawguard_safety_tag_qr_${id}`);
+      const possibleKeys = [
+        `pawguard_safety_tag_token_${id}`,
+        `pawguard_safety_tag_token_${dog?.id}`,
+        `pawguard_safety_tag_token_${(dog as any)?.dog_id}`,
+        `pawguard_safety_tag_token_${dog?.registration_number}`,
+      ].filter(Boolean);
 
-      if (savedToken || savedQrDataUrl) {
-        if (savedToken) setRawToken(savedToken);
-        const qrUrl = savedQrDataUrl || (savedToken ? await generateQrDataUrl(savedToken) : null);
-        if (qrUrl) {
-          setQrImageUrl(qrUrl);
-          setTagStatus("ACTIVE");
+      let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
+      if (!savedToken) {
+        for (const k of possibleKeys) {
+          const t = localStorage.getItem(k) || sessionStorage.getItem(k);
+          if (t) {
+            savedToken = t;
+            break;
+          }
         }
+      }
+
+      if (savedToken) {
+        setRawToken(savedToken);
+        const qrUrl = await generateQrDataUrl(savedToken);
+        const blob = await generateQrBlob(savedToken);
+        setQrImageUrl(qrUrl);
+        setQrBlob(blob);
+        localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
+        setTagStatus("ACTIVE");
       }
 
       // Check backend metadata for Safety Tag status
       try {
         const metaRes = await petService.getSafetyTagMetadata(id);
         const metaData = metaRes?.data || metaRes;
-        if (metaData?.status) {
-          setTagStatus(String(metaData.status).toUpperCase());
+        if (metaData) {
+          setTagMetadata(metaData);
+          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
+          if (isActive) {
+            setTagStatus("ACTIVE");
+          } else if (metaData.is_active === false || String(metaData.status || "").toUpperCase() === "INACTIVE") {
+            setTagStatus("INACTIVE");
+          }
         }
       } catch (metaErr: unknown) {
         const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
@@ -244,8 +267,10 @@ const Adoptions = () => {
       URL.revokeObjectURL(qrImageUrl);
     }
     setQrImageUrl(null);
+    setQrBlob(null);
     setQrDog(null);
     setQrError(null);
+    setTagMetadata(null);
     setRawToken(null);
     setTagStatus("INACTIVE");
     setIsQrModalOpen(false);
@@ -255,11 +280,21 @@ const Adoptions = () => {
     if (!qrImageUrl || !qrDog) return;
     const name = String(qrDog.name || "dog").replace(/[^a-zA-Z0-9-_]/g, "_");
     const link = document.createElement("a");
-    link.href = qrImageUrl;
-    link.download = `PawGuard_SafetyTag_${name}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (qrBlob) {
+      const url = URL.createObjectURL(qrBlob);
+      link.href = url;
+      link.download = `PawGuard_SafetyTag_${name}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } else {
+      link.href = qrImageUrl;
+      link.download = `PawGuard_SafetyTag_${name}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
   
   const [selectedApp, setSelectedApp] = useState<Record<string, unknown> | null>(null);
@@ -1580,14 +1615,96 @@ const Adoptions = () => {
                 {tagStatus === "ACTIVE" ? (
                   <>
                     <div style={{ fontSize: "15px", fontWeight: 800, color: "#1E293B" }}>
-                      ℹ️ QR CODE NOT AVAILABLE ON THIS BROWSER
+                      ℹ️ SAFETY TAG IS ACTIVE ON BACKEND
                     </div>
-                    <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "420px", lineHeight: 1.5 }}>
-                      Safety Tag is <strong>ACTIVE</strong> on backend, but the original QR token was issued previously and cannot be recovered after provisioning. To generate a new QR code for this pet, re-provision the Safety Tag below.
+                    <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "440px", lineHeight: 1.5 }}>
+                      Tag Status: <strong style={{ color: "#16A34A" }}>ACTIVE</strong>{" "}
+                      {tagMetadata?.token_prefix ? `(Prefix: ${String(tagMetadata.token_prefix)})` : ""}
+                      <br />
+                      To render and print the QR code for this active tag on this browser without re-issuing or changing the backend tag, enter the existing raw token below:
                     </div>
-                    <button type="button" onClick={() => setIsReProvisionConfirmOpen(true)} disabled={isProvisioning} style={{ width: "100%", padding: "11px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
-                      {isProvisioning ? "Provisioning..." : "Re-Provision Safety Tag"}
-                    </button>
+
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const clean = manualTokenInput.trim();
+                        if (!clean) return;
+                        const prefix = String(tagMetadata?.token_prefix || "").trim();
+                        if (prefix && !clean.startsWith(prefix)) {
+                          addToast(`Token prefix mismatch! Expected token starting with "${prefix}".`, "error");
+                          return;
+                        }
+                        try {
+                          const id = String(qrDog?.dog_id || qrDog?.original_dog_id || (qrDog?.companion_pet as any)?.original_dog_id || qrDog?.id || (qrDog?.companion_pet as any)?.id || qrDog?.companion_pet_id || "");
+                          const qrUrl = await generateQrDataUrl(clean);
+                          const blob = await generateQrBlob(clean);
+                          setRawToken(clean);
+                          setQrImageUrl(qrUrl);
+                          setQrBlob(blob);
+                          if (id) {
+                            localStorage.setItem(`pawguard_safety_tag_token_${id}`, clean);
+                            localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
+                          }
+                          addToast("Active Safety Tag QR loaded successfully!", "success");
+                        } catch {
+                          addToast("Failed to render QR for entered token.", "error");
+                        }
+                      }}
+                      style={{ width: "100%", maxWidth: "420px", display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}
+                    >
+                      <input
+                        type="text"
+                        value={manualTokenInput}
+                        onChange={(e) => setManualTokenInput(e.target.value)}
+                        placeholder="Enter existing raw token (e.g. cVnzRiqR...)"
+                        style={{
+                          width: "100%",
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid #CBD5E1",
+                          fontSize: "12px",
+                          fontFamily: "monospace",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="submit"
+                          disabled={!manualTokenInput.trim()}
+                          style={{
+                            flex: 1,
+                            padding: "10px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: manualTokenInput.trim() ? "#10B981" : "#94A3B8",
+                            color: "#FFFFFF",
+                            fontWeight: 700,
+                            fontSize: "13px",
+                            cursor: manualTokenInput.trim() ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          Load Active QR Code
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsReProvisionConfirmOpen(true)}
+                          disabled={isProvisioning}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: "8px",
+                            border: "1px solid #CBD5E1",
+                            background: "#FFFFFF",
+                            color: "#6D28D9",
+                            fontWeight: 700,
+                            fontSize: "12px",
+                            cursor: isProvisioning ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          Re-Provision
+                        </button>
+                      </div>
+                    </form>
                   </>
                 ) : (
                   <>
