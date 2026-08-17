@@ -2,6 +2,7 @@ import { notifyDataChanged } from "./dataSync";
 import { getCurrentUser } from "./roleUtils";
 import type { UserRole } from "../types/auth";
 import notificationService from "../services/notificationService";
+import { formatDateTime } from "./dateUtils";
 
 export interface ActionEventPayload {
   module:
@@ -58,7 +59,7 @@ export const getAuditStream = () => [...auditLogStream];
 export async function publishActionEvent(payload: ActionEventPayload): Promise<void> {
   const currentUser = getCurrentUser();
   const actor = payload.user || currentUser?.email || "System";
-  const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timestamp = formatDateTime(new Date());
 
   // 1. Create & Broadcast Notification
   try {

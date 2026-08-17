@@ -8,8 +8,11 @@ import {
   getDashboardRoleFromPath,
   getRoleTitle,
 } from "../utils/roleUtils";
+import useInactivityTimeout from "../hooks/useInactivityTimeout";
 
 const AdminLayout = () => {
+  useInactivityTimeout();
+
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);

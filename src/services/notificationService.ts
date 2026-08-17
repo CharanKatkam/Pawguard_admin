@@ -1,6 +1,7 @@
 import api from "../api/axios";
-import type { NotificationItem } from "../types/auth";
-import { getCurrentUser } from "../utils/roleUtils";
+import type { NotificationItem, UserRole } from "../types/auth";
+import { getCurrentUser, getCurrentUserRole } from "../utils/roleUtils";
+import { formatDateTime } from "../utils/dateUtils";
 
 export interface NotificationResponse {
   id: string;
@@ -22,11 +23,111 @@ export interface NotificationsListResponse {
 }
 
 /**
+ * Check if a notification is an Inventory / Low Stock alert
+ */
+export const isInventoryNotification = (notif: NotificationItem): boolean => {
+  const type = String(notif.type || "").toLowerCase();
+  const title = String(notif.title || "").toLowerCase();
+  const message = String(notif.message || "").toLowerCase();
+
+  return (
+    type === "inventory" ||
+    type === "inventory_changed" ||
+    type === "inventory_low_stock" ||
+    title.includes("inventory") ||
+    title.includes("stock") ||
+    title.includes("reorder") ||
+    title.includes("requisition") ||
+    message.includes("inventory") ||
+    message.includes("stock level") ||
+    message.includes("below reorder threshold")
+  );
+};
+
+/**
+ * Filter notifications based on role and shelter operational assignment.
+ * Enforces strict recipient rules:
+ * - Inventory Low Stock alerts MUST NOT be sent/displayed to Vets, Rescue Team, or Adopter/Public users.
+ * - Primary recipients: Shelter Manager for the specific shelter, Inventory Manager, Admin.
+ * - One shelter's inventory alerts MUST NOT be exposed to another shelter's manager.
+ */
+export const shouldUserReceiveNotification = (
+  notif: NotificationItem,
+  user: any,
+  role: UserRole | null
+): boolean => {
+  if (!role) return false;
+
+  if (isInventoryNotification(notif)) {
+    // 1. Role-based gating:
+    // Authorized: super_admin, rescue_centre_admin, inventory_manager, shelter_manager
+    // Prohibited: veterinarian, rescue_coordinator, rescue_agent, adoption_coordinator, foster_coordinator, volunteer_coordinator, finance_user, public/adopter
+    const allowedRoles: UserRole[] = [
+      "super_admin",
+      "rescue_centre_admin",
+      "inventory_manager",
+      "shelter_manager",
+    ];
+
+    if (!allowedRoles.includes(role)) {
+      return false;
+    }
+
+    // 2. Shelter isolation gating for Shelter Managers / Shelter Staff:
+    if (role === "shelter_manager") {
+      const userShelterId = String(user?.shelter_id || user?.shelterId || user?.facility_id || user?.facilityId || "").trim().toLowerCase();
+      const userShelterName = String(user?.shelter || user?.shelter_name || user?.department || "").trim().toLowerCase();
+
+      const notifData = notif.data || {};
+      const notifShelterId = String(notifData.shelter_id || notifData.shelterId || (notif as any).shelter_id || "").trim().toLowerCase();
+      const notifShelterName = String(notifData.shelter_name || notifData.shelterName || (notif as any).shelter_name || "").trim().toLowerCase();
+
+      if (userShelterId && notifShelterId && userShelterId !== notifShelterId) {
+        return false;
+      }
+      if (userShelterName && notifShelterName && !notifShelterName.includes(userShelterName) && !userShelterName.includes(notifShelterName)) {
+        return false;
+      }
+
+      // Check text in title/message for explicit shelter mentions (e.g. "Shelter A", "Shelter B")
+      const text = `${notif.title} ${notif.message}`.toLowerCase();
+      const shelterMatch = text.match(/shelter\s+([a-z0-9_-]+)/i);
+      if (userShelterName && shelterMatch) {
+        const mentioned = shelterMatch[0].toLowerCase();
+        if (!mentioned.includes(userShelterName) && !userShelterName.includes(mentioned)) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+};
+
+/**
+ * Deduplicate notifications to prevent duplicate low-stock alerts
+ */
+export const deduplicateNotifications = (list: NotificationItem[]): NotificationItem[] => {
+  const seen = new Set<string>();
+  const result: NotificationItem[] = [];
+
+  for (const item of list) {
+    const key = `${String(item.title).trim().toLowerCase()}|${String(item.message).trim().toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(item);
+    }
+  }
+
+  return result;
+};
+
+/**
  * Transform backend notification response to frontend NotificationItem format
  */
 const transformNotification = (notif: NotificationResponse): NotificationItem => {
   const createdTime = notif.created_at
-    ? new Date(notif.created_at).toLocaleString()
+    ? formatDateTime(notif.created_at)
     : "Just now";
 
   return {
@@ -46,12 +147,6 @@ const transformNotification = (notif: NotificationResponse): NotificationItem =>
  * Notification service - handles all notification API interactions matching OpenAPI specification exactly
  */
 export const notificationService = {
-  // POST /api/v1/notifications/send
-  // The backend `NotificationSend` schema supports role-targeted delivery via
-  // `target_roles` (send to all active users holding any of those roles).
-  // When target roles are provided we omit `user_id` (it is only required
-  // "unless target_roles is provided"); otherwise we keep the previous
-  // actor-scoped behaviour.
   sendBroadcastNotification: async (payload: {
     title: string;
     message: string;
@@ -98,7 +193,12 @@ export const notificationService = {
       notifications = response.data.data;
     }
 
-    return notifications.map(transformNotification);
+    const transformed = notifications.map(transformNotification);
+    const currentUser = getCurrentUser();
+    const currentRole = getCurrentUserRole();
+
+    const filtered = transformed.filter((item) => shouldUserReceiveNotification(item, currentUser, currentRole));
+    return deduplicateNotifications(filtered);
   },
 
   // GET /api/v1/notifications/unread-count

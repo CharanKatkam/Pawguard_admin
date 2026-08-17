@@ -21,6 +21,7 @@ import {
 import { useNotifications } from "../../hooks/useNotifications";
 import { useToast } from "../../context/ToastContext";
 import SendNotificationModal from "../../components/notifications/SendNotificationModal";
+import { formatDateTime } from "../../utils/dateUtils";
 
 const typeIcon: Record<string, React.ReactNode> = {
   emergency: <FaExclamationTriangle />,
@@ -247,8 +248,11 @@ const Notifications = () => {
                         </span>
                       )}
                     </div>
-                    <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#475569", lineHeight: 1.5 }}>{n.message}</p>
-                    {n.time && <span style={{ fontSize: "11.5px", color: "#94A3B8" }}>{n.time}</span>}
+                    {(n.created_at || n.time) && (
+                      <span style={{ fontSize: "11.5px", color: "#94A3B8" }}>
+                        {formatDateTime(n.created_at || n.time)}
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                     {!n.read && (

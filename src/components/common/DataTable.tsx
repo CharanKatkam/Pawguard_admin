@@ -4,6 +4,7 @@ import Modal from "./Modal";
 import { useToast } from "../../context/ToastContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { formatDateTime } from "../../utils/dateUtils";
 
 export interface Column {
   key: string;
@@ -427,6 +428,12 @@ const DataTable: React.FC<DataTableProps> = ({
                       content = col.render(rawVal, row);
                     } else if (col.key === "status" || col.key === "state" || col.key === "condition") {
                       content = renderStatusBadge(String(rawVal ?? ""));
+                    } else if (
+                      typeof rawVal === "string" &&
+                      (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(rawVal) ||
+                        /created|updated|scanned|date|time|timestamp/i.test(col.key))
+                    ) {
+                      content = formatDateTime(rawVal);
                     }
 
                     const rawText = String(rawVal ?? "");

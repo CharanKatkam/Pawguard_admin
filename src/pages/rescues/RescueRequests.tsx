@@ -12,6 +12,7 @@ import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { normalizeRole, getCurrentUserRole } from "../../utils/roleUtils";
+import { formatDateTime } from "../../utils/dateUtils";
 
 interface RescueRequestTableRow {
   id: string;
@@ -681,7 +682,7 @@ const RescueRequests = () => {
               {selectedRequest.is_urgent && <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700 }}>URGENT</span>}
             </div>
             <div><strong>Status:</strong> {rescueStatusBadge(selectedRequest.status)}</div>
-            <div><strong>Reported:</strong> {selectedRequest.date ? new Date(selectedRequest.date).toLocaleString() : "-"}</div>
+            <div><strong>Reported:</strong> {selectedRequest.date ? formatDateTime(selectedRequest.date as string) : "-"}</div>
             {selectedRequest.rejection_rationale && (
               <div style={{ background: "#FEF2F2", padding: "10px", borderRadius: "8px" }}>
                 <strong style={{ color: "#DC2626" }}>Rejection rationale:</strong> {selectedRequest.rejection_rationale}
@@ -698,7 +699,7 @@ const RescueRequests = () => {
                   {selectedRequest.dispatch.agents && Array.isArray(selectedRequest.dispatch.agents) && selectedRequest.dispatch.agents.length > 0 ? (
                     <div>Agents: {(selectedRequest.dispatch.agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")}</div>
                   ) : null}
-                  {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {new Date(String(selectedRequest.dispatch.dispatched_at)).toLocaleString()}</div> : null}
+                  {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {formatDateTime(selectedRequest.dispatch.dispatched_at as string)}</div> : null}
                 </div>
               </div>
             )}

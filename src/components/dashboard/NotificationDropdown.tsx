@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FaBell, FaCheckDouble, FaExclamationTriangle, FaStethoscope, FaHeart, FaUserCheck, FaSpinner, FaTimesCircle } from "react-icons/fa";
 import useNotifications from "../../hooks/useNotifications";
 import type { NotificationItem } from "../../types/auth";
+import { formatDateTime } from "../../utils/dateUtils";
 
 const NotificationDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -97,24 +98,7 @@ const NotificationDropdown = () => {
   };
 
   const formatTime = (notification: NotificationItem): string => {
-    if (notification.time) return notification.time;
-    
-    if (notification.created_at) {
-      const now = new Date();
-      const created = new Date(notification.created_at);
-      const diffMs = now.getTime() - created.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMs / 3600000);
-      const diffDays = Math.floor(diffMs / 86400000);
-
-      if (diffMins < 1) return "Just now";
-      if (diffMins < 60) return `${diffMins}m ago`;
-      if (diffHours < 24) return `${diffHours}h ago`;
-      if (diffDays < 7) return `${diffDays}d ago`;
-      return created.toLocaleDateString();
-    }
-
-    return "Recently";
+    return formatDateTime(notification.created_at || notification.time);
   };
 
   return (

@@ -50,12 +50,9 @@ const trimOrNull = (v: string): string | null => {
 const shortId = (id: string): string =>
   id && id.length > 8 ? `${id.slice(0, 8)}\u2026` : id || "-";
 
-const formatDate = (iso?: string | null): string => {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-};
+import { formatDateTime } from "../../utils/dateUtils";
+
+const formatDate = (iso?: string | null): string => formatDateTime(iso);
 
 const formatCoord = (v: number | null | undefined): string =>
   typeof v === "number" && Number.isFinite(v) ? v.toFixed(5) : "-";

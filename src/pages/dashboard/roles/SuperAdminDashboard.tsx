@@ -21,6 +21,7 @@ import DashboardNotificationsPanel from "../../../components/dashboard/Dashboard
 import RecentActivitiesPanel from "../../../components/dashboard/RecentActivitiesPanel";
 import DashboardNavigationCards from "../../../components/dashboard/DashboardNavigationCards";
 import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../../utils/roleUtils";
+import { formatDateTime } from "../../../utils/dateUtils";
 
 const AnalyticsCharts = lazy(() => import("../../../components/dashboard/AnalyticsCharts"));
 
@@ -247,13 +248,11 @@ const SuperAdminDashboard = () => {
             </div>
             <p style={{ margin: 0, color: "#94A3B8", fontSize: "13.5px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <FaRegClock />
-              {now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-              {" · "}
-              {now.toLocaleTimeString("en-US")}
+              {formatDateTime(now)}
               {lastUpdated && (
                 <>
                   {" · Last updated "}
-                  {lastUpdated.toLocaleTimeString("en-US")}
+                  {formatDateTime(lastUpdated)}
                 </>
               )}
             </p>

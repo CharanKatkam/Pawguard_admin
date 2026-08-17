@@ -21,6 +21,7 @@ import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { normalizeRole, isInternalRole } from "../../utils/roleUtils";
+import { formatDateTime } from "../../utils/dateUtils";
 
 interface UserTableRow {
   id: string;
@@ -38,23 +39,7 @@ interface UserTableRow {
   [key: string]: unknown;
 }
 
-const formatDate = (isoString?: string): string => {
-  if (!isoString) return "—";
-  try {
-    const date = new Date(isoString);
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    }) + " " + date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return "—";
-  }
-};
+const formatDate = (isoString?: string): string => formatDateTime(isoString);
 
 const formatRole = (role: string): string => {
   return role

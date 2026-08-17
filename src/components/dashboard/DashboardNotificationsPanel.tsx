@@ -16,6 +16,7 @@ import {
 } from "react-icons/fa";
 import { useNotifications } from "../../hooks/useNotifications";
 import DashboardSkeleton from "./DashboardSkeleton";
+import { formatDateTime } from "../../utils/dateUtils";
 
 const typeIcon: Record<string, React.ReactNode> = {
   emergency: <FaExclamationTriangle />,
@@ -177,7 +178,11 @@ const DashboardNotificationsPanel = () => {
                   <p style={{ margin: "3px 0 0", fontSize: "11.5px", color: "#64748B", lineHeight: 1.4 }}>
                     {n.message}
                   </p>
-                  {n.time && <span style={{ fontSize: "10.5px", color: "#94A3B8" }}>{n.time}</span>}
+                  {(n.created_at || n.time) && (
+                    <span style={{ fontSize: "10.5px", color: "#94A3B8" }}>
+                      {formatDateTime(n.created_at || n.time)}
+                    </span>
+                  )}
                 </div>
               </button>
             </li>

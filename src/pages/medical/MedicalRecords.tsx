@@ -9,6 +9,7 @@ import { FaStethoscope, FaSyringe, FaNotesMedical, FaFileMedical, FaTrash, FaUse
 import medicalService from "../../services/medicalService";
 import dogService from "../../services/dogService";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { formatDateTime } from "../../utils/dateUtils";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -554,7 +555,7 @@ const MedicalRecords = () => {
                   {dogHistory.map((item: Record<string, unknown>, idx: number) => (
                     <div key={idx} style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", fontSize: "12px" }}>
                       <div style={{ fontWeight: 700, color: "#0F172A" }}>
-                        {String(item.categoryName || item.entityType || item.type || "Medical Record")} &bull; {item.date && item.date !== "-" ? String(item.date) : "Not recorded"}
+                        {String(item.categoryName || item.entityType || item.type || "Medical Record")} &bull; {item.date || item.created_at || item.exam_date || item.treatment_date || item.administered_at || item.start_at ? formatDateTime((item.date || item.created_at || item.exam_date || item.treatment_date || item.administered_at || item.start_at) as string) : "Not recorded"}
                       </div>
                       <div style={{ color: "#475569", marginTop: "2px" }}>
                         {item.diagnosis && item.diagnosis !== "-" ? `Diagnosis: ${String(item.diagnosis)}` : ""}

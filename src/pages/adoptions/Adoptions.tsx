@@ -31,6 +31,7 @@ import petService from "../../services/petService";
 import medicalService from "../../services/medicalService";
 import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { formatDateTime } from "../../utils/dateUtils";
 
 const StatusBadge = ({ status }: { status: string }) => {
   const s = String(status || "").toLowerCase();
@@ -1117,7 +1118,7 @@ const Adoptions = () => {
                     <div>
                       <div style={{ fontSize: "11px", fontWeight: 700, color: "#D97706", textTransform: "uppercase" }}>Scheduled Home Verification</div>
                       <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <FaCalendarAlt color="#D97706" /> {new Date(String(selectedApp.home_inspection_scheduled_at)).toLocaleString()}
+                        <FaCalendarAlt color="#D97706" /> {formatDateTime(selectedApp.home_inspection_scheduled_at as string)}
                       </div>
                       {Boolean(selectedApp.home_inspection_notes) && (
                         <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>

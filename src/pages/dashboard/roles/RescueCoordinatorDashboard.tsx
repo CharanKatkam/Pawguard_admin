@@ -22,6 +22,7 @@ import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import { useDataSync } from "../../../utils/dataSync";
 import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
+import { formatDateTime } from "../../../utils/dateUtils";
 
 interface RescueDashboardData {
   total_calls: number;
@@ -60,7 +61,7 @@ const formatCase = (c: Record<string, unknown>) => ({
   is_urgent: !!c.is_urgent,
   rejection_rationale: String(c.rejection_rationale || ""),
   dispatch: (c.dispatch as Record<string, unknown>) || null,
-  created_at: c.created_at ? new Date(String(c.created_at)).toLocaleString() : "-",
+  created_at: c.created_at ? formatDateTime(c.created_at as string) : "-",
   raw: c,
 });
 
@@ -610,7 +611,7 @@ const RescueCoordinatorDashboard = () => {
                     <div><strong>Driver:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id)}</div>
                   ) : null}
                   {(selectedRequest.dispatch as Record<string, unknown>).dispatched_at ? (
-                    <div><strong>Dispatched:</strong> {new Date(String((selectedRequest.dispatch as Record<string, unknown>).dispatched_at)).toLocaleString()}</div>
+                    <div><strong>Dispatched:</strong> {formatDateTime((selectedRequest.dispatch as Record<string, unknown>).dispatched_at as string)}</div>
                   ) : null}
                 </div>
               </div>

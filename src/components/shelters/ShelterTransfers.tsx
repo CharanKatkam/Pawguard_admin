@@ -7,6 +7,7 @@ import { getCurrentUserRole } from "../../utils/roleUtils";
 import shelterService from "../../services/shelterService";
 import petService from "../../services/petService";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { formatDateTime } from "../../utils/dateUtils";
 import { FaExchangeAlt, FaPlus, FaCheck, FaArrowLeft } from "react-icons/fa";
 
 const unwrapList = (v: any): any[] =>
@@ -118,12 +119,12 @@ const ShelterTransfers = () => {
         status: t.status || "pending",
         notes: t.notes || "-",
         sender_confirmed_at: t.sender_confirmed_at
-          ? new Date(t.sender_confirmed_at).toLocaleString()
+          ? formatDateTime(t.sender_confirmed_at)
           : "-",
         receiver_confirmed_at: t.receiver_confirmed_at
-          ? new Date(t.receiver_confirmed_at).toLocaleString()
+          ? formatDateTime(t.receiver_confirmed_at)
           : "-",
-        created_at: t.created_at ? new Date(t.created_at).toLocaleString() : "-",
+        created_at: t.created_at ? formatDateTime(t.created_at) : "-",
       }));
       setTransfers(formatted);
     } catch (err: any) {

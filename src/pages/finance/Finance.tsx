@@ -28,11 +28,9 @@ const DONATION_STATUSES: Array<{ value: string; label: string }> = [
   { value: "failed", label: "Failed" },
 ];
 
-const formatDate = (value: unknown): string => {
-  if (!value) return "—";
-  const d = new Date(String(value));
-  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString();
-};
+import { formatDateTime } from "../../utils/dateUtils";
+
+const formatDate = (value: unknown): string => formatDateTime(value as string);
 
 const numericValue = (val: unknown): number => {
   const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));

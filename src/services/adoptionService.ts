@@ -1,5 +1,6 @@
 import api from "../api/axios";
 import { triggerAdoptionWorkflow } from "../utils/eventSystem";
+import { formatDateTime } from "../utils/dateUtils";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -242,7 +243,7 @@ export const adoptionService = {
     const response = await api.put(`/adoptions/${id}`, payload);
     
     const formattedDate = scheduledAt
-      ? new Date(scheduledAt).toLocaleString()
+      ? formatDateTime(scheduledAt)
       : "the scheduled date";
     await notifyApplicant(
       adopterId,

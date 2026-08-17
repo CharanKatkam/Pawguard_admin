@@ -29,6 +29,7 @@ import rescueService from "../../../services/rescueService";
 import inventoryService from "../../../services/inventoryService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { generateQrDataUrl, generateQrBlob } from "../../../utils/qrGenerator";
+import { formatDateTime } from "../../../utils/dateUtils";
 
 const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
@@ -666,7 +667,7 @@ const ShelterManagerDashboard = () => {
   // Report Generator Handler
   const handleGenerateReportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const now = new Date().toLocaleDateString();
+    const now = formatDateTime(new Date());
     let title = "Shelter Occupancy & Capacity Report";
     let body = `Total Shelter Dogs: ${dashboardData.total_dogs}\nAdoptable Dogs: ${dashboardData.adoptable_dogs}\nKennels Registered: ${dashboardData.total_kennels}\nCapacity Utilization: ${dashboardData.total_capacity > 0 ? Math.round((dashboardData.in_shelter_dogs / dashboardData.total_capacity) * 100) : 0}%`;
 

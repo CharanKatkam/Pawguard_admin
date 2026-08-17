@@ -23,6 +23,7 @@ import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { getCurrentUserRole, normalizeRole } from "../../utils/roleUtils";
+import { formatDateTime } from "../../utils/dateUtils";
 
 // Backend enum values (RescueSeverity / RescuePhysicalCondition) per OpenAPI.
 const SEVERITY_OPTIONS = [
@@ -183,8 +184,8 @@ const RescueManagement = () => {
           reporter_notes: String(item.reporter_notes ?? item.notes ?? "-"),
           status: String(item.status ?? "-"),
           ...(item.rejection_rationale ? { rejection_reason: String(item.rejection_rationale) } : {}),
-          created_at: item.created_at ? new Date(String(item.created_at)).toLocaleString() : "-",
-          updated_at: item.updated_at ? new Date(String(item.updated_at)).toLocaleString() : "-",
+          created_at: item.created_at ? formatDateTime(item.created_at as string) : "-",
+          updated_at: item.updated_at ? formatDateTime(item.updated_at as string) : "-",
           stage_label: stage.label,
           stage_bg: stage.bg,
           stage_color: stage.color,
@@ -192,10 +193,10 @@ const RescueManagement = () => {
           dispatch_agents: agentsList.length > 0 ? agentsList.map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ") : "-",
           dispatch_vehicle: String(d?.assigned_vehicle_id || d?.vehicle_id || "-"),
           dispatch_equipment: String(d?.equipment_details || "-"),
-          dispatched_at: d?.dispatched_at ? new Date(String(d.dispatched_at)).toLocaleString() : "-",
-          located_at: d?.located_at ? new Date(String(d.located_at)).toLocaleString() : "-",
-          rescued_at: d?.rescued_at ? new Date(String(d.rescued_at)).toLocaleString() : "-",
-          admitted_at: d?.admitted_at ? new Date(String(d.admitted_at)).toLocaleString() : "-",
+          dispatched_at: d?.dispatched_at ? formatDateTime(d.dispatched_at as string) : "-",
+          located_at: d?.located_at ? formatDateTime(d.located_at as string) : "-",
+          rescued_at: d?.rescued_at ? formatDateTime(d.rescued_at as string) : "-",
+          admitted_at: d?.admitted_at ? formatDateTime(d.admitted_at as string) : "-",
           escalation_type: String(d?.escalation_type || "-"),
           escalation_notes: String(d?.escalation_notes || "-"),
           has_dispatch: Boolean(d),

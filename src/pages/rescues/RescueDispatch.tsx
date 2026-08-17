@@ -21,6 +21,7 @@ import vehicleService from "../../services/vehicleService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
 import { normalizeRole } from "../../utils/roleUtils";
+import { formatDateTime } from "../../utils/dateUtils";
 
 const unwrapList = (body: unknown): Record<string, unknown>[] => {
   if (!body) return [];
@@ -125,8 +126,8 @@ const RescueDispatch = () => {
             agents.length > 0 ? agents.map((a: Record<string, unknown>) => userIdLabel(String(a.agent_id || a.id || ""))).join(", ") : "-",
           vehicle_label:
             String(vehicle?.vehicle_number || vehicle?.registration_number || vehicle?.id || d.vehicle_id || "-"),
-          reported_at: req?.created_at ? new Date(String(req.created_at)).toLocaleString() : "-",
-          dispatched_at: d.dispatched_at ? new Date(String(d.dispatched_at)).toLocaleString() : "-",
+          reported_at: req?.created_at ? formatDateTime(req.created_at as string) : "-",
+          dispatched_at: d.dispatched_at ? formatDateTime(d.dispatched_at as string) : "-",
           raw: d,
         };
       });

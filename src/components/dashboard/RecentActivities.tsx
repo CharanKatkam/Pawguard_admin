@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import dashboardService from "../../services/dashboardService";
 import { useDataSync } from "../../utils/dataSync";
 import { getActivityStream } from "../../utils/eventSystem";
+import { formatDateTime } from "../../utils/dateUtils";
 
 interface Activity {
   id?: number | string;
@@ -104,10 +105,7 @@ const RecentActivities = () => {
                 color: "#9CA3AF",
               }}
             >
-              {activity.time ||
-                activity.created_at ||
-                activity.timestamp ||
-                "-"}
+              {formatDateTime(activity.time || activity.created_at || activity.timestamp)}
             </small>
           </div>
         ))

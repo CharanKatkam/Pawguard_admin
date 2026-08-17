@@ -40,11 +40,9 @@ const pick = (row: Row, ...keys: string[]): unknown => {
   return undefined;
 };
 
-const formatDate = (v: unknown): string => {
-  if (!v) return "-";
-  const d = new Date(String(v));
-  return isNaN(d.getTime()) ? String(v) : d.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-};
+import { formatDateTime } from "../../../utils/dateUtils";
+
+const formatDate = (v: unknown): string => formatDateTime(v as string);
 
 const badgeStyle = (bg: string, color: string): React.CSSProperties => ({
   background: bg,

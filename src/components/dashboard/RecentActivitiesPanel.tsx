@@ -19,6 +19,7 @@ import { FaClock } from "react-icons/fa";
 import DashboardSectionHeader from "./DashboardSectionHeader";
 import DashboardSkeleton from "./DashboardSkeleton";
 import type { ActivityEntry } from "../../types/dashboard";
+import { formatDateTime } from "../../utils/dateUtils";
 
 interface RecentActivitiesPanelProps {
   activities: ActivityEntry[];
@@ -139,7 +140,7 @@ const RecentActivitiesPanel = ({ activities, loading }: RecentActivitiesPanelPro
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                     <span style={{ fontSize: "10.5px", color: "#94A3B8", display: "inline-flex", alignItems: "center", gap: 3 }}>
                       <FaClock size={9} />
-                      {a.time}
+                      {formatDateTime(a.time)}
                     </span>
                     <span
                       style={{

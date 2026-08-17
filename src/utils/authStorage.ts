@@ -15,7 +15,11 @@ export const AUTH_STORAGE_KEYS = {
   user: "user",
   rememberMe: "remember_me",
   rememberEmail: "remember_email",
+  lastActivity: "last_activity",
 } as const;
+
+/** Exact 300 seconds (5 minutes) session inactivity timeout. */
+export const SESSION_TIMEOUT_MS = 300 * 1000;
 
 const read = (key: string): string | null => {
   try {
@@ -62,6 +66,40 @@ const remove = (key: string): void => {
 export const getAccessToken = (): string | null => read(AUTH_STORAGE_KEYS.accessToken);
 
 export const getRefreshToken = (): string | null => read(AUTH_STORAGE_KEYS.refreshToken);
+
+export const updateLastActivity = (): void => {
+  const nowStr = Date.now().toString();
+  try {
+    sessionStorage.setItem(AUTH_STORAGE_KEYS.lastActivity, nowStr);
+  } catch {
+    /* storage unavailable; ignore */
+  }
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEYS.lastActivity, nowStr);
+  } catch {
+    /* storage unavailable; ignore */
+  }
+};
+
+export const getLastActivity = (): number | null => {
+  const raw = read(AUTH_STORAGE_KEYS.lastActivity);
+  if (!raw) return null;
+  const num = parseInt(raw, 10);
+  return isNaN(num) ? null : num;
+};
+
+export const isSessionExpired = (): boolean => {
+  const token = getAccessToken();
+  if (!token) return false;
+
+  const lastActivity = getLastActivity();
+  if (!lastActivity) {
+    updateLastActivity();
+    return false;
+  }
+
+  return Date.now() - lastActivity >= SESSION_TIMEOUT_MS;
+};
 
 export const getStoredUser = <T = unknown>(): T | null => {
   const raw = read(AUTH_STORAGE_KEYS.user);
@@ -135,6 +173,7 @@ export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
     remove(AUTH_STORAGE_KEYS.refreshToken);
   }
   write(AUTH_STORAGE_KEYS.user, JSON.stringify(data.user));
+  updateLastActivity();
 };
 
 /** Remove credentials from BOTH storages (leaves remember-email preference). */
@@ -142,4 +181,5 @@ export const clearAuthData = (): void => {
   remove(AUTH_STORAGE_KEYS.accessToken);
   remove(AUTH_STORAGE_KEYS.refreshToken);
   remove(AUTH_STORAGE_KEYS.user);
+  remove(AUTH_STORAGE_KEYS.lastActivity);
 };

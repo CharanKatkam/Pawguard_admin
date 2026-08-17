@@ -13,6 +13,7 @@ import { inventoryService } from "../services/inventoryService";
 import { medicalService } from "../services/medicalService";
 import { financeService } from "../services/financeService";
 import { donationsService } from "../services/donationsService";
+import { formatDateTime } from "../utils/dateUtils";
 import { firstDefined, unwrapList } from "../utils/chartUtils";
 import type { ActivityEntry, AnyRecord, DashboardSummary } from "../types/dashboard";
 
@@ -67,7 +68,7 @@ const normalizeActivity = (raw: AnyRecord): ActivityEntry | null => {
     user: userRaw === null ? "System" : String(userRaw),
     action: title,
     module: String(firstDefined(raw.module, raw.category, raw.type, raw.entity) ?? "system"),
-    time: timeRaw ? new Date(String(timeRaw)).toLocaleString() : "Just now",
+    time: timeRaw ? formatDateTime(timeRaw as string) : "Just now",
     status: String(firstDefined(raw.status, raw.result, raw.state) ?? "Success"),
     raw,
   };

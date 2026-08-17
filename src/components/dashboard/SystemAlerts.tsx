@@ -11,6 +11,7 @@ import {
   vaccinationDue,
 } from "../../utils/chartUtils";
 import type { AlertItem, AnyRecord } from "../../types/dashboard";
+import { getCurrentUser, getCurrentUserRole } from "../../utils/roleUtils";
 
 interface SystemAlertsProps {
   inventory: AnyRecord[];
@@ -49,8 +50,60 @@ const SystemAlerts = ({
 
   const alerts = useMemo<AlertItem[]>(() => {
     const list: AlertItem[] = [];
-    const criticalStock = inventory.filter(isCriticalStock);
-    const lowStock = inventory.filter((i) => isLowStockItem(i) && !isCriticalStock(i));
+    const user = getCurrentUser();
+    const userRole = getCurrentUserRole();
+
+    // Inventory Low Stock alert role gating:
+    // Authorized: super_admin, rescue_centre_admin, inventory_manager, shelter_manager
+    // Prohibited: veterinarian, rescue_coordinator, rescue_agent, adoption_coordinator, foster_coordinator, volunteer_coordinator, finance_user, public/adopter
+    const isAuthorizedForInventory =
+      userRole === "super_admin" ||
+      userRole === "rescue_centre_admin" ||
+      userRole === "inventory_manager" ||
+      userRole === "shelter_manager";
+
+    if (isAuthorizedForInventory) {
+      let filteredInventory = inventory;
+      if (userRole === "shelter_manager") {
+        const userShelterId = String((user as any)?.shelter_id || (user as any)?.shelterId || (user as any)?.facility_id || "").trim().toLowerCase();
+        const userShelterName = String((user as any)?.shelter || (user as any)?.shelter_name || (user as any)?.department || "").trim().toLowerCase();
+        if (userShelterId || userShelterName) {
+          filteredInventory = inventory.filter((item) => {
+            const itemShelterId = String(item.shelter_id || item.shelterId || "").trim().toLowerCase();
+            const itemShelterName = String(item.shelter || item.shelter_name || "").trim().toLowerCase();
+            if (userShelterId && itemShelterId) return userShelterId === itemShelterId;
+            if (userShelterName && itemShelterName) return userShelterName === itemShelterName;
+            return true;
+          });
+        }
+      }
+
+      const criticalStock = filteredInventory.filter(isCriticalStock);
+      const lowStock = filteredInventory.filter((i) => isLowStockItem(i) && !isCriticalStock(i));
+
+      if (criticalStock.length > 0) {
+        list.push({
+          id: "stock-critical",
+          severity: "danger",
+          title: `${criticalStock.length} inventory item${criticalStock.length > 1 ? "s" : ""} out of stock`,
+          description: "Essential supplies have hit zero stock and need immediate reordering.",
+          module: "Inventory",
+          path: "/inventory",
+          count: criticalStock.length,
+        });
+      } else if (lowStock.length > 0) {
+        list.push({
+          id: "stock-low",
+          severity: "warning",
+          title: `${lowStock.length} inventory item${lowStock.length > 1 ? "s" : ""} below reorder threshold`,
+          description: "Stock levels are running low and should be replenished soon.",
+          module: "Inventory",
+          path: "/inventory",
+          count: lowStock.length,
+        });
+      }
+    }
+
     const dueVaccines = medical.filter(vaccinationDue);
     const fullShelters = shelters.filter(isOverCapacity);
     const pendingRescues = rescues.filter((r) => isPending(r));
@@ -58,28 +111,6 @@ const SystemAlerts = ({
     const failedPayments = finance.filter((f) => isFailed(f));
     const pendingAdoptions = adoptions.filter((a) => isPending(a));
     const pendingVolunteers = volunteers.filter((v) => isPending(v));
-
-    if (criticalStock.length > 0) {
-      list.push({
-        id: "stock-critical",
-        severity: "danger",
-        title: `${criticalStock.length} inventory item${criticalStock.length > 1 ? "s" : ""} out of stock`,
-        description: "Essential supplies have hit zero stock and need immediate reordering.",
-        module: "Inventory",
-        path: "/inventory",
-        count: criticalStock.length,
-      });
-    } else if (lowStock.length > 0) {
-      list.push({
-        id: "stock-low",
-        severity: "warning",
-        title: `${lowStock.length} inventory item${lowStock.length > 1 ? "s" : ""} below reorder threshold`,
-        description: "Stock levels are running low and should be replenished soon.",
-        module: "Inventory",
-        path: "/inventory",
-        count: lowStock.length,
-      });
-    }
 
     if (dueVaccines.length > 0) {
       list.push({

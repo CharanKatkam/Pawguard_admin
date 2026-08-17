@@ -17,6 +17,7 @@ import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
+import { formatDateTime } from "../../../utils/dateUtils";
 
 interface RescueDashboardData {
   total_calls: number;
@@ -58,8 +59,8 @@ const formatAssigned = (c: Record<string, unknown>) => ({
   agents: Array.isArray((c.dispatch as Record<string, unknown>)?.agents) && ((c.dispatch as Record<string, unknown>).agents as Record<string, unknown>[]).length > 0
     ? ((c.dispatch as Record<string, unknown>).agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")
     : "-",
-  dispatched_at: (c.dispatch as Record<string, unknown>)?.dispatched_at ? new Date(String((c.dispatch as Record<string, unknown>).dispatched_at)).toLocaleString() : "-",
-  created_at: c.created_at ? new Date(String(c.created_at)).toLocaleString() : "-",
+  dispatched_at: (c.dispatch as Record<string, unknown>)?.dispatched_at ? formatDateTime((c.dispatch as Record<string, unknown>).dispatched_at as string) : "-",
+  created_at: c.created_at ? formatDateTime(c.created_at as string) : "-",
   media: Array.isArray(c.media_evidence) ? (c.media_evidence as string[]) : Array.isArray(c.media_urls) ? (c.media_urls as string[]) : [],
   raw: c,
 });

@@ -55,11 +55,9 @@ const badge = (bg: string, color: string): React.CSSProperties => ({
   display: "inline-block",
 });
 
-const formatDate = (v: unknown): string => {
-  if (!v) return "-";
-  const d = new Date(String(v));
-  return isNaN(d.getTime()) ? String(v) : d.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-};
+import { formatDateTime } from "../../utils/dateUtils";
+
+const formatDate = (v: unknown): string => formatDateTime(v as string);
 
 const parseTime = (v: unknown): number | null => {
   if (!v) return null;

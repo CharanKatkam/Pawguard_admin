@@ -15,6 +15,7 @@ import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import { rescueStatusBadge, dispatchStage, dispatchAgentNames } from "../../../utils/rescueStatus.tsx";
 import { useDataSync } from "../../../utils/dataSync";
+import { formatDateTime } from "../../../utils/dateUtils";
 
 interface RescueCall {
   id: string;
@@ -174,7 +175,7 @@ const RescueCentreAdminDashboard = () => {
 
   const data = statsData.recent_calls.map((item) => ({
     ...item,
-    created_at: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
+    created_at: item.created_at ? formatDateTime(item.created_at) : "-",
   }));
 
   return (
