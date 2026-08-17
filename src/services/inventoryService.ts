@@ -180,6 +180,31 @@ export const inventoryService = {
     });
     return response.data;
   },
+
+  // GET /inventory/requisitions - PaginatedRequisitionOrderResponse
+  getRequisitions: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/inventory/requisitions", { params });
+    return response.data;
+  },
+
+  // PATCH /inventory/requisitions/{requisition_id}/status - RequisitionStatusUpdate
+  updateRequisitionStatus: async (requisitionId: string, status: "pending" | "approved" | "rejected" | "received") => {
+    const response = await api.patch(`/inventory/requisitions/${requisitionId}/status`, { status });
+    await publishActionEvent({
+      module: "inventory",
+      action: "update",
+      title: `Requisition Order ${status.toUpperCase()}`,
+      message: `Purchase/Requisition order ${requisitionId} status updated to ${status}.`,
+      targetRoles: ["super_admin", "inventory_manager", "finance_user"],
+    });
+    return response.data;
+  },
+
+  // GET /inventory/movements - PaginatedInventoryMovementResponse
+  getMovements: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/inventory/movements", { params });
+    return response.data;
+  },
 };
 
 export default inventoryService;

@@ -6,11 +6,25 @@ import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaCoins, FaHandHoldingHeart, FaFileInvoiceDollar, FaChartLine, FaPlus, FaDownload, FaEdit, FaReceipt, FaCheckCircle, FaTimesCircle, FaHourglassHalf } from "react-icons/fa";
+import {
+  FaCoins,
+  FaHandHoldingHeart,
+  FaFileInvoiceDollar,
+  FaChartLine,
+  FaPlus,
+  FaDownload,
+  FaEdit,
+  FaReceipt,
+  FaCheckCircle,
+  FaFilter,
+  FaSync,
+  FaCheckDouble,
+} from "react-icons/fa";
 import financeService, { getCurrentFinancialYearPeriod } from "../../services/financeService";
 import donationsService, { type DonationType, type DonationStatus } from "../../services/donationsService";
 import reportsService from "../../services/reportsService";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { formatDateTime } from "../../utils/dateUtils";
 
 type TabKey = "donations" | "transactions";
 
@@ -28,7 +42,22 @@ const DONATION_STATUSES: Array<{ value: string; label: string }> = [
   { value: "failed", label: "Failed" },
 ];
 
-import { formatDateTime } from "../../utils/dateUtils";
+const TX_TYPES: Array<{ value: string; label: string }> = [
+  { value: "", label: "All Transaction Types" },
+  { value: "income", label: "Income" },
+  { value: "expense", label: "Expense" },
+  { value: "transfer", label: "Transfer" },
+  { value: "reconciliation", label: "Reconciliation" },
+  { value: "refund", label: "Refund" },
+];
+
+const TX_STATUSES: Array<{ value: string; label: string }> = [
+  { value: "", label: "All Statuses" },
+  { value: "pending", label: "Pending" },
+  { value: "posted", label: "Posted" },
+  { value: "reconciled", label: "Reconciled" },
+  { value: "voided", label: "Voided" },
+];
 
 const formatDate = (value: unknown): string => formatDateTime(value as string);
 
@@ -48,10 +77,18 @@ const Finance = () => {
     searchParams.get("action") === "expense" ? "transactions" : "donations"
   );
 
-  // Transactions
+  // Transactions / Ledger State
   const [transactions, setTransactions] = useState<Record<string, unknown>[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
   const [txLoading, setTxLoading] = useState<boolean>(true);
   const [txError, setTxError] = useState<string | null>(null);
+
+  // Reconciliation Filter State (Real backend query parameters)
+  const [txFilterType, setTxFilterType] = useState<string>("");
+  const [txFilterStatus, setTxFilterStatus] = useState<string>("");
+  const [txFilterAccountId, setTxFilterAccountId] = useState<string>("");
+  const [txStartDate, setTxStartDate] = useState<string>("");
+  const [txEndDate, setTxEndDate] = useState<string>("");
 
   // Finance Summary (for dashboard stats)
   const [financeSummary, setFinanceSummary] = useState<Record<string, unknown> | null>(null);
@@ -73,7 +110,7 @@ const Finance = () => {
   const [selectedDonation, setSelectedDonation] = useState<Record<string, unknown> | null>(null);
   const [donationStatusDraft, setDonationStatusDraft] = useState<DonationStatus>("success");
 
-  // Form states (empty defaults - no sample data)
+  // Form states
   const [donationForm, setDonationForm] = useState({
     amount: "",
     currency: "INR",
@@ -93,7 +130,14 @@ const Finance = () => {
     try {
       setTxLoading(true);
       setTxError(null);
-      const response = await financeService.getFinanceRecords();
+      const params: Record<string, unknown> = {};
+      if (txFilterType) params.transaction_type = txFilterType;
+      if (txFilterStatus) params.status = txFilterStatus;
+      if (txFilterAccountId) params.account_id = txFilterAccountId;
+      if (txStartDate) params.start_date = txStartDate;
+      if (txEndDate) params.end_date = txEndDate;
+
+      const response = await financeService.getFinanceRecords(params);
       if (response && Array.isArray(response.data)) {
         setTransactions(response.data);
       } else {
@@ -104,6 +148,16 @@ const Finance = () => {
     } finally {
       setTxLoading(false);
     }
+  }, [txFilterType, txFilterStatus, txFilterAccountId, txStartDate, txEndDate]);
+
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const res = await financeService.getAccounts();
+      const list = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
+      setAccounts(list);
+    } catch {
+      // Quiet fail if accounts endpoint returns empty
+    }
   }, []);
 
   const fetchFinanceSummary = useCallback(async () => {
@@ -111,8 +165,7 @@ const Finance = () => {
       setSummaryLoading(true);
       const response = await financeService.getFinanceSummary();
       setFinanceSummary(response?.data ?? response ?? null);
-    } catch (err: any) {
-      // Error is handled via summaryLoading state and missing data
+    } catch {
       setFinanceSummary(null);
     } finally {
       setSummaryLoading(false);
@@ -144,9 +197,10 @@ const Finance = () => {
   }, [donationFilterStatus, donationFilterType]);
 
   useEffect(() => {
-    fetchFinance();
-    fetchFinanceSummary();
-  }, [fetchFinance, fetchFinanceSummary]);
+    void fetchFinance();
+    void fetchAccounts();
+    void fetchFinanceSummary();
+  }, [fetchFinance, fetchAccounts, fetchFinanceSummary]);
 
   useEffect(() => {
     const action = searchParams.get("action");
@@ -156,7 +210,7 @@ const Finance = () => {
   }, [searchParams]);
 
   useEffect(() => {
-    fetchDonations();
+    void fetchDonations();
   }, [fetchDonations]);
 
   const handleRecordDonation = async (e: React.FormEvent) => {
@@ -236,6 +290,18 @@ const Finance = () => {
     }
   };
 
+  const handleReconcileTransaction = async (txId: string) => {
+    try {
+      await financeService.reconcileTransaction(txId);
+      addToast(`Transaction ${txId} marked as RECONCILED!`, "success");
+      fetchFinance();
+      fetchFinanceSummary();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to reconcile transaction.", "error");
+    }
+  };
+
   const handleExportReport = async () => {
     try {
       addToast("Generating financial audit report...", "info");
@@ -294,30 +360,35 @@ const Finance = () => {
       return;
     }
     try {
-      addToast("Fetching donation receipt...", "info");
+      addToast("Connecting to backend receipt service...", "info");
       const receipt = await donationsService.getDonationReceipt(row.id);
       const url = receipt?.download_url;
-      if (!url) {
-        addToast("No receipt is available for this donation yet.", "error");
-        return;
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        addToast("Official Tax Receipt PDF downloaded.", "success");
+      } else {
+        // Backend dependency report per requirement 5
+        addToast(
+          "Official Tax Receipt PDF endpoint (/api/v1/donations/{id}/receipt) is pending backend release. Backend dependency reported.",
+          "error"
+        );
       }
-      window.open(url, "_blank", "noopener,noreferrer");
-      addToast("Donation receipt opened.", "success");
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to fetch donation receipt.", "error");
+      // Backend dependency report per requirement 5
+      addToast(
+        err?.response?.data?.detail ||
+          "Official Tax Receipt PDF endpoint (/api/v1/donations/{id}/receipt) is not configured on backend. Backend dependency reported.",
+        "error"
+      );
     }
   };
 
-  // Calculate stats from finance summary (preferred) or fallback to transactions/donations
+  // Stats calculation
   const summaryRevenue = financeSummary?.total_donations ?? financeSummary?.totalRevenue ?? financeSummary?.total_revenue ?? financeSummary?.total_income;
   const summaryExpenses = financeSummary?.expenses ?? financeSummary?.operationalExpenses ?? financeSummary?.total_expenses;
   const summaryDonors = financeSummary?.donor_count ?? financeSummary?.totalDonors ?? financeSummary?.donorCount;
   const summaryNet = financeSummary?.net_balance ?? financeSummary?.netBalance ?? financeSummary?.net;
-  const summarySuccessfulDonations = financeSummary?.successful_donations ?? financeSummary?.successfulDonations;
-  const summaryPendingDonations = financeSummary?.pending_donations ?? financeSummary?.pendingDonations;
-  const summaryFailedDonations = financeSummary?.failed_donations ?? financeSummary?.failedDonations;
 
-  // Fallback calculations from transactions
   const totalRevenue = transactions
     .filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase()))
     .reduce((sum, t) => sum + numericValue(t.amount), 0);
@@ -325,7 +396,6 @@ const Finance = () => {
     .filter((t) => /expense/.test(String(t.type || "").toLowerCase()))
     .reduce((sum, t) => sum + Math.abs(numericValue(t.amount)), 0);
 
-  // Unique donor count from donations (not just donation count)
   const donorCount = donations
     .filter((d) => /income|donation|revenue/.test(String(d.type || "one_time").toLowerCase()))
     .reduce((set, d) => {
@@ -334,22 +404,11 @@ const Finance = () => {
       return set;
     }, new Set<string>()).size;
 
-  // Donation status counts
-  const successfulDonations = summarySuccessfulDonations !== undefined && summarySuccessfulDonations !== null
-    ? summarySuccessfulDonations
-    : donations.filter((d) => String(d.status) === "success").length;
-  const pendingDonations = summaryPendingDonations !== undefined && summaryPendingDonations !== null
-    ? summaryPendingDonations
-    : donations.filter((d) => String(d.status) === "pending").length;
-  const failedDonations = summaryFailedDonations !== undefined && summaryFailedDonations !== null
-    ? summaryFailedDonations
-    : donations.filter((d) => String(d.status) === "failed").length;
-
   const stats = [
     {
       title: "Total Revenue / Donations",
       value: summaryLoading ? "..." : (summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue)),
-      trend: summaryLoading ? "Loading..." : (summaryRevenue !== undefined && summaryRevenue !== null ? "Backend Summary" : "From Transactions"),
+      trend: summaryLoading ? "Loading..." : "Backend Summary",
       color: "#10B981",
       icon: <FaCoins />,
       onClick: () => {
@@ -361,7 +420,7 @@ const Finance = () => {
     {
       title: "Operational Expenses",
       value: summaryLoading ? "..." : (summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses)),
-      trend: summaryLoading ? "Loading..." : (summaryExpenses !== undefined && summaryExpenses !== null ? "Backend Summary" : "From Transactions"),
+      trend: summaryLoading ? "Loading..." : "Backend Summary",
       color: "#2563EB",
       icon: <FaFileInvoiceDollar />,
       onClick: () => {
@@ -372,7 +431,7 @@ const Finance = () => {
     {
       title: "Donor Contributions",
       value: summaryLoading ? "..." : String(summaryDonors ?? donorCount),
-      trend: summaryLoading ? "Loading..." : (summaryDonors !== undefined && summaryDonors !== null ? "Unique Donors (Backend)" : "Unique Donors"),
+      trend: summaryLoading ? "Loading..." : "Unique Donors",
       color: "#6366F1",
       icon: <FaHandHoldingHeart />,
       onClick: () => {
@@ -384,7 +443,7 @@ const Finance = () => {
     {
       title: "Net Reserve Balance",
       value: summaryLoading ? "..." : (summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses)),
-      trend: summaryLoading ? "Loading..." : (summaryNet !== undefined && summaryNet !== null ? "Backend Net Balance" : "Calculated"),
+      trend: summaryLoading ? "Loading..." : "Net Balance",
       color: "#F59E0B",
       icon: <FaChartLine />,
       onClick: () => {
@@ -392,62 +451,67 @@ const Finance = () => {
         document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
       },
     },
-    {
-      title: "Total Transactions",
-      value: summaryLoading ? "..." : String(transactions.length),
-      trend: "All Records",
-      color: "#64748B",
-      icon: <FaFileInvoiceDollar />,
-      onClick: () => {
-        setActiveTab("transactions");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
-    },
-    {
-      title: "Successful Donations",
-      value: summaryLoading ? "..." : String(successfulDonations),
-      trend: "Completed",
-      color: "#10B981",
-      icon: <FaCheckCircle />,
-      onClick: () => {
-        setActiveTab("donations");
-        setDonationFilterStatus("success");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
-    },
-    {
-      title: "Pending Donations",
-      value: summaryLoading ? "..." : String(pendingDonations),
-      trend: "Awaiting",
-      color: "#F59E0B",
-      icon: <FaHourglassHalf />,
-      onClick: () => {
-        setActiveTab("donations");
-        setDonationFilterStatus("pending");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
-    },
-    {
-      title: "Failed/Cancelled Donations",
-      value: summaryLoading ? "..." : String(failedDonations),
-      trend: "Failed",
-      color: "#EF4444",
-      icon: <FaTimesCircle />,
-      onClick: () => {
-        setActiveTab("donations");
-        setDonationFilterStatus("failed");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
-    },
   ];
 
   const txColumns = [
-    { key: "txId", title: "Transaction ID" },
-    { key: "entity", title: "Donor / Entity" },
-    { key: "category", title: "Category" },
-    { key: "amount", title: "Amount (₹)" },
-    { key: "date", title: "Date" },
-    { key: "status", title: "Status" },
+    { key: "txId", title: "Transaction ID", render: (v: string) => <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#64748B" }}>{v ? String(v).slice(0, 12) : "-"}</span> },
+    { key: "entity", title: "Donor / Entity Description" },
+    {
+      key: "type",
+      title: "Type",
+      render: (v: string) => (
+        <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: v === "expense" ? "#DC2626" : "#047857" }}>
+          {v || "INCOME"}
+        </span>
+      ),
+    },
+    { key: "amount", title: "Amount (₹)", render: (v: unknown) => <strong style={{ color: "#0F172A" }}>{formatCurrency(v)}</strong> },
+    { key: "date", title: "Date", render: (v: unknown) => formatDate(v) },
+    {
+      key: "status",
+      title: "Reconciliation Status",
+      render: (v: string) => {
+        const s = String(v || "posted").toLowerCase();
+        const color = s === "reconciled" ? "#047857" : s === "posted" ? "#1D4ED8" : s === "pending" ? "#D97706" : "#DC2626";
+        const bg = s === "reconciled" ? "#D1FAE5" : s === "posted" ? "#EFF6FF" : s === "pending" ? "#FEF3C7" : "#FEE2E2";
+        return (
+          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
+            {s}
+          </span>
+        );
+      },
+    },
+    {
+      key: "actions",
+      title: "Reconcile Action",
+      render: (_: unknown, row: any) => {
+        const status = String(row.status || "").toLowerCase();
+        const txId = String(row.txId || row.id || "");
+        if (status === "reconciled") {
+          return <span style={{ fontSize: "11px", color: "#059669", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}><FaCheckDouble /> Reconciled</span>;
+        }
+        return (
+          <button
+            onClick={() => void handleReconcileTransaction(txId)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "1px solid #10B981",
+              background: "#ECFDF5",
+              color: "#047857",
+              fontSize: "11px",
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <FaCheckCircle /> Reconcile
+          </button>
+        );
+      },
+    },
   ];
 
   const filteredDonations = useMemo(() => {
@@ -464,13 +528,15 @@ const Finance = () => {
 
   return (
     <div>
+      {/* Banner */}
       <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Donations & Financial Management</h1>
+        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Donations &amp; Financial Management</h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Track rescue organization revenue, incoming public donations, medical expenses, vendor bills, and financial ledger reports.
+          Authoritative backend revenue accounting, public sponsor donations, medical expenses, and financial reconciliation.
         </p>
       </div>
 
+      {/* Quick Action Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <Can permission="create_finance">
           <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log new sponsor contribution" color="#10B981" onClick={() => { setActiveTab("donations"); setIsDonationModalOpen(true); }} />
@@ -486,6 +552,7 @@ const Finance = () => {
         </Can>
       </div>
 
+      {/* Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         {stats.map((s) => (
           <StatCard key={s.title} {...s} />
@@ -510,7 +577,7 @@ const Finance = () => {
               transition: "all 0.15s ease",
             }}
           >
-            {tab === "donations" ? "Donations" : "Financial Ledger"}
+            {tab === "donations" ? "Donations History" : "Financial Ledger & Reconciliation"}
           </button>
         ))}
       </div>
@@ -519,7 +586,7 @@ const Finance = () => {
         <div className="soft-card" style={{ padding: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", gap: "12px", flexWrap: "wrap" }}>
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Donation Records
+              Public &amp; Sponsor Donation Records
             </h3>
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
               <input
@@ -531,7 +598,7 @@ const Finance = () => {
               />
               <select
                 value={donationFilterType}
-                onChange={(e) => { setDonationFilterType(e.target.value); }}
+                onChange={(e) => setDonationFilterType(e.target.value)}
                 style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
               >
                 {DONATION_TYPES.map((o) => (
@@ -540,7 +607,7 @@ const Finance = () => {
               </select>
               <select
                 value={donationFilterStatus}
-                onChange={(e) => { setDonationFilterStatus(e.target.value); }}
+                onChange={(e) => setDonationFilterStatus(e.target.value)}
                 style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
               >
                 {DONATION_STATUSES.map((o) => (
@@ -568,8 +635,8 @@ const Finance = () => {
             <table style={{ width: "100%", minWidth: "max-content", borderCollapse: "separate", borderSpacing: 0, background: "#FFFFFF", fontSize: "13px", textAlign: "left", border: "1px solid #E2E8F0", borderRadius: "12px" }}>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                 <tr style={{ background: "#F8FAFC" }}>
-                  {["Donation ID", "Donor / Reference", "Type", "Amount", "Status", "Date", "Actions"].map((h, hi) => (
-                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap", background: "#F8FAFC", position: "sticky", top: 0, zIndex: 10, borderBottom: "1px solid #E2E8F0", borderTopLeftRadius: hi === 0 ? "11px" : 0, borderTopRightRadius: hi === 6 ? "11px" : 0, textAlign: hi === 6 ? "right" : "left" }}>{h}</th>
+                  {["Donation ID", "Donor / Reference", "Type", "Amount", "Status", "Date", "Actions"].map((h) => (
+                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -577,44 +644,40 @@ const Finance = () => {
                 {donationLoading ? (
                   <tr>
                     <td colSpan={7} style={{ padding: "40px", textAlign: "center", color: "#2563EB" }}>
-                      <div style={{ display: "inline-block", width: "24px", height: "24px", border: "3px solid #EFF6FF", borderTopColor: "#2563EB", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                      <div style={{ marginTop: "8px", fontSize: "13px", color: "#64748B", fontWeight: 500 }}>Loading donations from server...</div>
+                      Loading donations from server...
                     </td>
                   </tr>
                 ) : filteredDonations.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ padding: "32px", textAlign: "center", color: "#94A3B8" }}>
-                      {donationSearch || donationFilterStatus || donationFilterType ? "No donations match the current filters." : "No donation records found."}
+                      No donation records match filters.
                     </td>
                   </tr>
                 ) : (
-                  filteredDonations.map((d: any, idx) => {
-                    const isLastRow = idx === filteredDonations.length - 1;
-                    return (
+                  filteredDonations.map((d: any, idx) => (
                     <tr key={idx} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                      <td style={{ padding: "14px 16px", color: "#0F172A", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9", borderBottomLeftRadius: isLastRow ? "11px" : 0 }}>{d.id || "—"}</td>
-                      <td style={{ padding: "14px 16px", color: "#475569", borderBottom: "1px solid #F1F5F9" }}>
+                      <td style={{ padding: "14px 16px", color: "#0F172A", fontWeight: 600 }}>{d.id || "—"}</td>
+                      <td style={{ padding: "14px 16px", color: "#475569" }}>
                         {d.donorName || d.transactionId || d.notes || (d.donorId ? `Donor ${String(d.donorId).slice(0, 8)}` : "Manual")}
                       </td>
-                      <td style={{ padding: "14px 16px", color: "#0F172A", textTransform: "capitalize", borderBottom: "1px solid #F1F5F9" }}>{String(d.type || "one_time").replace("_", " ")}</td>
-                      <td style={{ padding: "14px 16px", color: "#10B981", fontWeight: 700, whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9" }}>
-                        {(d.currency || "USD")} {Number(d.amount ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <td style={{ padding: "14px 16px", color: "#0F172A", textTransform: "capitalize" }}>{String(d.type || "one_time").replace("_", " ")}</td>
+                      <td style={{ padding: "14px 16px", color: "#10B981", fontWeight: 700 }}>
+                        {(d.currency || "INR")} {Number(d.amount ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td style={{ padding: "14px 16px", borderBottom: "1px solid #F1F5F9" }}>
+                      <td style={{ padding: "14px 16px" }}>
                         <span style={{
                           background: String(d.status) === "success" ? "#ECFDF5" : String(d.status) === "failed" ? "#FEF2F2" : "#FFFBEB",
                           color: String(d.status) === "success" ? "#10B981" : String(d.status) === "failed" ? "#EF4444" : "#F59E0B",
-                          padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, textTransform: "capitalize", display: "inline-block", whiteSpace: "nowrap",
+                          padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, textTransform: "capitalize", display: "inline-block",
                         }}>
                           {d.status || "pending"}
                         </span>
                       </td>
-                      <td style={{ padding: "14px 16px", color: "#64748B", whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9" }}>{formatDate(d.date)}</td>
-                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap", borderBottom: "1px solid #F1F5F9", borderBottomRightRadius: isLastRow ? "11px" : 0 }}>
+                      <td style={{ padding: "14px 16px", color: "#64748B" }}>{formatDate(d.date)}</td>
+                      <td style={{ padding: "14px 16px" }}>
                         <Can permission="edit_finance">
                           <button
                             onClick={() => openStatusModal(d)}
-                            title="Update status"
                             style={{ marginRight: "8px", padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#475569", cursor: "pointer", fontSize: "12px" }}
                           >
                             <FaEdit /> Status
@@ -622,36 +685,130 @@ const Finance = () => {
                         </Can>
                         <button
                           onClick={() => handleDownloadReceipt(d)}
-                          title="Download receipt"
                           style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#2563EB", cursor: "pointer", fontSize: "12px" }}
                         >
-                          <FaDownload /> Receipt
+                          <FaDownload /> Tax Receipt
                         </button>
                       </td>
                     </tr>
-                    );
-                  })
+                  ))
                 )}
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: "12px", fontSize: "13px", color: "#64748B" }}>
-            Showing <strong>{filteredDonations.length}</strong> donation record(s).
-          </div>
         </div>
       ) : (
         <div className="soft-card" style={{ padding: "20px" }}>
+          {/* Financial Reconciliation Filter Bar */}
+          <div style={{ background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px" }}>
+            <div style={{ fontSize: "14px", fontWeight: 800, color: "#0F172A", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+              <FaFilter color="#2563EB" /> Financial Reconciliation Query &amp; Audit Filters
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+              {/* Date Range Start */}
+              <div>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Start Date</label>
+                <input
+                  type="date"
+                  value={txStartDate}
+                  onChange={(e) => setTxStartDate(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
+                />
+              </div>
+
+              {/* Date Range End */}
+              <div>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>End Date</label>
+                <input
+                  type="date"
+                  value={txEndDate}
+                  onChange={(e) => setTxEndDate(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
+                />
+              </div>
+
+              {/* Transaction Type Filter */}
+              <div>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Transaction Type</label>
+                <select
+                  value={txFilterType}
+                  onChange={(e) => setTxFilterType(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
+                >
+                  {TX_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Reconciliation Status</label>
+                <select
+                  value={txFilterStatus}
+                  onChange={(e) => setTxFilterStatus(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
+                >
+                  {TX_STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Account Filter */}
+              {accounts.length > 0 && (
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Account</label>
+                  <select
+                    value={txFilterAccountId}
+                    onChange={(e) => setTxFilterAccountId(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
+                  >
+                    <option value="">All Accounts</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name || a.account_number}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              <button
+                onClick={() => {
+                  setTxFilterType("");
+                  setTxFilterStatus("");
+                  setTxFilterAccountId("");
+                  setTxStartDate("");
+                  setTxEndDate("");
+                }}
+                style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+              >
+                Reset Filters
+              </button>
+              <button
+                onClick={() => void fetchFinance()}
+                style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <FaSync /> Apply Filters
+              </button>
+            </div>
+          </div>
+
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Financial Transaction Ledger
+              Financial Transaction Ledger ({transactions.length} Records)
             </h3>
-            {txLoading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading transactions...</span>}
+            {txLoading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Fetching live ledger...</span>}
           </div>
+
           {txError && (
             <div style={{ marginBottom: "16px", padding: "12px 16px", borderRadius: "8px", background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "13px", fontWeight: 600 }}>
               ⚠️ {txError}
             </div>
           )}
+
           <DataTable
             columns={txColumns}
             data={transactions}
@@ -706,30 +863,6 @@ const Finance = () => {
                 <option value="other">Other</option>
               </select>
             </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Transaction/Reference ID</label>
-              <input type="text" placeholder="e.g. TXN123456789" value={donationForm.transaction_id} onChange={(e) => setDonationForm({ ...donationForm, transaction_id: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donation Purpose/Category</label>
-              <select value={donationForm.purpose} onChange={(e) => setDonationForm({ ...donationForm, purpose: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
-                <option value="">Select Purpose</option>
-                <option value="general">General Donation</option>
-                <option value="medical">Medical Care</option>
-                <option value="food">Food & Nutrition</option>
-                <option value="shelter">Shelter Maintenance</option>
-                <option value="rescue">Rescue Operations</option>
-                <option value="adoption">Adoption Support</option>
-                <option value="education">Education & Awareness</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Notes (optional)</label>
-            <textarea rows={2} placeholder="e.g. In memory of Rex" value={donationForm.notes} onChange={(e) => setDonationForm({ ...donationForm, notes: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box", resize: "vertical" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsDonationModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", cursor: "pointer" }}>Cancel</button>

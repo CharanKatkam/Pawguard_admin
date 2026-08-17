@@ -139,6 +139,52 @@ export const financeService = {
     });
     return response.data;
   },
+
+  // GET /finance/accounts - List financial accounts
+  getAccounts: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/finance/accounts", { params });
+    return response.data;
+  },
+
+  // POST /finance/accounts - Create financial account
+  createAccount: async (data: Record<string, unknown>) => {
+    const response = await api.post("/finance/accounts", data);
+    return response.data;
+  },
+
+  // GET /donations/history - List donation history
+  getDonations: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/donations/history", { params });
+    return response.data;
+  },
+
+  // POST /donations/record - Record incoming donation
+  recordDonation: async (data: Record<string, unknown>) => {
+    const response = await api.post("/donations/record", data);
+    await publishActionEvent({
+      module: "finance",
+      action: "create",
+      title: "Donation Received",
+      message: `New donation of ${data.amount} logged.`,
+      targetRoles: ["super_admin", "finance_user"],
+    });
+    return response.data;
+  },
+
+  // PATCH /finance/transactions/{tx_id} - Reconcile transaction
+  reconcileTransaction: async (txId: string) => {
+    const response = await api.patch(`/finance/transactions/${txId}`, {
+      status: "reconciled",
+    });
+    await publishActionEvent({
+      module: "finance",
+      action: "update",
+      title: "Transaction Reconciled",
+      message: `Financial transaction ${txId} marked as reconciled.`,
+      targetRoles: ["super_admin", "finance_user"],
+    });
+    return response.data;
+  },
 };
 
 export default financeService;

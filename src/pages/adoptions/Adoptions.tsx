@@ -241,8 +241,18 @@ const Adoptions = () => {
       }
 
       setRawToken(token);
-      sessionStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
-      localStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+      const keysToStore = [
+        id,
+        qrDog?.id,
+        (qrDog as any)?.dog_id,
+        (qrDog as any)?.original_dog_id,
+        (qrDog as any)?.registration_number,
+      ].filter(Boolean);
+
+      for (const k of keysToStore) {
+        sessionStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
+        localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
+      }
 
       const qrDataUrl = await generateQrDataUrl(token);
       localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrDataUrl);

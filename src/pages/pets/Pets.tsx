@@ -21,11 +21,13 @@ import {
   FaSearch,
   FaCheckCircle,
   FaSync,
+  FaHistory,
 } from "react-icons/fa";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
+import DogLifecycleTimelineModal from "../../components/pets/DogLifecycleTimelineModal";
 
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
 const GENDERS = ["male", "female", "unknown"];
@@ -109,8 +111,10 @@ const Pets = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
   const [selectedDog, setSelectedDog] = useState<any | null>(null);
   const [selectedViewDog, setSelectedViewDog] = useState<any | null>(null);
+  const [timelineDog, setTimelineDog] = useState<any | null>(null);
 
   // QR modal state
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -334,6 +338,11 @@ const Pets = () => {
     setIsViewModalOpen(true);
   };
 
+  const openTimelineModal = (dog: any) => {
+    setTimelineDog(dog);
+    setIsTimelineModalOpen(true);
+  };
+
   const openEdit = (dog: any) => {
     setSelectedDog(dog);
     setPetForm({
@@ -516,10 +525,20 @@ const Pets = () => {
         throw new Error("Backend provisioning response did not include data.raw_token.");
       }
 
-      // Store raw_token and rendered QR image in persistent storage
+      // Store raw_token across all dog key aliases in persistent storage
       setRawToken(token);
-      sessionStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
-      localStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+      const keysToStore = [
+        id,
+        qrDog?.id,
+        (qrDog as any)?.dog_id,
+        (qrDog as any)?.original_dog_id,
+        qrDog?.registration_number,
+      ].filter(Boolean);
+
+      for (const k of keysToStore) {
+        sessionStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
+        localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
+      }
 
       // Generate client-side QR image directly encoding raw_token
       const qrDataUrl = await generateQrDataUrl(token);
@@ -856,6 +875,24 @@ const Pets = () => {
           }}
         >
           <FaEye /> Master File
+        </button>
+        <button
+          onClick={() => openTimelineModal(row)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 12px",
+            borderRadius: "6px",
+            border: "1px solid #C4B5FD",
+            background: "#F5F3FF",
+            color: "#6D28D9",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          <FaHistory /> Timeline
         </button>
       </Can>
       <Can permission="edit_animals">
@@ -2402,6 +2439,29 @@ const Pets = () => {
                 onClick={() => {
                   const dog = selectedViewDog;
                   setIsViewModalOpen(false);
+                  openTimelineModal(dog);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#2563EB",
+                  color: "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                <FaHistory /> View Lifecycle Timeline
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const dog = selectedViewDog;
+                  setIsViewModalOpen(false);
                   openQrModal(dog);
                 }}
                 style={{
@@ -2431,18 +2491,28 @@ const Pets = () => {
                   borderRadius: "8px",
                   border: "1px solid #CBD5E1",
                   background: "#FFFFFF",
-                  color: "#334155",
+                  color: "#475569",
                   fontWeight: 600,
                   fontSize: "13px",
                   cursor: "pointer",
                 }}
               >
-                Close
+                Close Profile
               </button>
             </div>
           </div>
         )}
       </Modal>
+
+      {/* Dog Master Unified Lifecycle Timeline Modal */}
+      <DogLifecycleTimelineModal
+        isOpen={isTimelineModalOpen}
+        onClose={() => {
+          setIsTimelineModalOpen(false);
+          setTimelineDog(null);
+        }}
+        dog={timelineDog}
+      />
     </div>
   );
 };

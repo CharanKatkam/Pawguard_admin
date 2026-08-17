@@ -452,8 +452,18 @@ const ShelterManagerDashboard = () => {
       if (!token) throw new Error("Backend did not return raw_token.");
 
       setRawToken(token);
-      sessionStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
-      localStorage.setItem(`pawguard_safety_tag_token_${id}`, token);
+      const keysToStore = [
+        id,
+        qrDog?.id,
+        (qrDog as any)?.dog_id,
+        (qrDog as any)?.original_dog_id,
+        qrDog?.registration_number,
+      ].filter(Boolean);
+
+      for (const k of keysToStore) {
+        sessionStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
+        localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
+      }
 
       const qrDataUrl = await generateQrDataUrl(token);
       const blob = await generateQrBlob(token);

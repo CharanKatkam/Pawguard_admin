@@ -10,12 +10,14 @@ import {
   FaUserCheck,
   FaShieldAlt,
   FaEnvelope,
+  FaQrcode,
 } from "react-icons/fa";
-import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../utils/roleUtils";
+import { getCurrentUser, getCurrentUserRole, getRoleTitle, isScannerAuthorizedRole } from "../../utils/roleUtils";
 import { canViewSettings } from "../../utils/rbac";
 import authService from "../../services/auth/authService";
 import { clearAuthData } from "../../utils/authStorage";
 import NotificationDropdown from "./NotificationDropdown";
+import QrScannerModal from "./QrScannerModal";
 import Modal from "../common/Modal";
 
 interface HeaderProps {
@@ -83,6 +85,7 @@ const Header = ({
   const navigate = useNavigate();
   const user = getCurrentUser();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const displayName =
     user?.name ||
@@ -169,8 +172,36 @@ const Header = ({
           </h2>
         </div>
 
-        {/* Right Controls: Notifications, Settings, Profile & Logout */}
+        {/* Right Controls: QR Scanner, Notifications, Settings, Profile & Logout */}
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          {/* QR Scanner Button (Authorized Roles Only) */}
+          {isScannerAuthorizedRole(currentRole) && (
+            <button
+              onClick={() => setIsScannerOpen(true)}
+              style={{
+                position: "relative",
+                background: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+                borderRadius: "10px",
+                width: "40px",
+                height: "40px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#475569",
+                transition: "all 0.2s ease",
+                cursor: "pointer",
+                padding: 0,
+                flexShrink: 0,
+              }}
+              title="Safety Tag QR Scanner"
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#F8FAFC")}
+            >
+              <FaQrcode size={18} />
+            </button>
+          )}
+
           {/* Role-Specific Notifications */}
           <NotificationDropdown />
 
@@ -312,6 +343,12 @@ const Header = ({
           </div>
         </div>
       </Modal>
+
+      {/* PawGuard Safety Tag QR Scanner Modal */}
+      <QrScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+      />
     </>
   );
 };

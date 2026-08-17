@@ -565,3 +565,36 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
       ];
   }
 };
+
+/**
+ * Returns true if the authenticated user has one of the 7 authorized scanner roles:
+ * 1. Super Admin
+ * 2. Shelter Manager
+ * 3. Rescue Centre Admin
+ * 4. Rescue Coordinator
+ * 5. Rescue Agent
+ * 6. Veterinarian
+ * 7. Foster / Foster Caregiver
+ */
+export const isScannerAuthorizedRole = (userOrRole?: unknown): boolean => {
+  const user = userOrRole || getCurrentUser();
+  const rawRole = extractRoleString(user).toLowerCase().trim();
+  const normRole = normalizeRole(user);
+
+  if (
+    normRole === "super_admin" ||
+    normRole === "shelter_manager" ||
+    normRole === "rescue_centre_admin" ||
+    normRole === "rescue_coordinator" ||
+    normRole === "rescue_agent" ||
+    normRole === "veterinarian" ||
+    normRole === "foster_coordinator" ||
+    rawRole.includes("foster") ||
+    rawRole.includes("foster_caregiver") ||
+    rawRole.includes("foster_family")
+  ) {
+    return true;
+  }
+
+  return false;
+};

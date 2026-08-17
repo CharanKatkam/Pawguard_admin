@@ -1,120 +1,131 @@
 import api from "../api/axios";
-import { getStoredUser } from "../utils/authStorage";
 
 export interface VolunteerApplicationPayload {
-  full_name: string;
-  email: string;
-  phone?: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  skills?: string;
+  availability?: string;
   notes?: string;
+  medical_conditions?: string;
+  animal_handling_experience?: string;
   [key: string]: unknown;
 }
 
-export interface VolunteerProfilePayload {
-  full_name?: string;
-  email?: string;
-  phone?: string;
-  skills?: string[];
-  status?: string;
+export interface VolunteerProfileUpdatePayload {
+  status?: "applied" | "onboarded" | "active" | "inactive";
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  skills?: string;
+  availability?: string;
+  notes?: string;
+  medical_conditions?: string;
+  animal_handling_experience?: string;
+  background_check_completed?: boolean;
+  background_check_notes?: string;
   [key: string]: unknown;
 }
 
-export interface ShiftPayload {
-  title?: string;
-  location?: string;
-  start_time?: string;
-  end_time?: string;
+export interface ShiftCreatePayload {
+  shelter_facility_id?: string | null;
+  role_name: string;
+  start_at: string;
+  end_at: string;
   capacity?: number;
   [key: string]: unknown;
 }
 
-export interface VolunteerProfile {
-  id: string;
-  email: string;
-  full_name?: string;
-  [key: string]: unknown;
-}
-
-/** Find the current user's volunteer profile by matching email. */
-const getCurrentVolunteerProfile = async (): Promise<VolunteerProfile | null> => {
-  const user = getStoredUser<{ email?: string }>();
-  if (!user?.email) return null;
-
-  try {
-    const response = await api.get("/volunteers");
-    const list = Array.isArray(response)
-      ? response
-      : Array.isArray(response?.data)
-      ? response.data
-      : [];
-    return list.find((v: VolunteerProfile) => v.email === user.email) ?? null;
-  } catch {
-    return null;
-  }
-};
-
 export const volunteerService = {
-  // POST /volunteers/apply
-  applyVolunteer: async (data: VolunteerApplicationPayload) => {
-    const response = await api.post("/volunteers/apply", data);
-    return response.data;
-  },
-
-  // PUT /volunteers/{profile_id}
-  updateVolunteerProfile: async (profileId: string, data: VolunteerProfilePayload) => {
-    const response = await api.put(`/volunteers/${profileId}`, data);
-    return response.data;
-  },
-
-  // DELETE /volunteers/{profile_id}
-  deleteVolunteerProfile: async (profileId: string) => {
-    const response = await api.delete(`/volunteers/${profileId}`);
-    return response.data;
-  },
-
+  // GET /volunteers - List volunteer profiles
   getVolunteers: async (params?: Record<string, unknown>) => {
     const response = await api.get("/volunteers", { params });
     return response.data;
   },
 
-  // POST /volunteers/shifts
-  createShift: async (data: ShiftPayload) => {
+  // GET /volunteers/{profile_id} - Get profile details
+  getVolunteerById: async (profileId: string) => {
+    const response = await api.get(`/volunteers/${profileId}`);
+    return response.data;
+  },
+
+  // POST /volunteers/apply - Submit application
+  applyVolunteer: async (data: VolunteerApplicationPayload) => {
+    const response = await api.post("/volunteers/apply", data);
+    return response.data;
+  },
+
+  // PUT /volunteers/{profile_id} - Update profile / status
+  updateVolunteerProfile: async (profileId: string, data: VolunteerProfileUpdatePayload) => {
+    const response = await api.put(`/volunteers/${profileId}`, data);
+    return response.data;
+  },
+
+  // POST /volunteers/bulk/status - Bulk status update
+  bulkUpdateStatus: async (profileIds: string[], status: "applied" | "onboarded" | "active" | "inactive") => {
+    const response = await api.post("/volunteers/bulk/status", { profile_ids: profileIds, status });
+    return response.data;
+  },
+
+  // DELETE /volunteers/{profile_id} - Delete profile
+  deleteVolunteerProfile: async (profileId: string) => {
+    const response = await api.delete(`/volunteers/${profileId}`);
+    return response.data;
+  },
+
+  // GET /volunteers/{profile_id}/service-summary
+  getServiceSummary: async (profileId: string) => {
+    const response = await api.get(`/volunteers/${profileId}/service-summary`);
+    return response.data;
+  },
+
+  // GET /volunteers/{profile_id}/certificate
+  getCertificate: async (profileId: string) => {
+    const response = await api.get(`/volunteers/${profileId}/certificate`);
+    return response.data;
+  },
+
+  // GET /volunteers/shifts - List shifts
+  getShifts: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/volunteers/shifts", { params });
+    return response.data;
+  },
+
+  // POST /volunteers/shifts - Create shift
+  createShift: async (data: ShiftCreatePayload) => {
     const response = await api.post("/volunteers/shifts", data);
     return response.data;
   },
 
-  // GET /volunteers/{profile_id}/shifts
-  getShifts: async (params?: Record<string, unknown>) => {
-    const profile = await getCurrentVolunteerProfile();
-    if (!profile?.id) {
-      // Fallback to original endpoint for backward compatibility
-      const response = await api.get("/volunteers/shifts", { params });
-      return response.data;
-    }
-    const response = await api.get(`/volunteers/${profile.id}/shifts`, { params });
+  // POST /volunteers/shifts/{shift_id}/join - Join shift
+  joinShift: async (shiftId: string) => {
+    const response = await api.post(`/volunteers/shifts/${shiftId}/join`);
     return response.data;
   },
 
-  // POST /volunteers/shifts/{shift_id}/join
-  joinShift: async (shiftId: string, data?: Record<string, unknown>) => {
-    const response = await api.post(`/volunteers/shifts/${shiftId}/join`, data);
-    return response.data;
-  },
-
-  // POST /volunteers/attendance/{attendance_id}/check-in
-  checkInAttendance: async (attendanceId: string, data?: Record<string, unknown>) => {
-    const response = await api.post(`/volunteers/attendance/${attendanceId}/check-in`, data);
-    return response.data;
-  },
-
-  // POST /volunteers/attendance/{attendance_id}/check-out
-  checkOutAttendance: async (attendanceId: string, data?: Record<string, unknown>) => {
-    const response = await api.post(`/volunteers/attendance/${attendanceId}/check-out`, data);
-    return response.data;
-  },
-
-  // GET /volunteers/shifts/{shift_id}/attendance
+  // GET /volunteers/shifts/{shift_id}/attendance - List shift attendance
   getShiftAttendance: async (shiftId: string) => {
     const response = await api.get(`/volunteers/shifts/${shiftId}/attendance`);
+    return response.data;
+  },
+
+  // POST /volunteers/attendance/{attendance_id}/check-in - Check in
+  checkInAttendance: async (attendanceId: string, checkInAt?: string) => {
+    const payload = checkInAt ? { check_in_at: checkInAt } : {};
+    const response = await api.post(`/volunteers/attendance/${attendanceId}/check-in`, payload);
+    return response.data;
+  },
+
+  // POST /volunteers/attendance/{attendance_id}/check-out - Check out
+  checkOutAttendance: async (attendanceId: string, notes?: string, checkOutAt?: string) => {
+    const payload: Record<string, unknown> = {};
+    if (notes) payload.notes = notes;
+    if (checkOutAt) payload.check_out_at = checkOutAt;
+    const response = await api.post(`/volunteers/attendance/${attendanceId}/check-out`, payload);
+    return response.data;
+  },
+
+  // GET /admin/dashboard/volunteer-stats - Admin stats
+  getVolunteerStats: async () => {
+    const response = await api.get("/admin/dashboard/volunteer-stats");
     return response.data;
   },
 };
