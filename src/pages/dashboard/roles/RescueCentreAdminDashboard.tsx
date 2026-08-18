@@ -23,8 +23,11 @@ import shelterService from "../../../services/shelterService";
 import adoptionService from "../../../services/adoptionService";
 import fosterService from "../../../services/fosterService";
 import inventoryService from "../../../services/inventoryService";
+import userService from "../../../services/userService";
+import vehicleService from "../../../services/vehicleService";
 import { rescueStatusBadge, dispatchStage, dispatchAgentNames } from "../../../utils/rescueStatus";
 import { useDataSync } from "../../../utils/dataSync";
+import { normalizeRole } from "../../../utils/roleUtils";
 import { formatDateTime } from "../../../utils/dateUtils";
 
 interface RescueCallRow {
@@ -81,12 +84,14 @@ const RescueCentreAdminDashboard = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"rescues" | "intake" | "pipeline">("rescues");
+  const [activeTab, setActiveTab] = useState<"rescues" | "intake" | "pipeline" | "resources">("rescues");
 
   // Lifecycle Data States
   const [rescueCalls, setRescueCalls] = useState<RescueCallRow[]>([]);
   const [dogIntakes, setDogIntakes] = useState<DogIntakeRow[]>([]);
   const [applications, setApplications] = useState<ApplicationPipelineRow[]>([]);
+  const [rescueAgents, setRescueAgents] = useState<any[]>([]);
+  const [fleetVehicles, setFleetVehicles] = useState<any[]>([]);
 
   // Metric Totals
   const [statsData, setStatsData] = useState({
@@ -112,6 +117,8 @@ const RescueCentreAdminDashboard = () => {
         adoptionsRes,
         fostersRes,
         inventoryRes,
+        usersRes,
+        vehiclesRes,
       ] = await Promise.allSettled([
         dashboardService.getRescueCentreDashboard(),
         rescueService.getRescueCases({ page: 1, page_size: 20 }),
@@ -120,6 +127,8 @@ const RescueCentreAdminDashboard = () => {
         adoptionService.getApplications(),
         fosterService.getFosterProfiles(),
         inventoryService.getItems(),
+        userService.getUsers(),
+        vehicleService.getVehicles(),
       ]);
 
       const dashData = dashRes.status === "fulfilled" ? dashRes.value?.data || dashRes.value || {} : {};
@@ -128,6 +137,16 @@ const RescueCentreAdminDashboard = () => {
       const adoptionsList = adoptionsRes.status === "fulfilled" ? unwrapList(adoptionsRes.value) : [];
       const fostersList = fostersRes.status === "fulfilled" ? unwrapList(fostersRes.value) : [];
       const inventoryList = inventoryRes.status === "fulfilled" ? unwrapList(inventoryRes.value) : [];
+      const usersList = usersRes.status === "fulfilled" ? unwrapList(usersRes.value) : [];
+      const vehiclesList = vehiclesRes.status === "fulfilled" ? unwrapList(vehiclesRes.value) : [];
+
+      // Process Resource Availability
+      const agents = usersList.filter((u: any) => {
+        const r = normalizeRole(u);
+        return r === "rescue_agent" || r === "rescue_coordinator" || String(u.role || "").toLowerCase().includes("agent");
+      });
+      setRescueAgents(agents);
+      setFleetVehicles(vehiclesList);
 
       // 1. Process Recent Rescue Calls & Dispatches
       const recentCalls: RescueCallRow[] = casesList.map((item: any) => {
@@ -416,9 +435,9 @@ const RescueCentreAdminDashboard = () => {
         <QuickActionCard icon={<FaUsers />} title="Dispatch Unit" subtitle="Agent Fleet" color="#10B981" onClick={() => navigate("/rescue-dispatch")} />
         <QuickActionCard icon={<FaPaw />} title="Dog Management" subtitle="Dog Master Profiles" color="#6366F1" onClick={() => navigate("/pets")} />
         <QuickActionCard icon={<FaHome />} title="Shelter Facilities" subtitle="Kennel Capacity" color="#8B5CF6" onClick={() => navigate("/shelters")} />
-        <QuickActionCard icon={<FaStethoscope />} title="Medical Suite" subtitle="Records & Reminders" color="#EC4899" onClick={() => navigate("/medical-records")} />
-        <QuickActionCard icon={<FaBoxes />} title="Inventory & Stock" subtitle={`${statsData.lowStockAlertsCount} Low Stock Alerts`} color="#F59E0B" onClick={() => navigate("/inventory")} />
-        <QuickActionCard icon={<FaHeart />} title="Adoption & Foster" subtitle="Applications" color="#14B8A6" onClick={() => navigate("/adoptions")} />
+        <QuickActionCard icon={<FaPaw />} title="Shelter Dogs" subtitle="Post-Rescue Handover" color="#059669" onClick={() => navigate("/shelter-dogs")} />
+        <QuickActionCard icon={<FaUsers />} title="Staff & Users" subtitle="User Directory" color="#D97706" onClick={() => navigate("/users")} />
+        <QuickActionCard icon={<FaStethoscope />} title="Medical Suite" subtitle="Medical Records" color="#EC4899" onClick={() => navigate("/medical-records")} />
         <QuickActionCard icon={<FaChartBar />} title="Reports & Analytics" subtitle="Operational Insights" color="#3B82F6" onClick={() => navigate("/reports")} />
       </div>
 
@@ -491,7 +510,27 @@ const RescueCentreAdminDashboard = () => {
                 gap: "8px",
               }}
             >
-              <FaHeart /> 📋 Adoption & Foster Placement Pipeline ({applications.length})
+              <FaHeart /> 📋 Adoption & Foster Pipeline ({applications.length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("resources")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeTab === "resources" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                background: activeTab === "resources" ? "#EFF6FF" : "#FFFFFF",
+                color: activeTab === "resources" ? "#1D4ED8" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaUsers /> 👥 Resource Availability ({rescueAgents.length} Agents, {fleetVehicles.length} Vehicles)
             </button>
           </div>
         </div>
@@ -587,6 +626,63 @@ const RescueCentreAdminDashboard = () => {
               </button>
             )}
           />
+        )}
+
+        {/* TAB 4: RESOURCE AVAILABILITY MONITORING */}
+        {activeTab === "resources" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div>
+              <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: 800, color: "#0F172A" }}>
+                🚒 Rescue Agents ({rescueAgents.length})
+              </h4>
+              <DataTable
+                columns={[
+                  { key: "full_name", header: "Agent Name", render: (v: string, r: any) => v || r.email || r.id },
+                  { key: "id", header: "User ID", render: (v: string) => <span style={{ fontFamily: "monospace", fontSize: "11px" }}>{v}</span> },
+                  {
+                    key: "is_active",
+                    header: "Status",
+                    render: (val: boolean) => (
+                      <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: val !== false ? "#ECFDF5" : "#FEF2F2", color: val !== false ? "#047857" : "#DC2626" }}>
+                        {val !== false ? "ACTIVE AGENT" : "INACTIVE"}
+                      </span>
+                    ),
+                  },
+                ]}
+                data={rescueAgents}
+                loading={loading}
+                emptyMessage="No registered rescue agents found."
+              />
+            </div>
+
+            <div>
+              <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: 800, color: "#0F172A" }}>
+                🚑 Rescue Vehicles & Fleet ({fleetVehicles.length})
+              </h4>
+              <DataTable
+                columns={[
+                  { key: "vehicle_number", header: "Plate / Number", render: (v: string, r: any) => v || r.plate || r.id },
+                  { key: "model", header: "Model / Class", render: (v: string, r: any) => v || r.type || "Ambulance" },
+                  {
+                    key: "status",
+                    header: "Operational Status",
+                    render: (val: string) => {
+                      const lower = String(val || "").toLowerCase();
+                      const isReady = lower.includes("ready") || lower === "available";
+                      return (
+                        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: isReady ? "#ECFDF5" : lower.includes("dispatch") ? "#EFF6FF" : "#FEF2F2", color: isReady ? "#047857" : lower.includes("dispatch") ? "#1D4ED8" : "#DC2626" }}>
+                          {val || "Available"}
+                        </span>
+                      );
+                    },
+                  },
+                ]}
+                data={fleetVehicles}
+                loading={loading}
+                emptyMessage="No vehicles registered in fleet."
+              />
+            </div>
+          </div>
         )}
       </div>
     </div>

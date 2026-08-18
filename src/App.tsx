@@ -126,7 +126,6 @@ function App() {
                   allowedRoles={[
                     "super_admin",
                     "rescue_centre_admin",
-                    "rescue_coordinator",
                     "shelter_manager",
                     "foster_coordinator",
                     "volunteer_coordinator",
@@ -173,6 +172,21 @@ function App() {
               }
             >
               <Route path="/pets" element={<Pets />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  permission="view_animals"
+                  allowedRoles={[
+                    "super_admin",
+                    "rescue_centre_admin",
+                    "veterinarian",
+                    "shelter_manager",
+                  ]}
+                />
+              }
+            >
               <Route path="/shelter-dogs" element={<ShelterDogs />} />
             </Route>
 
@@ -252,9 +266,17 @@ function App() {
             >
               <Route path="/medical-records" element={<MedicalRecords />} />
               <Route path="/vet-directory" element={<VetAppointments />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  permission="view_medical"
+                  allowedRoles={["super_admin", "veterinarian", "shelter_manager"]}
+                />
+              }
+            >
               <Route path="/medical-reminders" element={<VaccinationReminders />} />
-
-
             </Route>
 
             <Route
@@ -263,7 +285,6 @@ function App() {
                   permission="view_inventory"
                   allowedRoles={[
                     "super_admin",
-                    "rescue_centre_admin",
                     "shelter_manager",
                     "inventory_manager",
                   ]}
@@ -303,7 +324,6 @@ function App() {
                     "super_admin",
                     "rescue_centre_admin",
                     "rescue_coordinator",
-                    "rescue_agent",
                     "veterinarian",
                     "shelter_manager",
                     "adoption_coordinator",

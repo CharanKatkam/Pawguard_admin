@@ -354,7 +354,29 @@ const DogLifecycleTimelineModal: React.FC<DogLifecycleTimelineModalProps> = ({
   });
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Dog Master Unified Lifecycle Timeline" maxWidth="780px">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Dog Master Unified Lifecycle Timeline"
+      size="xl"
+      footer={
+        <button
+          onClick={onClose}
+          style={{
+            padding: "8px 18px",
+            borderRadius: "8px",
+            border: "1px solid #CBD5E1",
+            background: "#F1F5F9",
+            color: "#334155",
+            fontWeight: 700,
+            fontSize: "13px",
+            cursor: "pointer",
+          }}
+        >
+          Close Timeline
+        </button>
+      }
+    >
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         {/* Top Pet Identity Banner */}
         <div
@@ -650,24 +672,6 @@ const DogLifecycleTimelineModal: React.FC<DogLifecycleTimelineModalProps> = ({
             ))}
           </div>
         )}
-
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "8px 18px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              background: "#F1F5F9",
-              color: "#334155",
-              fontWeight: 600,
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            Close Timeline
-          </button>
-        </div>
       </div>
     </Modal>
   );

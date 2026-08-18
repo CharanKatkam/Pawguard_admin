@@ -668,54 +668,18 @@ const RescueRequests = () => {
         </form>
       </Modal>
 
-      <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title={`Rescue Request Details${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}>
-        {selectedRequest && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div><strong>Reporter:</strong> {selectedRequest.reporter} ({selectedRequest.phone})</div>
-            <div><strong>Location:</strong> {selectedRequest.location}</div>
-            <div><strong>Physical Condition:</strong> <span style={{ textTransform: "capitalize" }}>{String(selectedRequest.condition || "").replace(/_/g, " ")}</span></div>
-            <div>
-              <strong>Severity:</strong>{" "}
-              <span style={{ textTransform: "uppercase", fontWeight: 600, color: selectedRequest.severity === "critical" ? "#DC2626" : selectedRequest.severity === "high" ? "#EA580C" : selectedRequest.severity === "medium" ? "#F59E0B" : "#16A34A" }}>
-                {selectedRequest.severity || "-"}
-              </span>
-              {selectedRequest.is_urgent && <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700 }}>URGENT</span>}
-            </div>
-            <div><strong>Status:</strong> {rescueStatusBadge(selectedRequest.status)}</div>
-            <div><strong>Reported:</strong> {selectedRequest.date ? formatDateTime(selectedRequest.date as string) : "-"}</div>
-            {selectedRequest.rejection_rationale && (
-              <div style={{ background: "#FEF2F2", padding: "10px", borderRadius: "8px" }}>
-                <strong style={{ color: "#DC2626" }}>Rejection rationale:</strong> {selectedRequest.rejection_rationale}
-              </div>
-            )}
-            {selectedRequest.dispatch && (
-              <div style={{ background: "#F5F3FF", padding: "10px", borderRadius: "8px" }}>
-                <strong style={{ color: "#7C3AED" }}>Dispatch Info</strong>
-                <div style={{ marginTop: "6px", fontSize: "14px" }}>
-                  {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id ? (
-                    <div>Vehicle: {String(selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id)}</div>
-                  ) : null}
-                  {selectedRequest.dispatch.assigned_driver_id ? <div>Driver: {String(selectedRequest.dispatch.assigned_driver_id)}</div> : null}
-                  {selectedRequest.dispatch.agents && Array.isArray(selectedRequest.dispatch.agents) && selectedRequest.dispatch.agents.length > 0 ? (
-                    <div>Agents: {(selectedRequest.dispatch.agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")}</div>
-                  ) : null}
-                  {selectedRequest.dispatch.dispatched_at ? <div>Dispatched: {formatDateTime(selectedRequest.dispatch.dispatched_at as string)}</div> : null}
-                </div>
-              </div>
-            )}
-            {selectedRequest.media_urls && selectedRequest.media_urls.length > 0 && (
-              <div>
-                <strong>Evidence:</strong>{" "}
-                {selectedRequest.media_urls.map((u: string, i: number) => (
-                  <a key={i} href={u} target="_blank" rel="noreferrer" style={{ marginRight: "8px", color: "#2563EB" }}>Media {i + 1}</a>
-                ))}
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => setIsViewModalOpen(false)}
+        title={`Rescue Request Details${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}
+        size="lg"
+        footer={
+          selectedRequest ? (
+            <>
               {["reported", "pending", "new"].includes(selectedRequest.status) && (isAdmin || isCoordinator) && (
                 <>
-                  <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Verify</button>
-                  <button onClick={() => { openRejectModal(selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Reject</button>
+                  <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Verify</button>
+                  <button onClick={() => { openRejectModal(selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Reject</button>
                 </>
               )}
               {selectedRequest.status === "verified" && isAdmin && (
@@ -725,7 +689,7 @@ const RescueRequests = () => {
                       setAssignForm({ coordinator_id: String(selectedRequest.raw?.coordinator_id || ""), notes: "" });
                       setIsAssignModalOpen(true);
                     }}
-                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <FaUserPlus size={12} /> Assign Rescue Coordinator
                   </button>
@@ -737,29 +701,29 @@ const RescueRequests = () => {
                     setIsViewModalOpen(false);
                     navigate(`/rescue-dispatch?case_id=${encodeURIComponent(selectedRequest.id)}`);
                   }}
-                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <FaTruck size={12} /> Accept Case & Dispatch Team
                 </button>
               )}
               {["verified", "dispatched", "located"].includes(selectedRequest.status) && (
                 <Can permission="edit_rescue_requests">
-                  <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Escalate</button>
+                  <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Escalate</button>
                 </Can>
               )}
               {selectedRequest.status === "dispatched" && (
                 <Can permission="edit_rescues">
-                  <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Mark Located</button>
+                  <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Mark Located</button>
                 </Can>
               )}
               {selectedRequest.status === "located" && (
                 <Can permission="edit_rescues">
-                  <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Mark Secured</button>
+                  <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Mark Secured</button>
                 </Can>
               )}
               {selectedRequest.status === "rescued" && (
                 <Can permission="edit_rescues">
-                  <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Admit to Centre</button>
+                  <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Admit to Centre</button>
                 </Can>
               )}
               {["rescued", "admitted"].includes(selectedRequest.status) && (
@@ -770,13 +734,14 @@ const RescueRequests = () => {
                     padding: "8px 16px",
                     background: "#7C3AED",
                     color: "#FFF",
-                    borderRadius: "6px",
+                    borderRadius: "8px",
                     border: "none",
                     cursor: isSubmitting ? "wait" : "pointer",
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "6px",
-                    fontWeight: 600,
+                    fontWeight: 700,
+                    fontSize: "13px",
                   }}
                 >
                   <FaSearchLocation size={12} /> Log as Found Pet for Matching
@@ -785,27 +750,93 @@ const RescueRequests = () => {
               {selectedRequest.status === "admitted" && (
                 <>
                   <button
-                    onClick={() => window.open(`/public/dogs/${selectedRequest.raw?.dog_id || selectedRequest.id}`, "_blank")}
-                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    onClick={() => window.open(`/public-scan/${selectedRequest.raw?.dog_id || selectedRequest.id}`, "_blank")}
+                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <FaExternalLinkAlt size={12} /> View Dog Profile
                   </button>
                   <button
                     onClick={() => window.location.href = "/medical"}
-                    style={{ padding: "8px 16px", background: "#0284C7", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    style={{ padding: "8px 16px", background: "#0284C7", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <FaNotesMedical size={12} /> Medical Workflow
                   </button>
                 </>
               )}
-              <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 600 }}>Close</button>
+              <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Close</button>
+            </>
+          ) : null
+        }
+      >
+        {selectedRequest && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Reporter Name</span><strong>{selectedRequest.reporter}</strong> ({selectedRequest.phone})</div>
+              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Location / Address</span><strong style={{ wordBreak: "break-word" }}>{selectedRequest.location}</strong></div>
+              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Physical Condition</span><strong style={{ textTransform: "capitalize" }}>{String(selectedRequest.condition || "").replace(/_/g, " ")}</strong></div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Priority & Severity</span>
+                <strong style={{ textTransform: "uppercase", color: selectedRequest.severity === "critical" ? "#DC2626" : selectedRequest.severity === "high" ? "#EA580C" : selectedRequest.severity === "medium" ? "#F59E0B" : "#16A34A" }}>
+                  {selectedRequest.severity || "-"}
+                </strong>
+                {selectedRequest.is_urgent && <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 800 }}>URGENT</span>}
+              </div>
+              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Status</span>{rescueStatusBadge(selectedRequest.status)}</div>
+              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Reported At</span><strong>{selectedRequest.date ? formatDateTime(selectedRequest.date as string) : "-"}</strong></div>
             </div>
+
+            {selectedRequest.rejection_rationale && (
+              <div style={{ background: "#FEF2F2", padding: "12px 14px", borderRadius: "10px", border: "1px solid #FCA5A5" }}>
+                <strong style={{ color: "#DC2626", display: "block", marginBottom: "4px" }}>Rejection Rationale:</strong>
+                <span style={{ fontSize: "13px", color: "#991B1B" }}>{selectedRequest.rejection_rationale}</span>
+              </div>
+            )}
+
+            {selectedRequest.dispatch && (
+              <div style={{ background: "#F5F3FF", padding: "14px 16px", borderRadius: "10px", border: "1px solid #DDD6FE" }}>
+                <strong style={{ color: "#7C3AED", fontSize: "14px", display: "block", marginBottom: "8px" }}>Dispatch & Team Info</strong>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
+                  {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id ? (
+                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Vehicle:</span> <strong>{String(selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id)}</strong></div>
+                  ) : null}
+                  {selectedRequest.dispatch.assigned_driver_id ? <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Driver:</span> <strong>{String(selectedRequest.dispatch.assigned_driver_id)}</strong></div> : null}
+                  {selectedRequest.dispatch.agents && Array.isArray(selectedRequest.dispatch.agents) && selectedRequest.dispatch.agents.length > 0 ? (
+                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Agents:</span> <strong>{(selectedRequest.dispatch.agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")}</strong></div>
+                  ) : null}
+                  {selectedRequest.dispatch.dispatched_at ? <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Dispatched At:</span> <strong>{formatDateTime(selectedRequest.dispatch.dispatched_at as string)}</strong></div> : null}
+                </div>
+              </div>
+            )}
+
+            {selectedRequest.media_urls && selectedRequest.media_urls.length > 0 && (
+              <div>
+                <strong style={{ display: "block", marginBottom: "6px" }}>Evidence / Photos:</strong>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {selectedRequest.media_urls.map((u: string, i: number) => (
+                    <a key={i} href={u} target="_blank" rel="noreferrer" style={{ padding: "4px 10px", background: "#EFF6FF", color: "#2563EB", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "12px", fontWeight: 600, textDecoration: "none" }}>
+                      Media Photo {i + 1} ↗
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>
 
-      <Modal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} title={`Assign Coordinator${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}>
-        <form onSubmit={handleAssignCoordinatorSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <Modal
+        isOpen={isAssignModalOpen}
+        onClose={() => setIsAssignModalOpen(false)}
+        title={`Assign Coordinator${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}
+        size="md"
+        footer={
+          <>
+            <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" form="assign-coordinator-form" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
+          </>
+        }
+      >
+        <form id="assign-coordinator-form" onSubmit={handleAssignCoordinatorSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {coordinators.length === 0 && (
             <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#92400E" }}>
               No rescue coordinators found in the user directory. Add a user with the rescue coordinator role first.
@@ -834,16 +865,25 @@ const RescueRequests = () => {
               style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
             />
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
-          </div>
         </form>
       </Modal>
 
       {/* Reject Request Confirmation Modal */}
-      <Modal isOpen={isRejectModalOpen} onClose={() => setIsRejectModalOpen(false)} title={`Reject Rescue Request${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}>
-        <form onSubmit={handleRejectSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <Modal
+        isOpen={isRejectModalOpen}
+        onClose={() => setIsRejectModalOpen(false)}
+        title={`Reject Rescue Request${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}
+        size="md"
+        footer={
+          <>
+            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" form="reject-request-form" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", cursor: isSubmitting ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700 }}>
+              {isSubmitting ? "Rejecting..." : "Confirm Rejection"}
+            </button>
+          </>
+        }
+      >
+        <form id="reject-request-form" onSubmit={handleRejectSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
             Are you sure you want to reject this rescue request? Rejecting will close the request and update its status to <strong>REJECTED</strong>.
           </div>
@@ -856,12 +896,6 @@ const RescueRequests = () => {
               onChange={(e) => setRejectionReason(e.target.value)}
               style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px", fontSize: "13px", boxSizing: "border-box" }}
             />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
-            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", cursor: isSubmitting ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700 }}>
-              {isSubmitting ? "Rejecting..." : "Confirm Rejection"}
-            </button>
           </div>
         </form>
       </Modal>

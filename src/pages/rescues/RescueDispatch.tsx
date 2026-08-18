@@ -654,64 +654,23 @@ const RescueDispatch = () => {
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}
         title={`Dispatch Details — ${selectedDispatch?.ticket || ""}`}
-      >
-        {selectedDispatch && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div>
-              <strong style={{ color: "#475569" }}>Target Location:</strong> {selectedDispatch.location}
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Priority / Severity:</strong>{" "}
-              <span
-                style={{
-                  textTransform: "uppercase",
-                  fontWeight: 700,
-                  color:
-                    selectedDispatch.severity === "critical"
-                      ? "#DC2626"
-                      : selectedDispatch.severity === "high"
-                      ? "#EA580C"
-                      : selectedDispatch.severity === "medium"
-                      ? "#F59E0B"
-                      : "#16A34A",
-                }}
-              >
-                {selectedDispatch.severity}
-              </span>
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Rescue Lifecycle Status:</strong> {rescueStatusBadge(selectedDispatch.rescue_status)}
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Dispatch Stage:</strong>{" "}
-              <span style={{ padding: "3px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 700, background: selectedDispatch.stage_bg, color: selectedDispatch.stage_color }}>
-                {selectedDispatch.stage_label}
-              </span>
-            </div>
-            <div style={{ background: "#F8FAFC", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <strong style={{ color: "#0F172A" }}>Assigned Rescue Team & Fleet Vehicle</strong>
-              <div style={{ marginTop: "6px", fontSize: "13px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                <div><strong>Rescue Agent(s):</strong> {selectedDispatch.agent_names}</div>
-                <div><strong>Rescue Vehicle:</strong> {selectedDispatch.vehicle_label}</div>
-                <div><strong>Dispatched At:</strong> {selectedDispatch.dispatched_at}</div>
-              </div>
-            </div>
-
-            {/* Stage Progress Action Controls */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+        size="lg"
+        footer={
+          selectedDispatch ? (
+            <>
               {["dispatched", "verified"].includes(String(selectedDispatch.rescue_status).toLowerCase()) && (
                 <>
                   <button
                     disabled={isSubmitting}
                     onClick={() => handleMarkEnRoute(selectedDispatch.dispatch_id)}
-                    style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <FaAmbulance size={12} /> Mark En Route
                   </button>
                   <button
                     disabled={isSubmitting}
                     onClick={() => handleMarkLocated(selectedDispatch.case_id || selectedDispatch.id)}
-                    style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <FaMapMarkerAlt size={12} /> Mark Located
                   </button>
@@ -722,7 +681,7 @@ const RescueDispatch = () => {
                 <button
                   disabled={isSubmitting}
                   onClick={() => handleMarkSecured(selectedDispatch.case_id || selectedDispatch.id)}
-                  style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
                 >
                   Mark Secured
                 </button>
@@ -732,7 +691,7 @@ const RescueDispatch = () => {
                 <button
                   disabled={isSubmitting}
                   onClick={() => handleMarkAdmitted(selectedDispatch.case_id || selectedDispatch.id)}
-                  style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <FaCheckCircle size={12} /> Admit to Centre & Send to Shelter Intake
                 </button>
@@ -740,12 +699,62 @@ const RescueDispatch = () => {
 
               {String(selectedDispatch.rescue_status).toLowerCase() === "admitted" && (
                 <button
-                  onClick={() => window.open(`/public/dogs/${selectedDispatch.case_id || selectedDispatch.id}`, "_blank")}
-                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  onClick={() => window.open(`/public-scan/${selectedDispatch.case_id || selectedDispatch.id}`, "_blank")}
+                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <FaExternalLinkAlt size={12} /> View Shelter Profile
                 </button>
               )}
+              <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Close</button>
+            </>
+          ) : null
+        }
+      >
+        {selectedDispatch && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Target Location</span>
+                <strong style={{ wordBreak: "break-word" }}>{selectedDispatch.location}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Priority / Severity</span>
+                <span
+                  style={{
+                    textTransform: "uppercase",
+                    fontWeight: 700,
+                    color:
+                      selectedDispatch.severity === "critical"
+                        ? "#DC2626"
+                        : selectedDispatch.severity === "high"
+                        ? "#EA580C"
+                        : selectedDispatch.severity === "medium"
+                        ? "#F59E0B"
+                        : "#16A34A",
+                  }}
+                >
+                  {selectedDispatch.severity}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Rescue Lifecycle Status</span>
+                {rescueStatusBadge(selectedDispatch.rescue_status)}
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Dispatch Stage</span>
+                <span style={{ padding: "3px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 700, background: selectedDispatch.stage_bg, color: selectedDispatch.stage_color }}>
+                  {selectedDispatch.stage_label}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ background: "#F5F3FF", padding: "14px 16px", borderRadius: "12px", border: "1px solid #DDD6FE" }}>
+              <strong style={{ color: "#7C3AED", fontSize: "14px", display: "block", marginBottom: "8px" }}>Assigned Rescue Team & Fleet Vehicle</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
+                <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Rescue Agent(s):</span> <strong>{selectedDispatch.agent_names}</strong></div>
+                <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Rescue Vehicle:</span> <strong>{selectedDispatch.vehicle_label}</strong></div>
+                <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Dispatched At:</span> <strong>{selectedDispatch.dispatched_at}</strong></div>
+              </div>
             </div>
           </div>
         )}

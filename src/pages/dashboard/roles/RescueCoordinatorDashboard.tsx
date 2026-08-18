@@ -462,14 +462,10 @@ const RescueCoordinatorDashboard = () => {
 
         <QuickActionCard
           icon={<FaClipboardList />}
-          title="Export Logs"
-          subtitle="Download Reports"
+          title="Shelter Directory"
+          subtitle="Handover Destination"
           color="#6366F1"
-          onClick={async () => {
-            addToast("Exporting rescue logs...", "info");
-            await reportsService.generateAndDownloadReport({ report_type: "rescue", format: "csv" });
-            addToast("Rescue logs exported successfully!", "info");
-          }}
+          onClick={() => navigate("/shelters")}
         />
       </div>
 
@@ -553,72 +549,10 @@ const RescueCoordinatorDashboard = () => {
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}
         title={`Rescue Request Details${selectedRequest?.ticket ? ` — ${selectedRequest.ticket}` : ""}`}
-      >
-        {selectedRequest && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div>
-              <strong style={{ color: "#475569" }}>Reporter:</strong> {String(selectedRequest.reporter || "-")}
-              {selectedRequest.phone ? ` (${selectedRequest.phone})` : ""}
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Location:</strong> {String(selectedRequest.location || "-")}
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Priority / Severity:</strong>{" "}
-              <span
-                style={{
-                  textTransform: "uppercase",
-                  fontWeight: 700,
-                  color:
-                    selectedRequest.severity === "critical"
-                      ? "#DC2626"
-                      : selectedRequest.severity === "high"
-                      ? "#EA580C"
-                      : selectedRequest.severity === "medium"
-                      ? "#F59E0B"
-                      : "#16A34A",
-                }}
-              >
-                {String(selectedRequest.severity || "-")}
-              </span>
-              {Boolean(selectedRequest.is_urgent) && (
-                <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700 }}>
-                  URGENT
-                </span>
-              )}
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Current Status:</strong> {rescueStatusBadge(String(selectedRequest.status || ""))}
-            </div>
-            <div>
-              <strong style={{ color: "#475569" }}>Reported At:</strong> {String(selectedRequest.created_at || "-")}
-            </div>
-
-            {selectedRequest.rejection_rationale ? (
-              <div style={{ background: "#FEF2F2", padding: "10px 14px", borderRadius: "8px", border: "1px solid #FCA5A5" }}>
-                <strong style={{ color: "#DC2626" }}>Rejection Rationale:</strong> {String(selectedRequest.rejection_rationale)}
-              </div>
-            ) : null}
-
-            {selectedRequest.dispatch ? (
-              <div style={{ background: "#F5F3FF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #DDD6FE" }}>
-                <strong style={{ color: "#7C3AED" }}>Dispatch & Field Operations</strong>
-                <div style={{ marginTop: "6px", fontSize: "13px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                  {(selectedRequest.dispatch as Record<string, unknown>).assigned_vehicle_id || (selectedRequest.dispatch as Record<string, unknown>).vehicle_id ? (
-                    <div><strong>Vehicle:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_vehicle_id || (selectedRequest.dispatch as Record<string, unknown>).vehicle_id)}</div>
-                  ) : null}
-                  {(selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id ? (
-                    <div><strong>Driver:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id)}</div>
-                  ) : null}
-                  {(selectedRequest.dispatch as Record<string, unknown>).dispatched_at ? (
-                    <div><strong>Dispatched:</strong> {formatDateTime((selectedRequest.dispatch as Record<string, unknown>).dispatched_at as string)}</div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {/* Status-Specific Action Buttons */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+        size="lg"
+        footer={
+          selectedRequest ? (
+            <>
               {["reported", "pending"].includes(String(selectedRequest.status || "").toLowerCase()) && (
                 <>
                   <button
@@ -701,13 +635,85 @@ const RescueCoordinatorDashboard = () => {
 
               {String(selectedRequest.status || "").toLowerCase() === "admitted" && (
                 <button
-                  onClick={() => window.open(`/public/dogs/${(selectedRequest.raw as Record<string, unknown>)?.dog_id || selectedRequest.id}`, "_blank")}
+                  onClick={() => window.open(`/public-scan/${(selectedRequest.raw as Record<string, unknown>)?.dog_id || selectedRequest.id}`, "_blank")}
                   style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <FaExternalLinkAlt size={12} /> View Dog Profile
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setIsViewModalOpen(false)}
+                style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+              >
+                Close
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {selectedRequest && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div>
+              <strong style={{ color: "#475569" }}>Reporter:</strong> {String(selectedRequest.reporter || "-")}
+              {selectedRequest.phone ? ` (${selectedRequest.phone})` : ""}
             </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Location:</strong> {String(selectedRequest.location || "-")}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Priority / Severity:</strong>{" "}
+              <span
+                style={{
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                  color:
+                    selectedRequest.severity === "critical"
+                      ? "#DC2626"
+                      : selectedRequest.severity === "high"
+                      ? "#EA580C"
+                      : selectedRequest.severity === "medium"
+                      ? "#F59E0B"
+                      : "#16A34A",
+                }}
+              >
+                {String(selectedRequest.severity || "-")}
+              </span>
+              {Boolean(selectedRequest.is_urgent) && (
+                <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700 }}>
+                  URGENT
+                </span>
+              )}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Current Status:</strong> {rescueStatusBadge(String(selectedRequest.status || ""))}
+            </div>
+            <div>
+              <strong style={{ color: "#475569" }}>Reported At:</strong> {String(selectedRequest.created_at || "-")}
+            </div>
+
+            {selectedRequest.rejection_rationale ? (
+              <div style={{ background: "#FEF2F2", padding: "10px 14px", borderRadius: "8px", border: "1px solid #FCA5A5" }}>
+                <strong style={{ color: "#DC2626" }}>Rejection Rationale:</strong> {String(selectedRequest.rejection_rationale)}
+              </div>
+            ) : null}
+
+            {selectedRequest.dispatch ? (
+              <div style={{ background: "#F5F3FF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #DDD6FE" }}>
+                <strong style={{ color: "#7C3AED" }}>Dispatch & Field Operations</strong>
+                <div style={{ marginTop: "6px", fontSize: "13px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {(selectedRequest.dispatch as Record<string, unknown>).assigned_vehicle_id || (selectedRequest.dispatch as Record<string, unknown>).vehicle_id ? (
+                    <div><strong>Vehicle:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_vehicle_id || (selectedRequest.dispatch as Record<string, unknown>).vehicle_id)}</div>
+                  ) : null}
+                  {(selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id ? (
+                    <div><strong>Driver:</strong> {String((selectedRequest.dispatch as Record<string, unknown>).assigned_driver_id)}</div>
+                  ) : null}
+                  {(selectedRequest.dispatch as Record<string, unknown>).dispatched_at ? (
+                    <div><strong>Dispatched:</strong> {formatDateTime((selectedRequest.dispatch as Record<string, unknown>).dispatched_at as string)}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </Modal>

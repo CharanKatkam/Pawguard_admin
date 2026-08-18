@@ -2298,7 +2298,78 @@ const Pets = () => {
           setSelectedViewDog(null);
         }}
         title={`Dog Master Profile — ${selectedViewDog?.name || "Record"}`}
-        maxWidth="680px"
+        size="xl"
+        footer={
+          selectedViewDog ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  const dog = selectedViewDog;
+                  setIsViewModalOpen(false);
+                  openTimelineModal(dog);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#2563EB",
+                  color: "#FFFFFF",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                <FaHistory /> View Lifecycle Timeline
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const dog = selectedViewDog;
+                  setIsViewModalOpen(false);
+                  openQrModal(dog);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#6D28D9",
+                  color: "#FFFFFF",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                <FaQrcode /> View QR Code
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsViewModalOpen(false);
+                  setSelectedViewDog(null);
+                }}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  color: "#475569",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Close Profile
+              </button>
+            </>
+          ) : null
+        }
       >
         {selectedViewDog && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -2335,7 +2406,7 @@ const Pets = () => {
               </span>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Breed</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedViewDog.breed || "-"}</div>
@@ -2397,7 +2468,7 @@ const Pets = () => {
                   <FaQrcode /> Generate / View QR
                 </button>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
                 <div>
                   <span style={{ color: "#64748B" }}>Unique Safety Token:</span>{" "}
                   <strong style={{ fontFamily: "monospace", color: "#6D28D9" }}>
@@ -2415,7 +2486,7 @@ const Pets = () => {
               <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>
                 <FaStethoscope color="#2563EB" /> Veterinary &amp; Operational Clearance
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
                 <div>
                   <span style={{ color: "#64748B" }}>Vet Clearance Status:</span>{" "}
                   <strong style={{ color: selectedViewDog.vet_clearance === false ? "#DC2626" : "#059669" }}>
@@ -2431,74 +2502,6 @@ const Pets = () => {
                   <strong>{selectedViewDog.shelter_name || selectedViewDog.current_facility || "Central Shelter"}</strong>
                 </div>
               </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  const dog = selectedViewDog;
-                  setIsViewModalOpen(false);
-                  openTimelineModal(dog);
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "9px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#2563EB",
-                  color: "#FFFFFF",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
-                <FaHistory /> View Lifecycle Timeline
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const dog = selectedViewDog;
-                  setIsViewModalOpen(false);
-                  openQrModal(dog);
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "9px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#6D28D9",
-                  color: "#FFFFFF",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
-                <FaQrcode /> View QR Code
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsViewModalOpen(false);
-                  setSelectedViewDog(null);
-                }}
-                style={{
-                  padding: "9px 16px",
-                  borderRadius: "8px",
-                  border: "1px solid #CBD5E1",
-                  background: "#FFFFFF",
-                  color: "#475569",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
-                Close Profile
-              </button>
             </div>
           </div>
         )}

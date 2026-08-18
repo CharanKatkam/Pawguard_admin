@@ -461,33 +461,27 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Staff & Users", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
-        { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
-        { name: "Inventory", path: "/inventory", iconType: "inventory" },
-        { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
-        { name: "Adoption Management", path: "/adoptions", iconType: "adoptions" },
-        { name: "Foster Management", path: "/fosters", iconType: "fosters" },
-        { name: "Volunteer Management", path: "/volunteers", iconType: "volunteers" },
-        { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
+        { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
       ];
 
     case "rescue_coordinator":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Rescue Management", path: "/rescues", iconType: "rescues" },
         { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
         { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },
-        { name: "Vehicle Fleet", path: "/vehicles", iconType: "vehicles" },
-        { name: "Reports", path: "/reports", iconType: "reports" },
+        { name: "Dog Management", path: "/pets", iconType: "pets" },
+        { name: "Shelter Directory", path: "/shelters", iconType: "shelters" },
+        { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
 
     case "rescue_agent":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
-        { name: "Assigned Rescues", path: "/rescues", iconType: "rescues" },
-        { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
-        { name: "Dog Records", path: "/pets", iconType: "pets" },
-        { name: "Reports & Logs", path: "/reports", iconType: "reports" },
+        { name: "My Assigned Rescues", path: "/rescues", iconType: "rescues" },
+        { name: "Rescue Dispatch & Tracking", path: "/rescue-dispatch", iconType: "vehicles" },
+        { name: "Dog Management", path: "/pets", iconType: "pets" },
+        { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
 
     case "veterinarian":

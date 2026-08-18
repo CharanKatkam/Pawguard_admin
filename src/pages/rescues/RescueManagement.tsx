@@ -791,10 +791,63 @@ const RescueManagement = () => {
       </Modal>
 
       {/* View Modal */}
-      <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Rescue Case Details">
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => setIsViewModalOpen(false)}
+        title="Rescue Case Details"
+        size="xl"
+        footer={
+          selectedCase ? (
+            <>
+              {["rescued", "admitted"].includes(String(selectedCase.status).toLowerCase()) && (
+                <button
+                  type="button"
+                  onClick={() => handleLogFoundPetFromRescue(selectedCase)}
+                  disabled={isSubmitting}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#7C3AED",
+                    color: "#FFF",
+                    cursor: isSubmitting ? "wait" : "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontWeight: 600,
+                  }}
+                >
+                  <FaSearchLocation size={12} /> Log as Found Pet for Matching
+                </button>
+              )}
+              <Can permission="edit_rescues">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAssignForm({
+                      coordinator_id: selectedCase.coordinator_id || "",
+                      notes: "",
+                    });
+                    setIsAssignModalOpen(true);
+                  }}
+                  style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaPlus size={12} /> Assign Coordinator
+                </button>
+              </Can>
+              <button
+                type="button"
+                onClick={() => setIsViewModalOpen(false)}
+                style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", cursor: "pointer" }}
+              >
+                Close
+              </button>
+            </>
+          ) : null
+        }
+      >
         {selectedCase && (
-          <>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", maxHeight: "70vh", overflowY: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
             <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Ticket Number</div>
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.ticket_number || "-"}</div>
@@ -1123,44 +1176,6 @@ const RescueManagement = () => {
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
-            {["rescued", "admitted"].includes(String(selectedCase.status).toLowerCase()) && (
-              <button
-                onClick={() => handleLogFoundPetFromRescue(selectedCase)}
-                disabled={isSubmitting}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#7C3AED",
-                  color: "#FFF",
-                  cursor: isSubmitting ? "wait" : "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  fontWeight: 600,
-                }}
-              >
-                <FaSearchLocation size={12} /> Log as Found Pet for Matching
-              </button>
-            )}
-            <Can permission="edit_rescues">
-              <button
-                onClick={() => {
-                  setAssignForm({
-                    coordinator_id: selectedCase.coordinator_id || "",
-                    notes: "",
-                  });
-                  setIsAssignModalOpen(true);
-                }}
-                style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
-              >
-                <FaPlus size={12} /> Assign Coordinator
-              </button>
-            </Can>
-            <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", cursor: "pointer" }}>Close</button>
-          </div>
-          </>
         )}
       </Modal>
 

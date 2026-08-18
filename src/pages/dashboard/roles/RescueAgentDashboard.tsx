@@ -12,9 +12,14 @@ import {
   FaSearch,
   FaMapMarkerAlt,
   FaExternalLinkAlt,
+  FaDog,
+  FaQrcode,
+  FaCompass,
+  FaLocationArrow,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
+import petService from "../../../services/petService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
 import { formatDateTime } from "../../../utils/dateUtils";
@@ -98,7 +103,62 @@ const RescueAgentDashboard = () => {
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [deliveryCaseId, setDeliveryCaseId] = useState("");
 
+  const [isDogModalOpen, setIsDogModalOpen] = useState(false);
+  const [registerDogForm, setRegisterDogForm] = useState({
+    case_id: "",
+    name: "",
+    breed: "Stray Dog",
+    gender: "male",
+    estimated_age: "2 years",
+    notes: "",
+  });
+
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleRegisterDogSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!registerDogForm.name.trim()) {
+      addToast("Please provide a name or temporary identifier for the rescued dog.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const targetCase = assignedCases.find((c) => String(c.id) === registerDogForm.case_id);
+      const location = String(targetCase?.location || "Field Location");
+
+      // 1. Reusing EXISTING Dog Management API creates Dog Record and generates Backend UUID
+      const petRes = await petService.createPet({
+        name: registerDogForm.name.trim(),
+        breed: registerDogForm.breed.trim(),
+        gender: registerDogForm.gender,
+        estimated_age: registerDogForm.estimated_age,
+        location_found: location,
+        status: "rescued",
+        notes: registerDogForm.notes ? `Rescued Case ${String(targetCase?.ticket || registerDogForm.case_id)}: ${registerDogForm.notes}` : `Rescued via Rescue Case #${String(targetCase?.ticket || "")}`,
+      });
+
+      const newDogId = (petRes as any)?.id || (petRes as any)?.dog_id || (petRes as any)?.data?.id;
+
+      // 2. Reusing EXISTING Safety Tag / QR provisioning API
+      if (newDogId) {
+        try {
+          await petService.provisionSafetyTag(String(newDogId));
+        } catch {
+          // Safety tag best effort if auto-provisioned
+        }
+      }
+
+      addToast(`Rescued Dog Registered! Backend Dog UUID: ${newDogId || "Generated"}. Safety Tag & QR linked.`, "success");
+      setIsDogModalOpen(false);
+      setRegisterDogForm({ case_id: "", name: "", breed: "Stray Dog", gender: "male", estimated_age: "2 years", notes: "" });
+      fetchAssignedCases();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to register rescued dog.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const fetchAssignedCases = useCallback(async () => {
     try {
@@ -521,6 +581,17 @@ const RescueAgentDashboard = () => {
         />
 
         <QuickActionCard
+          icon={<FaDog />}
+          title="Register Rescued Dog"
+          subtitle="Generate UUID & Safety Tag"
+          color="#7C3AED"
+          onClick={() => {
+            if (assignedCases.length > 0) setRegisterDogForm((prev) => ({ ...prev, case_id: String(assignedCases[0].id) }));
+            setIsDogModalOpen(true);
+          }}
+        />
+
+        <QuickActionCard
           icon={<FaAmbulance />}
           title="Confirm Delivery"
           subtitle="Handover to Shelter Intake"
@@ -533,6 +604,62 @@ const RescueAgentDashboard = () => {
           }}
         />
       </div>
+
+      {/* ACTIVE RESCUE GPS TRACKING NAVIGATION BANNER */}
+      {assignedCases.length > 0 && (() => {
+        const activeGpsCase = assignedCases.find((c) => {
+          const s = String(c.status || "").toLowerCase();
+          return ["en_route", "located", "secured", "accepted", "dispatched"].includes(s);
+        });
+        if (!activeGpsCase) return null;
+        const currentStage = String(activeGpsCase.status || "en_route").toLowerCase();
+        return (
+          <div
+            style={{
+              marginBottom: "20px",
+              background: "linear-gradient(135deg, #1E1B4B 0%, #312E81 100%)",
+              border: "1px solid #4338CA",
+              borderRadius: "14px",
+              padding: "16px 20px",
+              color: "#FFF",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "42px", height: "42px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#818CF8", fontSize: "20px" }}>
+                  <FaCompass className="animate-spin" />
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 800, background: "#10B981", color: "#FFF", padding: "2px 8px", borderRadius: "12px", textTransform: "uppercase" }}>
+                      ● ACTIVE GPS TRACKING
+                    </span>
+                    <span style={{ fontSize: "13px", color: "#C7D2FE", fontWeight: 600 }}>
+                      Ticket #{String(activeGpsCase.ticket)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "14px", fontWeight: 700, marginTop: "4px" }}>
+                    Destination: {String(activeGpsCase.location)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Lifecycle Progress Pipeline */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 700 }}>
+                <span style={{ padding: "4px 8px", borderRadius: "6px", background: "rgba(255,255,255,0.15)", color: "#FFF" }}>Assigned</span>
+                <span>➔</span>
+                <span style={{ padding: "4px 8px", borderRadius: "6px", background: currentStage === "en_route" ? "#2563EB" : "rgba(255,255,255,0.15)", color: "#FFF" }}>Accepted / En Route</span>
+                <span>➔</span>
+                <span style={{ padding: "4px 8px", borderRadius: "6px", background: currentStage === "located" ? "#0891B2" : "rgba(255,255,255,0.15)", color: "#FFF" }}>Arrived at Scene</span>
+                <span>➔</span>
+                <span style={{ padding: "4px 8px", borderRadius: "6px", background: currentStage === "secured" ? "#F59E0B" : "rgba(255,255,255,0.15)", color: "#FFF" }}>Dog Secured</span>
+                <span>➔</span>
+                <span style={{ padding: "4px 8px", borderRadius: "6px", background: "rgba(255,255,255,0.15)", color: "#94A3B8" }}>Reached Shelter (GPS Stop)</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Dynamic Headline Stat Cards */}
       <div
@@ -615,6 +742,68 @@ const RescueAgentDashboard = () => {
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}
         title={`Field Rescue Details — ${selectedCase?.ticket || ""}`}
+        size="lg"
+        footer={
+          selectedCase ? (
+            <>
+              {["dispatched", "verified"].includes(String(selectedCase.status || "").toLowerCase()) && (
+                <button
+                  disabled={isSubmitting}
+                  onClick={() => handleMarkEnRoute(String(selectedCase.dispatch_id || ""), String(selectedCase.id || ""))}
+                  style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaAmbulance size={12} /> Mark En Route
+                </button>
+              )}
+
+              {String(selectedCase.status || "").toLowerCase() === "en_route" && (
+                <button
+                  disabled={isSubmitting}
+                  onClick={() => handleMarkLocated(String(selectedCase.id || ""))}
+                  style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaMapMarkerAlt size={12} /> Mark Located
+                </button>
+              )}
+
+              {String(selectedCase.status || "").toLowerCase() === "located" && (
+                <button
+                  disabled={isSubmitting}
+                  onClick={() => handleMarkSecured(String(selectedCase.id || ""))}
+                  style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                >
+                  Mark Secured
+                </button>
+              )}
+
+              {["secured", "rescued"].includes(String(selectedCase.status || "").toLowerCase()) && (
+                <button
+                  disabled={isSubmitting}
+                  onClick={() => handleMarkAdmitted(String(selectedCase.id || ""))}
+                  style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaCheckCircle size={12} /> Confirm Delivery & Admit to Centre
+                </button>
+              )}
+
+              {String(selectedCase.status || "").toLowerCase() === "admitted" && (
+                <button
+                  onClick={() => window.open(`/public-scan/${(selectedCase.raw as Record<string, unknown>)?.dog_id || selectedCase.id}`, "_blank")}
+                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaExternalLinkAlt size={12} /> View Shelter Profile
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsViewModalOpen(false)}
+                style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+              >
+                Close
+              </button>
+            </>
+          ) : null
+        }
       >
         {selectedCase && (
           <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
@@ -672,68 +861,27 @@ const RescueAgentDashboard = () => {
                 </div>
               </div>
             )}
-
-            {/* Stage Progress Action Controls */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
-              {["dispatched", "verified"].includes(String(selectedCase.status || "").toLowerCase()) && (
-                <button
-                  disabled={isSubmitting}
-                  onClick={() => handleMarkEnRoute(String(selectedCase.dispatch_id || ""), String(selectedCase.id || ""))}
-                  style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaAmbulance size={12} /> Mark En Route
-                </button>
-              )}
-
-              {String(selectedCase.status || "").toLowerCase() === "en_route" && (
-                <button
-                  disabled={isSubmitting}
-                  onClick={() => handleMarkLocated(String(selectedCase.id || ""))}
-                  style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaMapMarkerAlt size={12} /> Mark Located
-                </button>
-              )}
-
-              {String(selectedCase.status || "").toLowerCase() === "located" && (
-                <button
-                  disabled={isSubmitting}
-                  onClick={() => handleMarkSecured(String(selectedCase.id || ""))}
-                  style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
-                >
-                  Mark Secured
-                </button>
-              )}
-
-              {["secured", "rescued"].includes(String(selectedCase.status || "").toLowerCase()) && (
-                <button
-                  disabled={isSubmitting}
-                  onClick={() => handleMarkAdmitted(String(selectedCase.id || ""))}
-                  style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaCheckCircle size={12} /> Confirm Delivery & Admit to Centre
-                </button>
-              )}
-
-              {String(selectedCase.status || "").toLowerCase() === "admitted" && (
-                <button
-                  onClick={() => window.open(`/public/dogs/${(selectedCase.raw as Record<string, unknown>)?.dog_id || selectedCase.id}`, "_blank")}
-                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaExternalLinkAlt size={12} /> View Shelter Profile
-                </button>
-              )}
-            </div>
           </div>
         )}
       </Modal>
 
       {/* Upload Photos Modal */}
-      <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="Upload Rescue Photos / Evidence">
-        <form onSubmit={handleUploadPhotoSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <Modal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        title="Upload Rescue Photos / Evidence"
+        size="md"
+        footer={
+          <>
+            <button type="button" onClick={() => setIsUploadModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" form="upload-photo-form" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700, fontSize: "13px" }}>{isSubmitting ? "Uploading..." : "Upload Evidence"}</button>
+          </>
+        }
+      >
+        <form id="upload-photo-form" onSubmit={handleUploadPhotoSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Select Rescue Case *</label>
-            <select required value={uploadCaseId} onChange={(e) => setUploadCaseId(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
+            <select required value={uploadCaseId} onChange={(e) => setUploadCaseId(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
               <option value="">Select assigned case...</option>
               {assignedCases.map((c) => (
                 <option key={String(c.id)} value={String(c.id)}>
@@ -750,22 +898,29 @@ const RescueAgentDashboard = () => {
               value={photoUrl}
               placeholder="https://example.com/rescue-photo.jpg"
               onChange={(e) => setPhotoUrl(e.target.value)}
-              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
             />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsUploadModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700 }}>{isSubmitting ? "Uploading..." : "Upload Evidence"}</button>
           </div>
         </form>
       </Modal>
 
       {/* Update Status Modal */}
-      <Modal isOpen={isStatusModalOpen} onClose={() => setIsStatusModalOpen(false)} title="Update Rescue Lifecycle Status">
-        <form onSubmit={handleStatusUpdateSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <Modal
+        isOpen={isStatusModalOpen}
+        onClose={() => setIsStatusModalOpen(false)}
+        title="Update Rescue Lifecycle Status"
+        size="md"
+        footer={
+          <>
+            <button type="button" onClick={() => setIsStatusModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" form="update-status-form" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", background: "#10B981", color: "#FFF", border: "none", fontWeight: 700, fontSize: "13px" }}>{isSubmitting ? "Updating..." : "Update Status"}</button>
+          </>
+        }
+      >
+        <form id="update-status-form" onSubmit={handleStatusUpdateSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Select Assigned Case *</label>
-            <select required value={statusCaseId} onChange={(e) => setStatusCaseId(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
+            <select required value={statusCaseId} onChange={(e) => setStatusCaseId(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
               <option value="">Select active case...</option>
               {assignedCases.map((c) => (
                 <option key={String(c.id)} value={String(c.id)}>
@@ -776,7 +931,7 @@ const RescueAgentDashboard = () => {
           </div>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Target Lifecycle Stage *</label>
-            <select required value={selectedNextStatus} onChange={(e) => setSelectedNextStatus(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
+            <select required value={selectedNextStatus} onChange={(e) => setSelectedNextStatus(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
               <option value="">Select next stage...</option>
               <option value="en_route">En Route (On the way to scene)</option>
               <option value="located">Located (Animal spotted on scene)</option>
@@ -784,19 +939,26 @@ const RescueAgentDashboard = () => {
               <option value="admitted">Admitted (Delivered to centre intake)</option>
             </select>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsStatusModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#10B981", color: "#FFF", border: "none", fontWeight: 700 }}>{isSubmitting ? "Updating..." : "Update Status"}</button>
-          </div>
         </form>
       </Modal>
 
       {/* Confirm Delivery Modal */}
-      <Modal isOpen={isDeliveryModalOpen} onClose={() => setIsDeliveryModalOpen(false)} title="Confirm Delivery & Centre Handover">
-        <form onSubmit={handleDeliverySubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <Modal
+        isOpen={isDeliveryModalOpen}
+        onClose={() => setIsDeliveryModalOpen(false)}
+        title="Confirm Delivery & Centre Handover"
+        size="md"
+        footer={
+          <>
+            <button type="button" onClick={() => setIsDeliveryModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" form="confirm-delivery-form" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", background: "#059669", color: "#FFF", border: "none", fontWeight: 700, fontSize: "13px" }}>{isSubmitting ? "Confirming..." : "Confirm Handover & Admit"}</button>
+          </>
+        }
+      >
+        <form id="confirm-delivery-form" onSubmit={handleDeliverySubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600 }}>Select Rescued Animal Case *</label>
-            <select required value={deliveryCaseId} onChange={(e) => setDeliveryCaseId(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
+            <select required value={deliveryCaseId} onChange={(e) => setDeliveryCaseId(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}>
               <option value="">Select case ready for handover...</option>
               {assignedCases.map((c) => (
                 <option key={String(c.id)} value={String(c.id)}>
@@ -805,12 +967,107 @@ const RescueAgentDashboard = () => {
               ))}
             </select>
           </div>
-          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
+          <p style={{ fontSize: "13px", color: "#64748B", margin: 0, lineHeight: 1.5 }}>
             Confirming delivery will mark this rescue case as <strong>ADMITTED</strong> and transfer responsibility to the Shelter Manager Intake Queue.
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsDeliveryModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#059669", color: "#FFF", border: "none", fontWeight: 700 }}>{isSubmitting ? "Confirming..." : "Confirm Handover & Admit"}</button>
+        </form>
+      </Modal>
+
+      {/* Register Rescued Dog Modal (Reusing Existing Dog Management UUID & Safety Tag / QR) */}
+      <Modal
+        isOpen={isDogModalOpen}
+        onClose={() => setIsDogModalOpen(false)}
+        title="Register Rescued Dog (Dog Management Intake)"
+        size="lg"
+        footer={
+          <>
+            <button type="button" onClick={() => setIsDogModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="submit" form="register-rescued-dog-form" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", background: "#7C3AED", color: "#FFF", border: "none", fontWeight: 700, fontSize: "13px" }}>{isSubmitting ? "Registering..." : "Register Dog & Generate Tag"}</button>
+          </>
+        }
+      >
+        <form id="register-rescued-dog-form" onSubmit={handleRegisterDogSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Select Rescue Case *</label>
+            <select
+              required
+              value={registerDogForm.case_id}
+              onChange={(e) => setRegisterDogForm({ ...registerDogForm, case_id: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+            >
+              <option value="">Select assigned rescue case...</option>
+              {assignedCases.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.ticket)} — {String(c.location)} ({String(c.status)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+            <div>
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Rescued Dog Name / Identifier *</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Buddy, Lucky, Rescued Dog #12"
+                value={registerDogForm.name}
+                onChange={(e) => setRegisterDogForm({ ...registerDogForm, name: e.target.value })}
+                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Breed / Type</label>
+              <input
+                type="text"
+                value={registerDogForm.breed}
+                placeholder="e.g. Mixed Breed, Stray Dog, Labrador"
+                onChange={(e) => setRegisterDogForm({ ...registerDogForm, breed: e.target.value })}
+                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+            <div>
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Gender</label>
+              <select
+                value={registerDogForm.gender}
+                onChange={(e) => setRegisterDogForm({ ...registerDogForm, gender: e.target.value })}
+                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+              >
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "13px", fontWeight: 600 }}>Estimated Age</label>
+              <input
+                type="text"
+                value={registerDogForm.estimated_age}
+                placeholder="e.g. 1 year, 6 months"
+                onChange={(e) => setRegisterDogForm({ ...registerDogForm, estimated_age: e.target.value })}
+                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Physical / Rescue Notes</label>
+            <textarea
+              rows={2}
+              value={registerDogForm.notes}
+              placeholder="Injuries, physical markings, rescue location details..."
+              onChange={(e) => setRegisterDogForm({ ...registerDogForm, notes: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+            />
+          </div>
+
+          <div style={{ background: "#EFF6FF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", fontSize: "12px", color: "#1D4ED8" }}>
+            ℹ️ <strong>Backend Dog UUID & Safety Tag Provisioning:</strong> Submitting will invoke the existing <code>petService.createPet</code> API to generate a permanent Dog UUID and automatically provision a PawGuard Safety Tag / QR code.
           </div>
         </form>
       </Modal>

@@ -7,15 +7,25 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   maxWidth?: string;
+  size?: "sm" | "md" | "lg" | "xl" | "full";
   footer?: React.ReactNode;
 }
+
+const SIZE_MAP = {
+  sm: "480px",
+  md: "620px",
+  lg: "760px",
+  xl: "900px",
+  full: "1100px",
+};
 
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   title,
   children,
-  maxWidth = "550px",
+  maxWidth,
+  size = "lg",
   footer,
 }) => {
   useEffect(() => {
@@ -28,7 +38,20 @@ export const Modal: React.FC<ModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const resolvedMaxWidth = maxWidth || SIZE_MAP[size] || "760px";
 
   return (
     <div
@@ -38,13 +61,13 @@ export const Modal: React.FC<ModalProps> = ({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: "rgba(15, 23, 42, 0.6)",
+        backgroundColor: "rgba(15, 23, 42, 0.65)",
         backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 1000,
-        padding: "12px",
+        padding: "16px",
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -54,31 +77,33 @@ export const Modal: React.FC<ModalProps> = ({
         style={{
           background: "#FFFFFF",
           borderRadius: "16px",
-          width: "min(100%, calc(100vw - 24px))",
-          maxWidth: maxWidth,
-          maxHeight: "90vh",
+          width: "min(100%, calc(100vw - 32px))",
+          maxWidth: resolvedMaxWidth,
+          maxHeight: "calc(100vh - 48px)",
           display: "flex",
           flexDirection: "column",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
           overflow: "hidden",
+          border: "1px solid #E2E8F0",
         }}
       >
-        {/* Header */}
+        {/* Header (Fixed at top) */}
         <div
           style={{
-            padding: "16px 20px",
+            padding: "18px 24px",
             borderBottom: "1px solid #E2E8F0",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             background: "#F8FAFC",
-            gap: "12px",
+            gap: "16px",
+            flexShrink: 0,
           }}
         >
           <h3
             style={{
               margin: 0,
-              fontSize: "16px",
+              fontSize: "17px",
               fontWeight: 700,
               color: "#0F172A",
               wordBreak: "break-word",
@@ -88,6 +113,7 @@ export const Modal: React.FC<ModalProps> = ({
             {title}
           </h3>
           <button
+            type="button"
             onClick={onClose}
             style={{
               background: "transparent",
@@ -95,22 +121,32 @@ export const Modal: React.FC<ModalProps> = ({
               color: "#64748B",
               fontSize: "18px",
               cursor: "pointer",
-              padding: "4px",
+              padding: "6px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               borderRadius: "8px",
               flexShrink: 0,
+              transition: "all 0.15s ease",
+            }}
+            title="Close Modal"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#E2E8F0";
+              e.currentTarget.style.color = "#0F172A";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#64748B";
             }}
           >
             <FaTimes />
           </button>
         </div>
 
-        {/* Content */}
+        {/* Content Body (Single Scrollbar) */}
         <div
           style={{
-            padding: "16px 20px",
+            padding: "20px 24px",
             overflowY: "auto",
             flex: 1,
             wordBreak: "break-word",
@@ -119,17 +155,19 @@ export const Modal: React.FC<ModalProps> = ({
           {children}
         </div>
 
-        {/* Optional Footer */}
+        {/* Optional Fixed Footer (Pinned at bottom) */}
         {footer && (
           <div
             style={{
-              padding: "12px 20px",
+              padding: "14px 24px",
               borderTop: "1px solid #E2E8F0",
               background: "#F8FAFC",
               display: "flex",
+              alignItems: "center",
               justifyContent: "flex-end",
               flexWrap: "wrap",
-              gap: "8px",
+              gap: "12px",
+              flexShrink: 0,
             }}
           >
             {footer}
