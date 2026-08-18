@@ -41,6 +41,10 @@ interface DataTableProps {
   searchValue?: string;
   /** Called when the search term changes (server mode). */
   onSearchChange?: (term: string) => void;
+  /** Option to hide the internal search input box. */
+  hideSearch?: boolean;
+  /** Custom controls to render on the left side of the table header row. */
+  leftHeaderControls?: React.ReactNode;
 }
 
 const DataTable: React.FC<DataTableProps> = ({
@@ -63,6 +67,8 @@ const DataTable: React.FC<DataTableProps> = ({
   onPageChange,
   searchValue,
   onSearchChange,
+  hideSearch = false,
+  leftHeaderControls,
 }) => {
   const { addToast } = useToast();
   const { can } = usePermissions();
@@ -223,48 +229,53 @@ const DataTable: React.FC<DataTableProps> = ({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "16px",
+          marginBottom: "12px",
           gap: "12px",
           flexWrap: "wrap",
         }}
       >
-        {/* Search */}
-        <div style={{ position: "relative", width: "100%", maxWidth: "320px", flex: "1 1 200px" }}>
-          <FaSearch
-            style={{
-              position: "absolute",
-              left: "12px",
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "#94A3B8",
-              fontSize: "14px",
-            }}
-          />
-          <input
-            type="text"
-            placeholder="Search records..."
-            value={serverMode ? (searchValue ?? "") : searchTerm}
-            onChange={(e) => {
-              if (serverMode) {
-                if (onSearchChange) onSearchChange(e.target.value);
-              } else {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }
-            }}
-            style={{
-              width: "100%",
-              padding: "9px 12px 9px 36px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              fontSize: "13px",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
+        {leftHeaderControls ? (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+            {leftHeaderControls}
+          </div>
+        ) : !hideSearch ? (
+          <div style={{ position: "relative", width: "100%", maxWidth: "320px", flex: "1 1 200px" }}>
+            <FaSearch
+              style={{
+                position: "absolute",
+                left: "12px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "#94A3B8",
+                fontSize: "14px",
+              }}
+            />
+            <input
+              type="text"
+              placeholder="Search records..."
+              value={serverMode ? (searchValue ?? "") : searchTerm}
+              onChange={(e) => {
+                if (serverMode) {
+                  if (onSearchChange) onSearchChange(e.target.value);
+                } else {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "9px 12px 9px 36px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                fontSize: "13px",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+        ) : null}
 
-        <div style={{ fontSize: "13px", color: "#64748B" }}>
+        <div style={{ fontSize: "13px", color: "#64748B", marginLeft: "auto" }}>
           Showing <strong>{pageData.length}</strong> of <strong>{serverMode ? totalCount : filteredData.length}</strong> entries
         </div>
       </div>

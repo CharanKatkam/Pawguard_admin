@@ -82,6 +82,8 @@ const VeterinarianDashboard = () => {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("all");
+  const [shelterMedicalStatusFilter, setShelterMedicalStatusFilter] = useState("all");
+  const [shelterAdoptionFilter, setShelterAdoptionFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   const [searchParams] = useSearchParams();
@@ -541,7 +543,38 @@ const VeterinarianDashboard = () => {
 
     const isShelterDog = status === "shelter" || status === "clinic" || status === "rescued" || medStatus.length > 0;
     const matchesQuery = !q || name.includes(q) || regNo.includes(q) || id.includes(q) || medStatus.includes(q);
-    return isShelterDog && matchesQuery;
+
+    // 1. Medical Status Filter
+    let matchesMedStatus = true;
+    if (shelterMedicalStatusFilter !== "all") {
+      const target = shelterMedicalStatusFilter.toLowerCase();
+      if (target === "pending") {
+        matchesMedStatus = medStatus.includes("pending") || medStatus.includes("check") || !medStatus;
+      } else if (target === "assigned to vet") {
+        matchesMedStatus = medStatus.includes("assigned") || medStatus.includes("vet");
+      } else if (target === "under treatment") {
+        matchesMedStatus = medStatus.includes("treatment") || medStatus.includes("under");
+      } else if (target === "examined - pending clearance") {
+        matchesMedStatus = medStatus.includes("examined");
+      } else if (target === "medically cleared") {
+        matchesMedStatus = medStatus.includes("clear") || medStatus.includes("fit") || Boolean(d.is_fit_for_adoption || d.is_adoptable);
+      } else {
+        matchesMedStatus = medStatus === target || medStatus.includes(target);
+      }
+    }
+
+    // 2. Adoption Readiness Filter
+    let matchesAdoption = true;
+    if (shelterAdoptionFilter !== "all") {
+      const isAdoptable = Boolean(d.is_fit_for_adoption || d.is_adoptable || medStatus.includes("clear") || str(d.adoption_readiness).toUpperCase() === "READY_FOR_ADOPTION");
+      if (shelterAdoptionFilter === "ready") {
+        matchesAdoption = isAdoptable;
+      } else if (shelterAdoptionFilter === "not_ready") {
+        matchesAdoption = !isAdoptable;
+      }
+    }
+
+    return isShelterDog && matchesQuery && matchesMedStatus && matchesAdoption;
   });
 
   const shelterColumns = [
@@ -643,7 +676,7 @@ const VeterinarianDashboard = () => {
       {/* VETERINARY QUEUE & WORKSPACE (DUAL SOURCES) */}
       <div id="appointments-queue" className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
         {/* Source Navigation Tabs */}
-        <div style={{ display: "flex", gap: "12px", borderBottom: "2px solid #E2E8F0", paddingBottom: "12px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ borderBottom: "2px solid #E2E8F0", paddingBottom: "12px", marginBottom: "16px" }}>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
               type="button"
@@ -685,41 +718,6 @@ const VeterinarianDashboard = () => {
               <FaCalendarAlt /> 🌐 Public Website Appointments ({filteredAppointments.length})
             </button>
           </div>
-
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <div style={{ position: "relative" }}>
-              <FaSearch size={13} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
-              <input
-                type="text"
-                placeholder="Search dog, ID, diagnosis..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ padding: "8px 12px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "220px" }}
-              />
-            </div>
-
-            {activeSourceTab === "public_appts" && (
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-              >
-                <option value="all">All Statuses</option>
-                <option value="requested">Requested / Pending</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            )}
-
-            <button
-              type="button"
-              onClick={fetchDashboardData}
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
-            >
-              <FaSync /> Sync Queue
-            </button>
-          </div>
         </div>
 
         {/* TAB 1: SHELTER MEDICAL REQUESTS */}
@@ -728,6 +726,62 @@ const VeterinarianDashboard = () => {
             columns={shelterColumns}
             data={shelterDogRows}
             loading={loading}
+            hideSearch={true}
+            leftHeaderControls={
+              <>
+                <div style={{ position: "relative" }}>
+                  <FaSearch size={13} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
+                  <input
+                    type="text"
+                    placeholder="Search dog, ID, diagnosis..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ padding: "8px 12px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "220px" }}
+                  />
+                </div>
+
+                <select
+                  value={shelterMedicalStatusFilter}
+                  onChange={(e) => setShelterMedicalStatusFilter(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #CBD5E1",
+                    fontSize: "13px",
+                    background: "#FFF",
+                    color: "#334155",
+                    fontWeight: 500,
+                  }}
+                  aria-label="Filter by Medical Status"
+                >
+                  <option value="all">All Medical Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="assigned to vet">Assigned to Vet</option>
+                  <option value="under treatment">Under Treatment</option>
+                  <option value="examined - pending clearance">Examined - Pending Clearance</option>
+                  <option value="medically cleared">Medically Cleared</option>
+                </select>
+
+                <select
+                  value={shelterAdoptionFilter}
+                  onChange={(e) => setShelterAdoptionFilter(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #CBD5E1",
+                    fontSize: "13px",
+                    background: "#FFF",
+                    color: "#334155",
+                    fontWeight: 500,
+                  }}
+                  aria-label="Filter by Adoption Readiness"
+                >
+                  <option value="all">All Adoption Readiness</option>
+                  <option value="ready">Ready for Adoption</option>
+                  <option value="not_ready">Not Ready</option>
+                </select>
+              </>
+            }
             emptyMessage="No shelter medical requests found matching current filter."
             renderRowActions={(row: Row) => {
               const isCleared = Boolean(row.is_fit_for_adoption || row.is_adoptable || str(row.medical_status).toLowerCase().includes("clear"));
@@ -780,6 +834,33 @@ const VeterinarianDashboard = () => {
             columns={apptColumns}
             data={filteredAppointments}
             loading={loading}
+            hideSearch={true}
+            leftHeaderControls={
+              <>
+                <div style={{ position: "relative" }}>
+                  <FaSearch size={13} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
+                  <input
+                    type="text"
+                    placeholder="Search dog, ID, diagnosis..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ padding: "8px 12px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "220px" }}
+                  />
+                </div>
+
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="requested">Requested / Pending</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </>
+            }
             emptyMessage="No public web appointments found matching current filters."
             renderRowActions={(row: Row) => {
               const status = str(pick(row, "status")).toLowerCase();
