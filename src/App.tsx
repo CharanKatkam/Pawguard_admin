@@ -208,7 +208,7 @@ function App() {
               element={
                 <ProtectedRoute
                   permission="view_foster_placements"
-                  allowedRoles={["super_admin", "foster_coordinator"]}
+                  allowedRoles={["super_admin", "foster_coordinator", "rescue_centre_admin"]}
                 />
               }
             >
@@ -219,7 +219,7 @@ function App() {
               element={
                 <ProtectedRoute
                   permission="view_volunteers"
-                  allowedRoles={["super_admin", "volunteer_coordinator", "shelter_manager"]}
+                  allowedRoles={["super_admin", "volunteer_coordinator", "shelter_manager", "rescue_centre_admin"]}
                 />
               }
             >

@@ -462,10 +462,11 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
         { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
         { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
-
-
         { name: "Inventory", path: "/inventory", iconType: "inventory" },
         { name: "Lost & Found", path: "/lost-and-found", iconType: "lostfound" },
+        { name: "Adoption Management", path: "/adoptions", iconType: "adoptions" },
+        { name: "Foster Management", path: "/fosters", iconType: "fosters" },
+        { name: "Volunteer Management", path: "/volunteers", iconType: "volunteers" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
