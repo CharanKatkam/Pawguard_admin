@@ -5,7 +5,6 @@ import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import Modal from "../../../components/common/Modal";
 import { useToast } from "../../../context/ToastContext";
-import reportsService from "../../../services/reportsService";
 import {
   FaAmbulance,
   FaUserPlus,

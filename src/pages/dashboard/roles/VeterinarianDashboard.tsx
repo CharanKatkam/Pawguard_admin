@@ -16,7 +16,6 @@ import {
   FaSearch,
   FaUserMd,
   FaHistory,
-  FaSync,
   FaHeartbeat,
   FaEye,
   FaCheckCircle,

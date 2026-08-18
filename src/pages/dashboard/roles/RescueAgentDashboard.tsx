@@ -13,9 +13,7 @@ import {
   FaMapMarkerAlt,
   FaExternalLinkAlt,
   FaDog,
-  FaQrcode,
   FaCompass,
-  FaLocationArrow,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";

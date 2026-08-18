@@ -814,11 +814,11 @@ const Finance = () => {
             data={transactions}
             module="finance"
             onEdit={async (r) => {
-              await financeService.updateTransaction(r.txId || r.id || "1", r);
+              await financeService.updateTransaction(String(r.txId || r.id || "1"), r);
               fetchFinance();
             }}
             onDelete={async (r) => {
-              await financeService.deleteTransaction(r.txId || r.id);
+              await financeService.deleteTransaction(String(r.txId || r.id || ""));
               fetchFinance();
             }}
           />

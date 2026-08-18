@@ -6,27 +6,27 @@ import { usePermissions } from "../../context/PermissionContext";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
-export interface Column {
+export interface Column<T = any> {
   key: string;
   title?: string;
   header?: string;
   sortable?: boolean;
-  render?: (value: any, row: any) => React.ReactNode;
+  render?: (value: any, row: T) => React.ReactNode;
 }
 
-interface DataTableProps {
-  columns: Column[];
-  data: Record<string, unknown>[];
+export interface DataTableProps<T = any> {
+  columns: Column<T>[];
+  data: T[];
   pageSize?: number;
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
   emptyMessage?: string;
-  onView?: (row: any) => void;
-  onEdit?: (row: any) => void;
-  onDelete?: (row: any) => void;
-  onRowClick?: (row: any) => void;
-  renderRowActions?: (row: any) => React.ReactNode;
+  onView?: (row: T) => void;
+  onEdit?: (row: T) => void;
+  onDelete?: (row: T) => void;
+  onRowClick?: (row: T) => void;
+  renderRowActions?: (row: T) => React.ReactNode;
   /** Permission module name used to gate Edit/Delete actions (e.g. "users"). */
   module?: string;
   /** Server-driven mode: search + pagination are delegated to the parent. */
@@ -47,7 +47,7 @@ interface DataTableProps {
   leftHeaderControls?: React.ReactNode;
 }
 
-const DataTable: React.FC<DataTableProps> = ({
+function DataTable<T = any>({
   columns,
   data,
   pageSize = 5,
@@ -69,7 +69,7 @@ const DataTable: React.FC<DataTableProps> = ({
   onSearchChange,
   hideSearch = false,
   leftHeaderControls,
-}) => {
+}: DataTableProps<T>): React.ReactElement {
   const { addToast } = useToast();
   const { can } = usePermissions();
   const canEdit = !module || can("edit", module);
@@ -100,7 +100,7 @@ const DataTable: React.FC<DataTableProps> = ({
     const lower = searchTerm.toLowerCase();
     return data.filter((row) =>
       columns.some((col) => {
-        const val = row[col.key];
+        const val = (row as Record<string, any>)[col.key];
         return val !== undefined && val !== null && String(val).toLowerCase().includes(lower);
       })
     );
@@ -171,7 +171,7 @@ const DataTable: React.FC<DataTableProps> = ({
     );
   };
 
-  const handleRowClick = (row: Record<string, any>) => {
+  const handleRowClick = (row: T) => {
     if (onRowClick) {
       onRowClick(row);
     }
@@ -188,7 +188,7 @@ const DataTable: React.FC<DataTableProps> = ({
     if (!selectedRow) return;
     try {
       if (onEdit) {
-        await onEdit(editFormData);
+        await onEdit(editFormData as unknown as T);
       }
       addToast("Record updated successfully!", "success");
       notifyDataChanged();
@@ -203,7 +203,7 @@ const DataTable: React.FC<DataTableProps> = ({
     if (!selectedRow) return;
     try {
       if (onDelete) {
-        await onDelete(selectedRow);
+        await onDelete(selectedRow as unknown as T);
       }
       addToast("Record deleted successfully!", "success");
       notifyDataChanged();
@@ -432,7 +432,7 @@ const DataTable: React.FC<DataTableProps> = ({
                   onMouseLeave={(e) => (e.currentTarget.style.background = "#FFFFFF")}
                 >
                   {columns.map((col, ci) => {
-                    const rawVal = row[col.key];
+                    const rawVal = (row as Record<string, any>)[col.key];
                     let content: React.ReactNode = String(rawVal ?? "");
 
                     if (col.render) {
