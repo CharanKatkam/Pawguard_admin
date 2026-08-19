@@ -86,7 +86,12 @@ const MedicalRecords = () => {
           const dog = dogs.find((d) => d.id === r.petId || d.id === r.pet_id);
           return dog && !String(r.petName || "").includes(" ") ? { ...r, petName: dog.name } : r;
         });
-        setMedicalRecords(rows);
+        const sortedRows = [...rows].sort((a: any, b: any) => {
+          const timeA = new Date(a.date || a.created_at || a.recorded_at || 0).getTime();
+          const timeB = new Date(b.date || b.created_at || b.recorded_at || 0).getTime();
+          return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+        });
+        setMedicalRecords(sortedRows);
       }
     } catch {
       addToast("Failed to load medical records.", "error");
