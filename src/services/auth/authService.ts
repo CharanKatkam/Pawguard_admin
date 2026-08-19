@@ -34,6 +34,11 @@ const getMe = async () => {
   return response.data;
 };
 
+const refreshSession = async () => {
+  const response = await axios.post("/auth/refresh");
+  return response.data;
+};
+
 const logout = async () => {
   try {
     await axios.post("/auth/logout");
@@ -71,6 +76,7 @@ const confirmPasswordReset = async (token: string, newPassword: string) => {
 const authService = {
   login,
   getMe,
+  refreshSession,
   logout,
   requestPasswordReset,
   confirmPasswordReset,

@@ -36,11 +36,30 @@ api.interceptors.request.use(
   }
 );
 
-// Response Interceptor: Global 401 authorization handler
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value?: unknown) => void;
+  reject: (reason?: unknown) => void;
+}> = [];
+
+const processQueue = (error: unknown) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve();
+    }
+  });
+  failedQueue = [];
+};
+
+// Response Interceptor: Global 401 authorization & single-retry refresh handler
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (axios.isAxiosError(error) && error.response) {
+  async (error) => {
+    const originalRequest = error?.config;
+
+    if (axios.isAxiosError(error) && error.response && originalRequest) {
       const status = error.response.status;
 
       const publicPaths = ["/", "/reset-password", "/403", "/public-scan", "/scan-pet", "/scan"];
@@ -48,10 +67,43 @@ api.interceptors.response.use(
         (p) => window.location.pathname === p || window.location.pathname.startsWith(p + "/")
       );
 
-      if (status === 401 && !isPublicPath) {
-        clearAuthData();
-        notifyAuthChanged();
-        window.location.href = "/";
+      const isAuthEndpoint =
+        typeof originalRequest.url === "string" &&
+        (originalRequest.url.includes("/auth/login") || originalRequest.url.includes("/auth/refresh"));
+
+      if (status === 401 && !isPublicPath && !isAuthEndpoint) {
+        if (originalRequest._retry) {
+          clearAuthData();
+          notifyAuthChanged();
+          window.location.href = "/";
+          return Promise.reject(error);
+        }
+
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          })
+            .then(() => api(originalRequest))
+            .catch((err) => Promise.reject(err));
+        }
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        try {
+          // Attempt session renewal via backend-controlled HttpOnly cookie refresh
+          await api.post("/auth/refresh");
+          processQueue(null);
+          return api(originalRequest);
+        } catch (refreshErr) {
+          processQueue(refreshErr);
+          clearAuthData();
+          notifyAuthChanged();
+          window.location.href = "/";
+          return Promise.reject(refreshErr);
+        } finally {
+          isRefreshing = false;
+        }
       }
     }
 

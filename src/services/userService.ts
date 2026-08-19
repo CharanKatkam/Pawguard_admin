@@ -18,6 +18,7 @@ export interface UserPayload {
   department?: string;
   status?: string;
   password?: string;
+  direct_permissions?: string[];
 }
 
 export interface RolePayload {
@@ -65,7 +66,14 @@ export const extractPermissionCodes = (raw: unknown): string[] => {
 export const userService = {
   getUsers: async (params?: Record<string, unknown>) => {
     try {
-      const response = await api.get("/admin/users", { params });
+      const queryParams: Record<string, unknown> = { ...params };
+      if (typeof queryParams.page_size === "number" && queryParams.page_size > 100) {
+        queryParams.page_size = 100;
+      }
+      if (typeof queryParams.limit === "number" && queryParams.limit > 100) {
+        queryParams.limit = 100;
+      }
+      const response = await api.get("/admin/users", { params: queryParams });
       return response.data;
     } catch (err: unknown) {
       const e = err as { response?: { status?: number } };

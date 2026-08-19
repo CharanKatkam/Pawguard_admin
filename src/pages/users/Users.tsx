@@ -10,11 +10,9 @@ import {
   FaUserPlus,
   FaUsers,
   FaUserShield,
-  FaTrash,
   FaCheckCircle,
   FaTimesCircle,
   FaKey,
-  FaExternalLinkAlt,
   FaEdit,
   FaBan,
   FaHome,
@@ -30,22 +28,29 @@ import userService, { type UserPayload, extractPermissionCodes } from "../../ser
 import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole, isInternalRole, getRoleTitle } from "../../utils/roleUtils";
+import { normalizeRole, isInternalRole } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 import { describePermission } from "../../utils/permissionsCatalog";
 
 interface UserTableRow {
   id: string;
   name: string;
+  full_name?: string | null;
   email: string;
   phone: string | null;
   roles: string[];
-  role: string; // formatted for display fallback
+  role: string;
   isActive: boolean;
+  is_active?: boolean;
   isVerified: boolean;
+  is_verified?: boolean;
   mfaEnabled: boolean;
+  mfa_enabled?: boolean;
   createdAt: string;
+  created_at?: string;
   updatedAt: string;
+  updated_at?: string;
+  direct_permissions?: string[];
   status: "Active" | "Inactive";
   [key: string]: unknown;
 }
@@ -53,6 +58,7 @@ interface UserTableRow {
 const formatDate = (isoString?: string): string => formatDateTime(isoString);
 
 const formatRole = (role: string): string => {
+  if (!role) return "General Public";
   return role
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -60,7 +66,7 @@ const formatRole = (role: string): string => {
 };
 
 const formatRoles = (roles: string[]): React.ReactNode => {
-  if (!roles || roles.length === 0) return <span style={{ color: "#94A3B8" }}>No Role</span>;
+  if (!roles || roles.length === 0) return <span style={{ color: "#94A3B8" }}>General Public</span>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
       {roles.map((role) => (
@@ -101,7 +107,6 @@ const ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendRoles: s
 
 /**
  * Checks if any of the user's assigned roles are authorized for Admin Portal access.
- * Reuses existing role normalization & internal staff logic from roleUtils.
  */
 const hasAdminPortalAccess = (roles: string[]): boolean => {
   if (!roles || roles.length === 0) return false;
@@ -164,13 +169,105 @@ const Users = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserTableRow | null>(null);
 
-  // User Profile & Password Reset Modal State
+  // User Profile Modal State
   const [selectedUserProfile, setSelectedUserProfile] = useState<UserTableRow | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Password Reset State inside Profile Modal
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [isResetTokenFormOpen, setIsResetTokenFormOpen] = useState(false);
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
+
+  // Direct User Permission Overrides State
+  const [isPermModalOpen, setIsPermModalOpen] = useState(false);
+  const [permUserId, setPermUserId] = useState<string>("");
+  const [permUserName, setPermUserName] = useState<string>("");
+  const [permUserRole, setPermUserRole] = useState<string>("");
+  const [userDirectPerms, setUserDirectPerms] = useState<string[]>([]);
+  const [loadingPerms, setLoadingPerms] = useState(false);
+  const [customPermCode, setCustomPermCode] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Form State for Add / Edit User
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    role: "rescue_agent",
+    password: "",
+  });
+
+  /**
+   * Fetch complete user profile from backend API to ensure exact field matching
+   * without stale state or hardcoded fallbacks.
+   */
+  const handleOpenUserProfile = async (userRow: UserTableRow) => {
+    // 1. Immediately reset profile state to null to avoid stale React state
+    setSelectedUserProfile(null);
+    setIsProfileModalOpen(true);
+    setProfileLoading(true);
+
+    try {
+      // 2. Fetch fresh detailed user profile from backend API (single source of truth)
+      const userRes = await userService.getUserById(userRow.id);
+      const userPayload = ((userRes as any)?.data || userRes) as Record<string, unknown>;
+
+      let perms: string[] = [];
+      try {
+        const permRes = await userService.getUserPermissions(userRow.id);
+        perms = extractPermissionCodes(permRes);
+      } catch {
+        perms = Array.isArray(userPayload.direct_permissions) ? (userPayload.direct_permissions as string[]) : [];
+      }
+
+      const rolesArr = Array.isArray(userPayload.roles)
+        ? (userPayload.roles as string[])
+        : Array.isArray(userPayload.role_names)
+        ? (userPayload.role_names as string[])
+        : userPayload.role
+        ? [String(userPayload.role)]
+        : userRow.roles;
+
+      const fullObj: UserTableRow = {
+        id: String(userPayload.id || userRow.id),
+        name: String(userPayload.full_name || userPayload.name || userRow.name || "Not provided"),
+        full_name: (userPayload.full_name as string) || (userPayload.name as string) || userRow.full_name || null,
+        email: String(userPayload.email || userRow.email || ""),
+        phone: userPayload.phone !== undefined ? (userPayload.phone as string | null) : userRow.phone,
+        roles: rolesArr,
+        role: rolesArr.length > 0 ? rolesArr.join(", ") : String(userPayload.role || userRow.role || "general_public"),
+        isActive: userPayload.is_active !== undefined ? Boolean(userPayload.is_active) : userRow.isActive,
+        is_active: userPayload.is_active !== undefined ? Boolean(userPayload.is_active) : userRow.isActive,
+        isVerified: userPayload.is_verified !== undefined ? Boolean(userPayload.is_verified) : userRow.isVerified,
+        is_verified: userPayload.is_verified !== undefined ? Boolean(userPayload.is_verified) : userRow.isVerified,
+        mfaEnabled: userPayload.mfa_enabled !== undefined ? Boolean(userPayload.mfa_enabled) : userRow.mfaEnabled,
+        mfa_enabled: userPayload.mfa_enabled !== undefined ? Boolean(userPayload.mfa_enabled) : userRow.mfaEnabled,
+        createdAt: (userPayload.created_at as string) || userRow.createdAt,
+        created_at: (userPayload.created_at as string) || userRow.createdAt,
+        updatedAt: (userPayload.updated_at as string) || userRow.updatedAt,
+        updated_at: (userPayload.updated_at as string) || userRow.updatedAt,
+        direct_permissions: perms,
+        status: (userPayload.is_active ?? userRow.isActive) ? "Active" : "Inactive",
+      };
+
+      setSelectedUserProfile(fullObj);
+    } catch {
+      // Fallback to table row data, strictly handling null phone as null / "Not provided"
+      setSelectedUserProfile({
+        ...userRow,
+        phone: userRow.phone ?? null,
+        is_active: userRow.isActive,
+        is_verified: userRow.isVerified,
+        mfa_enabled: userRow.mfaEnabled,
+        created_at: userRow.createdAt,
+        updated_at: userRow.updatedAt,
+        direct_permissions: [],
+      });
+    } finally {
+      setProfileLoading(false);
+    }
+  };
 
   const handleRequestPasswordReset = async () => {
     if (!selectedUserProfile?.email) return;
@@ -206,18 +303,9 @@ const Users = () => {
     }
   };
 
-  // Direct User Permission Overrides State in Profile Modal
-  const [isPermModalOpen, setIsPermModalOpen] = useState(false);
-  const [permUserId, setPermUserId] = useState<string>("");
-  const [permUserName, setPermUserName] = useState<string>("");
-  const [permUserRole, setPermUserRole] = useState<string>("");
-  const [userDirectPerms, setUserDirectPerms] = useState<string[]>([]);
-  const [loadingPerms, setLoadingPerms] = useState(false);
-  const [customPermCode, setCustomPermCode] = useState("");
-
   const openUserDirectPermissions = async (user: UserTableRow) => {
     setPermUserId(user.id);
-    setPermUserName(user.name);
+    setPermUserName(user.full_name || user.name);
     setPermUserRole(user.roles?.[0] || user.role || "");
     setIsPermModalOpen(true);
     setLoadingPerms(true);
@@ -268,10 +356,11 @@ const Users = () => {
   const handleToggleUserActiveStatus = async (user: UserTableRow) => {
     try {
       setIsSubmitting(true);
-      const newStatus = !user.isActive;
+      const currentActive = user.is_active ?? user.isActive;
+      const newStatus = !currentActive;
       await userService.updateUser(user.id, { is_active: newStatus });
-      addToast(`Account status for ${user.name} set to ${newStatus ? "Active" : "Inactive"}.`, "success");
-      setSelectedUserProfile((prev) => (prev ? { ...prev, isActive: newStatus, status: newStatus ? "Active" : "Inactive" } : null));
+      addToast(`Account status for ${user.full_name || user.name} set to ${newStatus ? "Active" : "Inactive"}.`, "success");
+      setSelectedUserProfile((prev) => (prev ? { ...prev, isActive: newStatus, is_active: newStatus, status: newStatus ? "Active" : "Inactive" } : null));
       fetchUsers();
       notifyDataChanged();
     } catch (err: unknown) {
@@ -281,16 +370,7 @@ const Users = () => {
     }
   };
 
-  // Form State
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    role: "rescue_agent",
-    password: "",
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Fetch users function - defined before useEffect to avoid "accessed before declaration" error
+  // Fetch users function
   const fetchUsers = useCallback(async () => {
     try {
       setError(null);
@@ -310,21 +390,30 @@ const Users = () => {
       const formattedUsers = userList.map((user: UserPayload): UserTableRow => {
         const roles = Array.isArray(user.roles)
           ? user.roles
+          : Array.isArray(user.role_names)
+          ? user.role_names
           : user.role
           ? [user.role]
           : [];
         return {
           id: user.id || "-",
           name: user.full_name || user.name || "-",
+          full_name: user.full_name || user.name || null,
           email: user.email || "-",
-          phone: user.phone ?? null,
+          phone: user.phone !== undefined ? user.phone : null,
           roles,
           role: roles.length > 0 ? roles.join(", ") : user.role || "-",
           isActive: user.is_active !== undefined ? user.is_active : (user.status === "Active"),
+          is_active: user.is_active !== undefined ? user.is_active : (user.status === "Active"),
           isVerified: user.is_verified !== undefined ? user.is_verified : false,
+          is_verified: user.is_verified !== undefined ? user.is_verified : false,
           mfaEnabled: user.mfa_enabled !== undefined ? user.mfa_enabled : false,
+          mfa_enabled: user.mfa_enabled !== undefined ? user.mfa_enabled : false,
           createdAt: user.created_at || "",
+          created_at: user.created_at || "",
           updatedAt: user.updated_at || "",
+          updated_at: user.updated_at || "",
+          direct_permissions: user.direct_permissions || [],
           status: user.is_active !== undefined ? (user.is_active ? "Active" : "Inactive") : (user.status === "Active" ? "Active" : "Inactive"),
         };
       });
@@ -344,7 +433,6 @@ const Users = () => {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchUsers();
   }, [fetchUsers]);
 
@@ -419,7 +507,6 @@ const Users = () => {
     }
   };
 
-  // Check if user matches the selected role filter
   const matchesRoleFilter = useCallback(
     (userRoles: string[], filterValue: string): boolean => {
       if (filterValue === "all") return true;
@@ -430,7 +517,6 @@ const Users = () => {
     []
   );
 
-  // Memoize summary cards
   const stats = useMemo(
     () => [
       {
@@ -448,47 +534,54 @@ const Users = () => {
         selected: activeFilter === "all" && roleFilter === "all" && !searchTerm,
       },
       {
-        title: "Admin Portal Access",
-        value: loading
-          ? "..."
-          : `${users.filter((u: UserTableRow) => hasAdminPortalAccess(u.roles)).length} Users`,
-        trend: roleFilter !== "all" ? "Filtered View" : "Permitted Access",
-        color: "#6366F1",
+        title: "Admin Staff Roles",
+        value: loading ? "..." : `${users.filter((u) => hasAdminPortalAccess(u.roles)).length} Staff`,
+        trend: "Authorized Internal Roles",
+        color: "#10B981",
         icon: <FaUserShield />,
         onClick: () => {
           setActiveFilter("admin");
+          setRoleFilter("all");
+          setSearchTerm("");
           document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
         },
         selected: activeFilter === "admin",
       },
+      {
+        title: "Active Accounts",
+        value: loading ? "..." : `${users.filter((u) => u.isActive).length} Active`,
+        trend: "Platform Ready",
+        color: "#059669",
+        icon: <FaCheckCircle />,
+      },
+      {
+        title: "Inactive Accounts",
+        value: loading ? "..." : `${users.filter((u) => !u.isActive).length} Inactive`,
+        trend: "Access Suspended",
+        color: "#EF4444",
+        icon: <FaTimesCircle />,
+      },
     ],
-    [loading, users, activeFilter, roleFilter, searchTerm]
+    [users, loading, activeFilter, roleFilter, searchTerm]
   );
 
-  // Filter users based on active filter, role filter, and search term
   const filteredUsers = useMemo(() => {
-    const lowerSearch = searchTerm.trim().toLowerCase();
-    return users.filter((user) => {
-      // Admin Portal Access filter
-      if (activeFilter === "admin" && !hasAdminPortalAccess(user.roles)) return false;
-
-      // Role filter
-      if (!matchesRoleFilter(user.roles, roleFilter)) return false;
-
-      // Search filter
-      if (lowerSearch) {
-        const searchableFields = [
-          user.name,
-          user.email,
-          user.phone,
-          user.id,
-          ...user.roles,
-        ].filter(Boolean);
-        if (!searchableFields.some((field) => String(field).toLowerCase().includes(lowerSearch))) {
-          return false;
-        }
+    return users.filter((u) => {
+      if (activeFilter === "admin" && !hasAdminPortalAccess(u.roles)) {
+        return false;
       }
-
+      if (!matchesRoleFilter(u.roles, roleFilter)) {
+        return false;
+      }
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const nameMatch = u.name.toLowerCase().includes(term);
+        const emailMatch = u.email.toLowerCase().includes(term);
+        const idMatch = u.id.toLowerCase().includes(term);
+        const phoneMatch = Boolean(u.phone && String(u.phone).toLowerCase().includes(term));
+        const roleMatch = u.roles.some((r) => r.toLowerCase().includes(term));
+        return nameMatch || emailMatch || idMatch || phoneMatch || roleMatch;
+      }
       return true;
     });
   }, [users, activeFilter, roleFilter, searchTerm, matchesRoleFilter]);
@@ -513,7 +606,7 @@ const Users = () => {
     {
       key: "phone",
       title: "Phone",
-      render: (val: string | null) => val ?? "—",
+      render: (val: string | null) => (val && val.trim() ? val : "Not provided"),
     },
     {
       key: "roles",
@@ -581,7 +674,7 @@ const Users = () => {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>
-          User Management & Personnel
+          User Management &amp; Personnel
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
           Manage user accounts, assign role permissions, onboard rescue staff, veterinarians, coordinators and volunteers.
@@ -702,20 +795,16 @@ const Users = () => {
             searchValue={searchTerm}
             onSearchChange={setSearchTerm}
             onRowClick={(row) => {
-              const target = row as UserTableRow;
-              setSelectedUserProfile(target);
-              setIsProfileModalOpen(true);
+              void handleOpenUserProfile(row as UserTableRow);
             }}
             onView={(row) => {
-              const target = row as UserTableRow;
-              setSelectedUserProfile(target);
-              setIsProfileModalOpen(true);
+              void handleOpenUserProfile(row as UserTableRow);
             }}
             onEdit={(row) => {
               const target = row as UserTableRow;
               setSelectedUser(target);
               setFormData({
-                name: target.name || "",
+                name: target.full_name || target.name || "",
                 email: target.email || "",
                 role: Array.isArray(target.roles) ? target.roles.join(", ") : target.role || "",
                 password: "",
@@ -732,7 +821,7 @@ const Users = () => {
 
       {/* User Profile & Credentials Modal */}
       <Modal
-        isOpen={isProfileModalOpen && !!selectedUserProfile}
+        isOpen={isProfileModalOpen}
         onClose={() => {
           setIsProfileModalOpen(false);
           setSelectedUserProfile(null);
@@ -740,9 +829,13 @@ const Users = () => {
           setResetToken("");
           setNewPassword("");
         }}
-        title={`User Profile — ${selectedUserProfile?.name || "Details"}`}
+        title={`User Profile — ${selectedUserProfile?.full_name || selectedUserProfile?.name || "Details"}`}
       >
-        {selectedUserProfile && (
+        {profileLoading ? (
+          <div style={{ padding: "40px 0", textAlign: "center", color: "#64748B" }}>
+            Loading user profile from API...
+          </div>
+        ) : selectedUserProfile ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             {/* Header Badge Card */}
             <div
@@ -771,11 +864,11 @@ const Users = () => {
                   flexShrink: 0,
                 }}
               >
-                {selectedUserProfile.name.charAt(0).toUpperCase()}
+                {(selectedUserProfile.full_name || selectedUserProfile.name || "U").charAt(0).toUpperCase()}
               </div>
               <div style={{ flex: 1 }}>
                 <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-                  {selectedUserProfile.name}
+                  {selectedUserProfile.full_name || selectedUserProfile.name || "Not provided"}
                 </h3>
                 <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
                   <span
@@ -788,19 +881,19 @@ const Users = () => {
                       fontWeight: 600,
                     }}
                   >
-                    {formatRole(selectedUserProfile.roles[0] || selectedUserProfile.role)}
+                    {formatRole(selectedUserProfile.roles?.[0] || selectedUserProfile.role || "general_public")}
                   </span>
                   <span
                     style={{
-                      background: selectedUserProfile.isActive ? "#DCFCE7" : "#FEE2E2",
-                      color: selectedUserProfile.isActive ? "#166534" : "#991B1B",
+                      background: (selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "#DCFCE7" : "#FEE2E2",
+                      color: (selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "#166534" : "#991B1B",
                       padding: "2px 10px",
                       borderRadius: "999px",
                       fontSize: "12px",
                       fontWeight: 700,
                     }}
                   >
-                    {selectedUserProfile.isActive ? "Active" : "Inactive"}
+                    {(selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "Active" : "Inactive"}
                   </span>
                 </div>
               </div>
@@ -809,7 +902,7 @@ const Users = () => {
             {/* Profile Details Grid */}
             <div>
               <h4 style={{ margin: "0 0 12px", fontSize: "13px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                Account Overview
+                Account Overview &amp; API Details
               </h4>
               <div
                 style={{
@@ -824,41 +917,92 @@ const Users = () => {
               >
                 <div>
                   <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Full Name</label>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedUserProfile.name}</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                    {selectedUserProfile.full_name || selectedUserProfile.name || "Not provided"}
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Email Address</label>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#2563EB", marginTop: "2px" }}>{selectedUserProfile.email}</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#2563EB", marginTop: "2px" }}>
+                    {selectedUserProfile.email || "Not provided"}
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Phone Number</label>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedUserProfile.phone || "+919876517358"}</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                    {selectedUserProfile.phone && String(selectedUserProfile.phone).trim() ? selectedUserProfile.phone : "Not provided"}
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Assigned Role</label>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{formatRole(selectedUserProfile.roles[0] || selectedUserProfile.role)}</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                    {selectedUserProfile.roles && selectedUserProfile.roles.length > 0
+                      ? selectedUserProfile.roles.map(formatRole).join(", ")
+                      : formatRole(selectedUserProfile.role || "general_public")}
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Account Status</label>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: selectedUserProfile.isActive ? "#16A34A" : "#DC2626", marginTop: "2px" }}>
-                    {selectedUserProfile.isActive ? "Active" : "Inactive"}
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: (selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "#16A34A" : "#DC2626", marginTop: "2px" }}>
+                    {(selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "Active" : "Inactive"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Verification</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: (selectedUserProfile.is_verified ?? selectedUserProfile.isVerified) ? "#16A34A" : "#64748B", marginTop: "2px" }}>
+                    {(selectedUserProfile.is_verified ?? selectedUserProfile.isVerified) ? "Verified" : "Unverified"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>MFA</label>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: (selectedUserProfile.mfa_enabled ?? selectedUserProfile.mfaEnabled) ? "#16A34A" : "#64748B", marginTop: "2px" }}>
+                    {(selectedUserProfile.mfa_enabled ?? selectedUserProfile.mfaEnabled) ? "Enabled" : "Disabled"}
                   </div>
                 </div>
                 <div>
                   <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>User ID (UUID)</label>
-                  <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#475569", marginTop: "2px", wordBreak: "break-all" }}>{selectedUserProfile.id}</div>
+                  <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#475569", marginTop: "2px", wordBreak: "break-all" }}>
+                    {selectedUserProfile.id || "Not available"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Created Date</label>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#334155", marginTop: "2px" }}>
+                    {(selectedUserProfile.created_at || selectedUserProfile.createdAt) ? formatDateTime(String(selectedUserProfile.created_at || selectedUserProfile.createdAt)) : "Not available"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Updated Date</label>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#334155", marginTop: "2px" }}>
+                    {(selectedUserProfile.updated_at || selectedUserProfile.updatedAt) ? formatDateTime(String(selectedUserProfile.updated_at || selectedUserProfile.updatedAt)) : "Not available"}
+                  </div>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Direct Permissions</label>
+                  {selectedUserProfile.direct_permissions && selectedUserProfile.direct_permissions.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                      {selectedUserProfile.direct_permissions.map((code) => (
+                        <span key={code} style={{ background: "#F1F5F9", color: "#334155", padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontFamily: "monospace" }}>
+                          {code}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "13px", color: "#94A3B8", fontStyle: "italic", marginTop: "2px" }}>
+                      None (Role default permissions apply)
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Role-Aware & Permission-Aware Actions Section */}
+            {/* Account Operations Section */}
             <div style={{ background: "#F8FAFC", border: "1px solid #CBD5E1", borderRadius: "12px", padding: "16px" }}>
               <h4 style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: 700, color: "#0F172A" }}>
-                Account Operations &amp; Role Resource Access
+                Account Operations &amp; Resource Access
               </h4>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-                {/* Common Account Management Actions */}
                 <button
                   type="button"
                   onClick={handleRequestPasswordReset}
@@ -905,7 +1049,7 @@ const Users = () => {
                   onClick={() => {
                     setSelectedUser(selectedUserProfile);
                     setFormData({
-                      name: selectedUserProfile.name || "",
+                      name: selectedUserProfile.full_name || selectedUserProfile.name || "",
                       email: selectedUserProfile.email || "",
                       role: Array.isArray(selectedUserProfile.roles) ? selectedUserProfile.roles.join(", ") : selectedUserProfile.role || "",
                       password: "",
@@ -937,9 +1081,9 @@ const Users = () => {
                   style={{
                     padding: "9px 16px",
                     borderRadius: "8px",
-                    background: selectedUserProfile.isActive ? "#FEF2F2" : "#ECFDF5",
-                    color: selectedUserProfile.isActive ? "#991B1B" : "#047857",
-                    border: `1px solid ${selectedUserProfile.isActive ? "#FCA5A5" : "#A7F3D0"}`,
+                    background: (selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "#FEF2F2" : "#ECFDF5",
+                    color: (selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "#991B1B" : "#047857",
+                    border: `1px solid ${(selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "#FCA5A5" : "#A7F3D0"}`,
                     fontSize: "13px",
                     fontWeight: 600,
                     cursor: "pointer",
@@ -948,7 +1092,7 @@ const Users = () => {
                     gap: "6px",
                   }}
                 >
-                  <FaBan size={13} /> {selectedUserProfile.isActive ? "Deactivate Account" : "Activate Account"}
+                  <FaBan size={13} /> {(selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "Deactivate Account" : "Activate Account"}
                 </button>
 
                 {/* Dynamic Role-Specific Navigation Actions */}
@@ -983,236 +1127,116 @@ const Users = () => {
 
                   const roleBtns: React.ReactNode[] = [];
 
-                  if (roleStr.includes("super_admin") || roleStr.includes("system:admin")) {
-                    roleBtns.push(navBtn("Manage Roles & Permissions Matrix", "/roles-permissions", <FaUserShield size={13} />, "#EEF2FF", "#3730A3", "#C7D2FE"));
-                  }
-                  if (roleStr.includes("rescue_centre_admin") || roleStr.includes("rescue_manager")) {
-                    roleBtns.push(navBtn("View Rescue Operations", "/rescues", <FaExternalLinkAlt size={12} />, "#FFF7ED", "#C2410C", "#FFEDD5"));
-                    roleBtns.push(navBtn("View Rescue Vehicles", "/vehicles", <FaTruck size={12} />, "#F0FDF4", "#15803D", "#BBF7D0"));
-                  }
-                  if (roleStr.includes("rescue_admin") || roleStr.includes("rescue_coordinator") || roleStr.includes("rescue_agent")) {
-                    roleBtns.push(navBtn("View Rescue Requests", "/rescues", <FaExternalLinkAlt size={12} />, "#FFF7ED", "#C2410C", "#FFEDD5"));
-                  }
-                  if (roleStr.includes("veterinarian") || roleStr.includes("vet")) {
-                    roleBtns.push(navBtn("View Medical Cases & EMR", "/medical", <FaStethoscope size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
-                    roleBtns.push(navBtn("View Vaccination Schedules", "/medical?tab=vaccinations", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
-                  }
-                  if (roleStr.includes("shelter_manager") || roleStr.includes("shelter_staff")) {
-                    roleBtns.push(navBtn("View Shelter Facilities", "/shelters", <FaHome size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
-                    roleBtns.push(navBtn("View Shelter Dogs & Kennels", "/pets", <FaExternalLinkAlt size={12} />, "#ECFDF5", "#047857", "#A7F3D0"));
-                  }
-                  if (roleStr.includes("adoption_coordinator")) {
+                  if (/veterinarian/.test(roleStr)) {
+                    roleBtns.push(navBtn("Open Vet Dashboard", "/veterinarian-dashboard", <FaStethoscope size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                  } else if (/shelter/.test(roleStr)) {
+                    roleBtns.push(navBtn("Open Shelter Manager Dashboard", "/shelter-manager-dashboard", <FaHome size={13} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
+                  } else if (/rescue_agent|rescue_coordinator|rescue_centre/.test(roleStr)) {
+                    roleBtns.push(navBtn("View Rescue Dispatches", "/rescue-dispatch", <FaTruck size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
+                  } else if (/adoption/.test(roleStr)) {
                     roleBtns.push(navBtn("View Adoption Applications", "/adoptions", <FaHeart size={13} />, "#FDF2F8", "#BE185D", "#FBCFE8"));
-                  }
-                  if (roleStr.includes("foster_coordinator")) {
-                    roleBtns.push(navBtn("View Foster Caregivers", "/fosters", <FaHandHoldingHeart size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
-                    roleBtns.push(navBtn("View Foster Placements", "/fosters?tab=placements", <FaExternalLinkAlt size={12} />, "#ECFDF5", "#047857", "#A7F3D0"));
-                  }
-                  if (roleStr.includes("foster_family")) {
-                    roleBtns.push(navBtn("View Active Foster Placements", "/fosters", <FaHandHoldingHeart size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
-                  }
-                  if (roleStr.includes("volunteer_coordinator")) {
-                    roleBtns.push(navBtn("View Volunteer Roster", "/volunteers", <FaUserFriends size={13} />, "#FFFBEB", "#B45309", "#FDE68A"));
-                    roleBtns.push(navBtn("View Volunteer Shifts", "/volunteers?tab=shifts", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
-                  }
-                  if (roleStr.includes("volunteer") && !roleStr.includes("volunteer_coordinator")) {
-                    roleBtns.push(navBtn("View Volunteer Profile & Shifts", "/volunteers", <FaUserFriends size={13} />, "#FFFBEB", "#B45309", "#FDE68A"));
-                  }
-                  if (roleStr.includes("inventory_manager")) {
-                    roleBtns.push(navBtn("View Inventory Stock", "/inventory", <FaBoxes size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
-                    roleBtns.push(navBtn("View Requisitions", "/inventory?tab=requisitions", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
-                    roleBtns.push(navBtn("View Suppliers", "/inventory?tab=suppliers", <FaExternalLinkAlt size={12} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
-                  }
-                  if (roleStr.includes("finance_user")) {
-                    roleBtns.push(navBtn("View Financial Ledger", "/finance", <FaCoins size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
-                    roleBtns.push(navBtn("View Donation Transactions", "/finance?tab=donations", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
-                  }
-                  if (roleStr.includes("donor")) {
-                    roleBtns.push(navBtn("View Donor Contributions", "/finance?tab=donors", <FaCoins size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                  } else if (/foster/.test(roleStr)) {
+                    roleBtns.push(navBtn("View Foster Placements", "/fosters", <FaHandHoldingHeart size={13} />, "#FFF7ED", "#C2410C", "#FFEDD5"));
+                  } else if (/volunteer/.test(roleStr)) {
+                    roleBtns.push(navBtn("View Volunteer Roster", "/volunteers", <FaUserFriends size={13} />, "#FEFCE8", "#A16207", "#FEF08A"));
+                  } else if (/inventory/.test(roleStr)) {
+                    roleBtns.push(navBtn("View Inventory Suite", "/inventory", <FaBoxes size={13} />, "#F0FDF4", "#15803D", "#BBF7D0"));
+                  } else if (/finance/.test(roleStr)) {
+                    roleBtns.push(navBtn("View Finance Dashboard", "/finance-dashboard", <FaCoins size={13} />, "#F0FDF4", "#15803D", "#BBF7D0"));
                   }
 
                   return roleBtns;
                 })()}
               </div>
-            </div>
 
-            {/* Optional Reset Token Confirmation Form */}
-            {isResetTokenFormOpen && (
-              <div style={{ background: "#EFF6FF", border: "1px solid #93C5FD", borderRadius: "10px", padding: "14px" }}>
-                <h5 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 700, color: "#1E40AF" }}>
-                  Confirm Password Reset with Token
-                </h5>
-                <p style={{ fontSize: "12px", color: "#3B82F6", margin: "0 0 10px" }}>
-                  Enter the reset token generated by backend OpenAPI (or email) and specify the new test password for this user.
-                </p>
-                <form onSubmit={handleConfirmPasswordReset} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {/* Confirm Password Reset Form inline if token is generated */}
+              {isResetTokenFormOpen && (
+                <form onSubmit={handleConfirmPasswordReset} style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid #E2E8F0", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#1E40AF" }}>
+                    Enter Password Reset Confirmation Token
+                  </div>
                   <div>
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#1E3A8A" }}>Reset Token:</label>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Reset Token (from email / dev log) *</label>
                     <input
                       type="text"
+                      required
+                      placeholder="Paste reset token string..."
                       value={resetToken}
                       onChange={(e) => setResetToken(e.target.value)}
-                      placeholder="Paste reset token..."
-                      required
-                      style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "13px", marginTop: "2px", boxSizing: "border-box" }}
+                      style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#1E3A8A" }}>New Password:</label>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>New Password *</label>
                     <PasswordInput
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Enter new test password (min 10 chars)..."
-                      required
                     />
                   </div>
-                  <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      style={{ padding: "8px 14px", borderRadius: "6px", background: "#1D4ED8", color: "#FFFFFF", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                    >
-                      {isSubmitting ? "Updating..." : "Update Password"}
-                    </button>
+                  <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                     <button
                       type="button"
                       onClick={() => setIsResetTokenFormOpen(false)}
-                      style={{ padding: "8px 14px", borderRadius: "6px", background: "#FFFFFF", color: "#475569", border: "1px solid #CBD5E1", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFFFFF", fontSize: "12px" }}
                     >
                       Cancel
                     </button>
-                  </div>
-                </form>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
-
-      {/* Direct User Permission Overrides Modal in User Management */}
-      <Modal
-        isOpen={isPermModalOpen}
-        onClose={() => setIsPermModalOpen(false)}
-        title={`Direct Permission Overrides — ${permUserName || "User"}`}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ margin: 0, color: "#64748B", fontSize: "13px" }}>
-            Grant or revoke specific permission overrides directly for <strong>{permUserName}</strong>, overriding default role policy (`{getRoleTitle(permUserRole)}`).
-          </p>
-
-          <div style={{ background: "#F8FAFC", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0", display: "flex", gap: "8px", alignItems: "center" }}>
-            <input
-              type="text"
-              placeholder="Permission code (e.g. inventory:create, foster:update)"
-              value={customPermCode}
-              onChange={(e) => setCustomPermCode(e.target.value)}
-              style={{ flex: 1, padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12.5px" }}
-            />
-            <button
-              type="button"
-              onClick={() => handleGrantUserPerm(customPermCode)}
-              disabled={isSubmitting || !customPermCode.trim()}
-              style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
-            >
-              Grant
-            </button>
-          </div>
-
-          <div>
-            <h4 style={{ margin: "0 0 8px", color: "#0F172A", fontSize: "13.5px", fontWeight: 700 }}>
-              Active Direct Overrides ({userDirectPerms.length})
-            </h4>
-
-            {loadingPerms ? (
-              <div style={{ padding: "16px", textAlign: "center", color: "#2563EB" }}>Loading permissions...</div>
-            ) : userDirectPerms.length === 0 ? (
-              <div style={{ padding: "16px", textAlign: "center", color: "#64748B", background: "#F8FAFC", borderRadius: "6px", border: "1px solid #E2E8F0", fontSize: "12.5px" }}>
-                No direct user permission overrides granted. User operates strictly under assigned role defaults.
-              </div>
-            ) : (
-              <div style={{ maxHeight: "200px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
-                {userDirectPerms.map((code) => (
-                  <div key={code} style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", background: "#FFF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: "#0F172A", fontFamily: "monospace", fontSize: "12px" }}>{code}</div>
-                      <div style={{ fontSize: "11px", color: "#64748B" }}>{describePermission(code)}</div>
-                    </div>
                     <button
-                      type="button"
-                      onClick={() => handleRevokeUserPerm(code)}
+                      type="submit"
                       disabled={isSubmitting}
-                      style={{ padding: "4px 8px", borderRadius: "4px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFFFFF", fontWeight: 700, fontSize: "12px", cursor: "pointer" }}
                     >
-                      Revoke
+                      {isSubmitting ? "Updating Password..." : "Finalize Password Update"}
                     </button>
                   </div>
-                ))}
-              </div>
-            )}
+                </form>
+              )}
+            </div>
           </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button
-              type="button"
-              onClick={() => setIsPermModalOpen(false)}
-              style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
-            >
-              Close
-            </button>
-          </div>
-        </div>
+        ) : null}
       </Modal>
 
-      {/* Provision User Modal */}
-      <Modal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        title="Provision New User Account"
-      >
+      {/* Provision New User Modal */}
+      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Provision User Account">
         <form onSubmit={handleCreateUser} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Full Name *</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+              Full Name *
+            </label>
             <input
               type="text"
               required
-              placeholder="e.g. Dr. Sarah Connor"
+              placeholder="e.g. Dr. Sarah Jenkins"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Email Address *</label>
-            <input
-              type="email"
-              required
-              placeholder="sarah@pawguard.org"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Initial Password</label>
-            <PasswordInput
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              placeholder="Leave blank for auto-generated password"
-              autoComplete="new-password"
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
             />
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+              Email Address *
+            </label>
+            <input
+              type="email"
+              required
+              placeholder="sarah.j@pawguard.org"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+              Assigned System Role *
+            </label>
             <select
               value={formData.role}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", background: "#FFFFFF" }}
             >
-              <option value="super_admin">Super Admin</option>
+              <option value="super_admin">Super Admin (Full System Privileges)</option>
               <option value="rescue_centre_admin">Rescue Centre Admin</option>
               <option value="rescue_coordinator">Rescue Coordinator</option>
               <option value="rescue_agent">Rescue Agent</option>
@@ -1222,37 +1246,41 @@ const Users = () => {
               <option value="foster_coordinator">Foster Coordinator</option>
               <option value="volunteer_coordinator">Volunteer Coordinator</option>
               <option value="inventory_manager">Inventory Manager</option>
-              <option value="finance_user">Finance User</option>
+              <option value="finance_user">Finance Officer</option>
             </select>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+              Initial Password (Optional — Auto-generated if left empty)
+            </label>
+            <PasswordInput
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
             <button
               type="button"
               onClick={() => setIsAddModalOpen(false)}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", fontWeight: 600 }}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: "pointer" }}
             >
-              {isSubmitting ? "Provisioning..." : "Provision User"}
+              {isSubmitting ? "Provisioning..." : "Provision Account"}
             </button>
           </div>
         </form>
       </Modal>
 
-
-
-      {/* Edit User Modal */}
-      <Modal
-        isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
-        title="Edit User Account"
-      >
+      {/* Edit User Account Modal */}
+      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit User Account Details">
         <form onSubmit={handleUpdateUser} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Full Name *</label>
@@ -1261,78 +1289,105 @@ const Users = () => {
               required
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
             />
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Email Address</label>
-            <input
-              type="email"
-              disabled
-              value={formData.email}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box", background: "#F1F5F9", color: "#64748B" }}
-            />
-            <span style={{ fontSize: "11px", color: "#94A3B8" }}>Email address cannot be changed after creation.</span>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role(s)</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Assigned Role(s) (comma-separated)</label>
             <input
               type="text"
+              required
               value={formData.role}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              placeholder="e.g. veterinarian, rescue_agent"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
             />
-            <span style={{ fontSize: "11px", color: "#94A3B8" }}>Separate multiple roles with a comma.</span>
+            <span style={{ fontSize: "11px", color: "#64748B" }}>e.g. super_admin, veterinarian</span>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button
-              type="button"
-              onClick={() => setIsEditModalOpen(false)}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
-            >
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+            <button type="button" onClick={() => setIsEditModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", fontWeight: 600 }}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
-            >
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: "pointer" }}>
               {isSubmitting ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Delete User Modal */}
-      <Modal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        title="Confirm User Deletion"
-      >
+      {/* Delete Confirmation Modal */}
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Deprovision Account">
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0 }}>
-            Are you sure you want to permanently delete the account for <strong>{selectedUser?.name}</strong> ({selectedUser?.email})?
+          <p style={{ margin: 0, fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+            Are you sure you want to permanently delete the user account for <strong>{selectedUser?.name}</strong> (<code>{selectedUser?.email}</code>)? This action cannot be undone.
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <button
-              type="button"
-              onClick={() => setIsDeleteModalOpen(false)}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
-            >
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+            <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", fontWeight: 600 }}>
               Cancel
             </button>
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={handleDeleteUser}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <FaTrash /> {isSubmitting ? "Deleting..." : "Delete User"}
+            <button type="button" onClick={handleDeleteUser} disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#DC2626", color: "#FFFFFF", fontWeight: 700, cursor: "pointer" }}>
+              {isSubmitting ? "Deleting..." : "Permanently Delete Account"}
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Direct Permission Overrides Modal */}
+      <Modal isOpen={isPermModalOpen} onClose={() => setIsPermModalOpen(false)} title={`Direct Permissions — ${permUserName}`}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", padding: "12px 14px", borderRadius: "8px" }}>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A" }}>{permUserName}</div>
+            <div style={{ fontSize: "12px", color: "#64748B" }}>Role: {formatRole(permUserRole)} &bull; User ID: <code>{permUserId}</code></div>
+          </div>
+
+          <div>
+            <h4 style={{ margin: "0 0 8px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>Active Direct Permissions ({userDirectPerms.length})</h4>
+            {loadingPerms ? (
+              <p style={{ color: "#64748B", fontSize: "13px" }}>Loading direct permissions...</p>
+            ) : userDirectPerms.length === 0 ? (
+              <p style={{ color: "#94A3B8", fontSize: "13px", fontStyle: "italic" }}>No direct permission overrides assigned. User inherits role default permissions.</p>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+                {userDirectPerms.map((code) => (
+                  <li key={code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F1F5F9", padding: "8px 12px", borderRadius: "6px" }}>
+                    <div>
+                      <code style={{ fontSize: "12px", fontWeight: 700, color: "#1E293B" }}>{code}</code>
+                      <div style={{ fontSize: "11px", color: "#64748B" }}>{describePermission(code)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeUserPerm(code)}
+                      disabled={isSubmitting}
+                      style={{ border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", padding: "4px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div style={{ borderTop: "1px solid #E2E8F0", paddingTop: "14px" }}>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Grant New Direct Permission Code</label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                type="text"
+                placeholder="e.g. create_rescue, view_finance"
+                value={customPermCode}
+                onChange={(e) => setCustomPermCode(e.target.value)}
+                style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+              <button
+                type="button"
+                onClick={() => handleGrantUserPerm(customPermCode)}
+                disabled={isSubmitting || !customPermCode.trim()}
+                style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "12px", cursor: "pointer" }}
+              >
+                Grant Permission
+              </button>
+            </div>
           </div>
         </div>
       </Modal>
