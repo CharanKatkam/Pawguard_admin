@@ -15,13 +15,24 @@ import {
   FaTimesCircle,
   FaKey,
   FaExternalLinkAlt,
+  FaEdit,
+  FaBan,
+  FaHome,
+  FaStethoscope,
+  FaHeart,
+  FaHandHoldingHeart,
+  FaUserFriends,
+  FaBoxes,
+  FaCoins,
+  FaTruck,
 } from "react-icons/fa";
-import userService, { type UserPayload } from "../../services/userService";
+import userService, { type UserPayload, extractPermissionCodes } from "../../services/userService";
 import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole, isInternalRole } from "../../utils/roleUtils";
+import { normalizeRole, isInternalRole, getRoleTitle } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
+import { describePermission } from "../../utils/permissionsCatalog";
 
 interface UserTableRow {
   id: string;
@@ -195,6 +206,81 @@ const Users = () => {
     }
   };
 
+  // Direct User Permission Overrides State in Profile Modal
+  const [isPermModalOpen, setIsPermModalOpen] = useState(false);
+  const [permUserId, setPermUserId] = useState<string>("");
+  const [permUserName, setPermUserName] = useState<string>("");
+  const [permUserRole, setPermUserRole] = useState<string>("");
+  const [userDirectPerms, setUserDirectPerms] = useState<string[]>([]);
+  const [loadingPerms, setLoadingPerms] = useState(false);
+  const [customPermCode, setCustomPermCode] = useState("");
+
+  const openUserDirectPermissions = async (user: UserTableRow) => {
+    setPermUserId(user.id);
+    setPermUserName(user.name);
+    setPermUserRole(user.roles?.[0] || user.role || "");
+    setIsPermModalOpen(true);
+    setLoadingPerms(true);
+    try {
+      const res = await userService.getUserPermissions(user.id);
+      const codes = extractPermissionCodes(res);
+      setUserDirectPerms(codes);
+    } catch {
+      setUserDirectPerms([]);
+    } finally {
+      setLoadingPerms(false);
+    }
+  };
+
+  const handleGrantUserPerm = async (code: string) => {
+    if (!permUserId || !code.trim()) return;
+    try {
+      setIsSubmitting(true);
+      await userService.grantUserPermission(permUserId, code.trim());
+      addToast(`Granted direct permission "${code.trim()}" to ${permUserName}`, "success");
+      const res = await userService.getUserPermissions(permUserId);
+      setUserDirectPerms(extractPermissionCodes(res));
+      setCustomPermCode("");
+      notifyDataChanged();
+    } catch (err: unknown) {
+      addToast(getErrorMessage(err, "Failed to grant user permission."), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRevokeUserPerm = async (code: string) => {
+    if (!permUserId || !code) return;
+    try {
+      setIsSubmitting(true);
+      await userService.revokeUserPermission(permUserId, code);
+      addToast(`Revoked direct permission "${code}" from ${permUserName}`, "success");
+      const res = await userService.getUserPermissions(permUserId);
+      setUserDirectPerms(extractPermissionCodes(res));
+      notifyDataChanged();
+    } catch (err: unknown) {
+      addToast(getErrorMessage(err, "Failed to revoke user permission."), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleUserActiveStatus = async (user: UserTableRow) => {
+    try {
+      setIsSubmitting(true);
+      const newStatus = !user.isActive;
+      await userService.updateUser(user.id, { is_active: newStatus });
+      addToast(`Account status for ${user.name} set to ${newStatus ? "Active" : "Inactive"}.`, "success");
+      setSelectedUserProfile((prev) => (prev ? { ...prev, isActive: newStatus, status: newStatus ? "Active" : "Inactive" } : null));
+      fetchUsers();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      addToast(getErrorMessage(err, "Failed to update account status."), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Form State
   const [formData, setFormData] = useState({
     name: "",
@@ -243,7 +329,13 @@ const Users = () => {
         };
       });
 
-      setUsers(formattedUsers);
+      const sortedFormattedUsers = formattedUsers.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setUsers(sortedFormattedUsers);
     } catch (err: unknown) {
       setError(getErrorMessage(err, "Failed to load registered users. Please check permissions."));
     } finally {
@@ -759,78 +851,188 @@ const Users = () => {
               </div>
             </div>
 
-            {/* Login Credentials Section */}
+            {/* Role-Aware & Permission-Aware Actions Section */}
             <div style={{ background: "#F8FAFC", border: "1px solid #CBD5E1", borderRadius: "12px", padding: "16px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-                <h4 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <FaKey style={{ color: "#2563EB" }} /> Login Credentials
-                </h4>
-                <span style={{ fontSize: "11px", color: "#64748B", background: "#E2E8F0", padding: "2px 8px", borderRadius: "4px", fontWeight: 600 }}>
-                  Secured
-                </span>
-              </div>
+              <h4 style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: 700, color: "#0F172A" }}>
+                Account Operations &amp; Role Resource Access
+              </h4>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>Login Email:</label>
-                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#0F172A", fontFamily: "monospace", background: "#FFFFFF", padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", marginTop: "2px" }}>
-                    {selectedUserProfile.email}
-                  </div>
-                </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                {/* Common Account Management Actions */}
+                <button
+                  type="button"
+                  onClick={handleRequestPasswordReset}
+                  disabled={isResettingPassword}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: "8px",
+                    background: "#2563EB",
+                    color: "#FFFFFF",
+                    border: "none",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: isResettingPassword ? "wait" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaKey size={13} /> {isResettingPassword ? "Initializing Reset..." : "Set / Reset Login Password"}
+                </button>
 
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>Password:</label>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", marginTop: "2px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>🔒 Not displayed / not retrievable</span>
-                    <span style={{ fontSize: "11px", color: "#94A3B8" }}>Encrypted Hash</span>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => openUserDirectPermissions(selectedUserProfile)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: "8px",
+                    background: "#F5F3FF",
+                    color: "#6D28D9",
+                    border: "1px solid #DDD6FE",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaUserShield size={13} /> Direct Permission Overrides
+                </button>
 
-                <div style={{ marginTop: "6px", display: "flex", flexWrap: "wrap", gap: "10px" }}>
-                  <button
-                    type="button"
-                    onClick={handleRequestPasswordReset}
-                    disabled={isResettingPassword}
-                    style={{
-                      padding: "9px 16px",
-                      borderRadius: "8px",
-                      background: "#2563EB",
-                      color: "#FFFFFF",
-                      border: "none",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      cursor: isResettingPassword ? "wait" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <FaKey size={13} /> {isResettingPassword ? "Initializing Reset..." : "Set / Reset Login Password"}
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedUser(selectedUserProfile);
+                    setFormData({
+                      name: selectedUserProfile.name || "",
+                      email: selectedUserProfile.email || "",
+                      role: Array.isArray(selectedUserProfile.roles) ? selectedUserProfile.roles.join(", ") : selectedUserProfile.role || "",
+                      password: "",
+                    });
+                    setIsProfileModalOpen(false);
+                    setIsEditModalOpen(true);
+                  }}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: "8px",
+                    background: "#EFF6FF",
+                    color: "#1D4ED8",
+                    border: "1px solid #BFDBFE",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaEdit size={13} /> Edit User Profile
+                </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsProfileModalOpen(false);
-                      navigate("/rescues");
-                    }}
-                    style={{
-                      padding: "9px 16px",
-                      borderRadius: "8px",
-                      background: "#F1F5F9",
-                      color: "#0F172A",
-                      border: "1px solid #CBD5E1",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <FaExternalLinkAlt size={12} /> View Assigned Rescues
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleUserActiveStatus(selectedUserProfile)}
+                  disabled={isSubmitting}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: "8px",
+                    background: selectedUserProfile.isActive ? "#FEF2F2" : "#ECFDF5",
+                    color: selectedUserProfile.isActive ? "#991B1B" : "#047857",
+                    border: `1px solid ${selectedUserProfile.isActive ? "#FCA5A5" : "#A7F3D0"}`,
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <FaBan size={13} /> {selectedUserProfile.isActive ? "Deactivate Account" : "Activate Account"}
+                </button>
+
+                {/* Dynamic Role-Specific Navigation Actions */}
+                {(() => {
+                  const roleStr = String(selectedUserProfile.roles?.[0] || selectedUserProfile.role || "").toLowerCase().trim();
+
+                  const navBtn = (label: string, path: string, icon: React.ReactNode, bg = "#F1F5F9", fg = "#0F172A", border = "#CBD5E1") => (
+                    <button
+                      key={path}
+                      type="button"
+                      onClick={() => {
+                        setIsProfileModalOpen(false);
+                        navigate(path);
+                      }}
+                      style={{
+                        padding: "9px 16px",
+                        borderRadius: "8px",
+                        background: bg,
+                        color: fg,
+                        border: `1px solid ${border}`,
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      {icon} {label}
+                    </button>
+                  );
+
+                  const roleBtns: React.ReactNode[] = [];
+
+                  if (roleStr.includes("super_admin") || roleStr.includes("system:admin")) {
+                    roleBtns.push(navBtn("Manage Roles & Permissions Matrix", "/roles-permissions", <FaUserShield size={13} />, "#EEF2FF", "#3730A3", "#C7D2FE"));
+                  }
+                  if (roleStr.includes("rescue_centre_admin") || roleStr.includes("rescue_manager")) {
+                    roleBtns.push(navBtn("View Rescue Operations", "/rescues", <FaExternalLinkAlt size={12} />, "#FFF7ED", "#C2410C", "#FFEDD5"));
+                    roleBtns.push(navBtn("View Rescue Vehicles", "/vehicles", <FaTruck size={12} />, "#F0FDF4", "#15803D", "#BBF7D0"));
+                  }
+                  if (roleStr.includes("rescue_admin") || roleStr.includes("rescue_coordinator") || roleStr.includes("rescue_agent")) {
+                    roleBtns.push(navBtn("View Rescue Requests", "/rescues", <FaExternalLinkAlt size={12} />, "#FFF7ED", "#C2410C", "#FFEDD5"));
+                  }
+                  if (roleStr.includes("veterinarian") || roleStr.includes("vet")) {
+                    roleBtns.push(navBtn("View Medical Cases & EMR", "/medical", <FaStethoscope size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                    roleBtns.push(navBtn("View Vaccination Schedules", "/medical?tab=vaccinations", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
+                  }
+                  if (roleStr.includes("shelter_manager") || roleStr.includes("shelter_staff")) {
+                    roleBtns.push(navBtn("View Shelter Facilities", "/shelters", <FaHome size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
+                    roleBtns.push(navBtn("View Shelter Dogs & Kennels", "/pets", <FaExternalLinkAlt size={12} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                  }
+                  if (roleStr.includes("adoption_coordinator")) {
+                    roleBtns.push(navBtn("View Adoption Applications", "/adoptions", <FaHeart size={13} />, "#FDF2F8", "#BE185D", "#FBCFE8"));
+                  }
+                  if (roleStr.includes("foster_coordinator")) {
+                    roleBtns.push(navBtn("View Foster Caregivers", "/fosters", <FaHandHoldingHeart size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
+                    roleBtns.push(navBtn("View Foster Placements", "/fosters?tab=placements", <FaExternalLinkAlt size={12} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                  }
+                  if (roleStr.includes("foster_family")) {
+                    roleBtns.push(navBtn("View Active Foster Placements", "/fosters", <FaHandHoldingHeart size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
+                  }
+                  if (roleStr.includes("volunteer_coordinator")) {
+                    roleBtns.push(navBtn("View Volunteer Roster", "/volunteers", <FaUserFriends size={13} />, "#FFFBEB", "#B45309", "#FDE68A"));
+                    roleBtns.push(navBtn("View Volunteer Shifts", "/volunteers?tab=shifts", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
+                  }
+                  if (roleStr.includes("volunteer") && !roleStr.includes("volunteer_coordinator")) {
+                    roleBtns.push(navBtn("View Volunteer Profile & Shifts", "/volunteers", <FaUserFriends size={13} />, "#FFFBEB", "#B45309", "#FDE68A"));
+                  }
+                  if (roleStr.includes("inventory_manager")) {
+                    roleBtns.push(navBtn("View Inventory Stock", "/inventory", <FaBoxes size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                    roleBtns.push(navBtn("View Requisitions", "/inventory?tab=requisitions", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
+                    roleBtns.push(navBtn("View Suppliers", "/inventory?tab=suppliers", <FaExternalLinkAlt size={12} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
+                  }
+                  if (roleStr.includes("finance_user")) {
+                    roleBtns.push(navBtn("View Financial Ledger", "/finance", <FaCoins size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                    roleBtns.push(navBtn("View Donation Transactions", "/finance?tab=donations", <FaExternalLinkAlt size={12} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
+                  }
+                  if (roleStr.includes("donor")) {
+                    roleBtns.push(navBtn("View Donor Contributions", "/finance?tab=donors", <FaCoins size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                  }
+
+                  return roleBtns;
+                })()}
               </div>
             </div>
 
@@ -885,6 +1087,80 @@ const Users = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Direct User Permission Overrides Modal in User Management */}
+      <Modal
+        isOpen={isPermModalOpen}
+        onClose={() => setIsPermModalOpen(false)}
+        title={`Direct Permission Overrides — ${permUserName || "User"}`}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ margin: 0, color: "#64748B", fontSize: "13px" }}>
+            Grant or revoke specific permission overrides directly for <strong>{permUserName}</strong>, overriding default role policy (`{getRoleTitle(permUserRole)}`).
+          </p>
+
+          <div style={{ background: "#F8FAFC", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0", display: "flex", gap: "8px", alignItems: "center" }}>
+            <input
+              type="text"
+              placeholder="Permission code (e.g. inventory:create, foster:update)"
+              value={customPermCode}
+              onChange={(e) => setCustomPermCode(e.target.value)}
+              style={{ flex: 1, padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12.5px" }}
+            />
+            <button
+              type="button"
+              onClick={() => handleGrantUserPerm(customPermCode)}
+              disabled={isSubmitting || !customPermCode.trim()}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+            >
+              Grant
+            </button>
+          </div>
+
+          <div>
+            <h4 style={{ margin: "0 0 8px", color: "#0F172A", fontSize: "13.5px", fontWeight: 700 }}>
+              Active Direct Overrides ({userDirectPerms.length})
+            </h4>
+
+            {loadingPerms ? (
+              <div style={{ padding: "16px", textAlign: "center", color: "#2563EB" }}>Loading permissions...</div>
+            ) : userDirectPerms.length === 0 ? (
+              <div style={{ padding: "16px", textAlign: "center", color: "#64748B", background: "#F8FAFC", borderRadius: "6px", border: "1px solid #E2E8F0", fontSize: "12.5px" }}>
+                No direct user permission overrides granted. User operates strictly under assigned role defaults.
+              </div>
+            ) : (
+              <div style={{ maxHeight: "200px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+                {userDirectPerms.map((code) => (
+                  <div key={code} style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", background: "#FFF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#0F172A", fontFamily: "monospace", fontSize: "12px" }}>{code}</div>
+                      <div style={{ fontSize: "11px", color: "#64748B" }}>{describePermission(code)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeUserPerm(code)}
+                      disabled={isSubmitting}
+                      style={{ padding: "4px 8px", borderRadius: "4px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setIsPermModalOpen(false)}
+              style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* Provision User Modal */}
