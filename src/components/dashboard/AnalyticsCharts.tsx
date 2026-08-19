@@ -30,6 +30,7 @@ interface AnalyticsChartsProps {
   adoptions: AnyRecord[];
   rescues: AnyRecord[];
   finance: AnyRecord[];
+  donations?: AnyRecord[];
   inventory: AnyRecord[];
   medical: AnyRecord[];
   shelters: AnyRecord[];
@@ -106,6 +107,7 @@ const AnalyticsCharts = ({
   adoptions,
   rescues,
   finance,
+  donations = [],
   inventory,
   medical,
   shelters,
@@ -113,7 +115,13 @@ const AnalyticsCharts = ({
 }: AnalyticsChartsProps) => {
   const adoptionTrend = buildMonthlyTrend(adoptions, { count: 6 });
   const rescueTrend = buildMonthlyTrend(rescues, { count: 6 });
-  const donationTrend = buildMonthlyTrend(finance.filter(isIncome), { valueKey: "amount", count: 6 });
+
+  // Use real donations list from GET /api/v1/donations (or finance income fallback)
+  const validDonations = Array.isArray(donations) && donations.length > 0
+    ? donations.filter((d) => !/failed|refunded|cancelled|declined/i.test(getString(d, "status")))
+    : finance.filter(isIncome);
+
+  const donationTrend = buildMonthlyTrend(validDonations, { valueKey: "amount", count: 6 });
   const inventoryStatus = buildStatusDistribution(inventory);
   const adoptionPipeline = buildStatusDistribution(adoptions);
   const medicalStatus = buildStatusDistribution(medical);
@@ -128,7 +136,7 @@ const AnalyticsCharts = ({
         gap: "14px",
       }}
     >
-      <ChartCard title="Monthly Adoption Trend" subtitle="Adoptions per month (last 6 months)" hasData={adoptionTrend.some((p) => p.value > 0)}>
+      <ChartCard title="Monthly Adoption Trend" subtitle="Adoptions per month (last 6 months)" hasData={Array.isArray(adoptions)}>
         <ResponsiveContainer>
           <LineChart data={adoptionTrend}>
             <CartesianGrid stroke="#E2E8F0" strokeDasharray="5 5" />
@@ -140,7 +148,7 @@ const AnalyticsCharts = ({
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Monthly Rescue Trend" subtitle="Rescue cases per month (last 6 months)" hasData={rescueTrend.some((p) => p.value > 0)}>
+      <ChartCard title="Monthly Rescue Trend" subtitle="Rescue cases per month (last 6 months)" hasData={Array.isArray(rescues)}>
         <ResponsiveContainer>
           <AreaChart data={rescueTrend}>
             <defs>
@@ -158,13 +166,13 @@ const AnalyticsCharts = ({
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Donations Trend" subtitle="Incoming donation value per month" hasData={donationTrend.some((p) => p.value > 0)}>
+      <ChartCard title="Donations Trend" subtitle="Incoming donation value per month (last 6 months)" hasData={Array.isArray(donations) || Array.isArray(finance)}>
         <ResponsiveContainer>
           <BarChart data={donationTrend}>
             <CartesianGrid stroke="#E2E8F0" strokeDasharray="5 5" />
             <XAxis dataKey="month" tick={{ fill: "#64748B" }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: "#64748B" }} axisLine={false} tickLine={false} />
-            <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
+            <Tooltip formatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`} />
             <Bar dataKey="value" name="Donations" fill="#10B981" radius={[5, 5, 0, 0]} maxBarSize={38} />
           </BarChart>
         </ResponsiveContainer>

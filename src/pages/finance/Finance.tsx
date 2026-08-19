@@ -1,65 +1,57 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
-import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
-import Can from "../../components/rbac/Can";
 import {
   FaCoins,
   FaHandHoldingHeart,
-  FaFileInvoiceDollar,
   FaChartLine,
   FaPlus,
   FaDownload,
-  FaEdit,
-  FaReceipt,
-  FaCheckCircle,
   FaFilter,
-  FaSync,
+  FaSearch,
+  FaUndo,
   FaCheckDouble,
+  FaDog,
+  FaEdit,
 } from "react-icons/fa";
-import financeService, { getCurrentFinancialYearPeriod } from "../../services/financeService";
-import donationsService, { type DonationType, type DonationStatus } from "../../services/donationsService";
-import reportsService from "../../services/reportsService";
+import donationsService, {
+  type DonationType,
+  type DonationStatus,
+  isCompletedDonationStatus,
+  isRefundedDonationStatus,
+  isValidSponsorshipStatus,
+} from "../../services/donationsService";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
-type TabKey = "donations" | "transactions";
+type TabKey = "donations" | "sponsorships" | "donors";
 
 const DONATION_TYPES: Array<{ value: string; label: string }> = [
-  { value: "", label: "All Types" },
-  { value: "one_time", label: "One-Time" },
-  { value: "recurring", label: "Recurring" },
-  { value: "sponsorship", label: "Sponsorship" },
+  { value: "", label: "All Donation Types" },
+  { value: "one_time", label: "One-Time Donation" },
+  { value: "recurring", label: "Recurring Monthly" },
+  { value: "sponsorship", label: "Dog Sponsorship" },
 ];
 
-const DONATION_STATUSES: Array<{ value: string; label: string }> = [
+const DONATION_STATUSES: Array<{ value: DonationStatus | ""; label: string }> = [
   { value: "", label: "All Statuses" },
   { value: "pending", label: "Pending" },
-  { value: "success", label: "Success" },
+  { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
+  { value: "refunded", label: "Refunded" },
+  { value: "cancelled", label: "Cancelled" },
 ];
 
-const TX_TYPES: Array<{ value: string; label: string }> = [
-  { value: "", label: "All Transaction Types" },
-  { value: "income", label: "Income" },
-  { value: "expense", label: "Expense" },
-  { value: "transfer", label: "Transfer" },
-  { value: "reconciliation", label: "Reconciliation" },
-  { value: "refund", label: "Refund" },
-];
-
-const TX_STATUSES: Array<{ value: string; label: string }> = [
+const SPONSORSHIP_STATUSES: Array<{ value: string; label: string }> = [
   { value: "", label: "All Statuses" },
+  { value: "active", label: "Active" },
+  { value: "completed", label: "Completed" },
   { value: "pending", label: "Pending" },
-  { value: "posted", label: "Posted" },
-  { value: "reconciled", label: "Reconciled" },
-  { value: "voided", label: "Voided" },
+  { value: "cancelled", label: "Cancelled" },
 ];
-
-const formatDate = (value: unknown): string => formatDateTime(value as string);
 
 const numericValue = (val: unknown): number => {
   const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));
@@ -73,42 +65,39 @@ const Finance = () => {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<TabKey>(() =>
-    searchParams.get("action") === "expense" ? "transactions" : "donations"
-  );
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const act = searchParams.get("action") || searchParams.get("tab");
+    if (act === "sponsorship" || act === "sponsorships") return "sponsorships";
+    if (act === "donor" || act === "donors") return "donors";
+    return "donations";
+  });
 
-  // Transactions / Ledger State
-  const [transactions, setTransactions] = useState<Record<string, unknown>[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [txLoading, setTxLoading] = useState<boolean>(true);
-  const [txError, setTxError] = useState<string | null>(null);
-
-  // Reconciliation Filter State (Real backend query parameters)
-  const [txFilterType, setTxFilterType] = useState<string>("");
-  const [txFilterStatus, setTxFilterStatus] = useState<string>("");
-  const [txFilterAccountId, setTxFilterAccountId] = useState<string>("");
-  const [txStartDate, setTxStartDate] = useState<string>("");
-  const [txEndDate, setTxEndDate] = useState<string>("");
-
-  // Finance Summary (for dashboard stats)
-  const [financeSummary, setFinanceSummary] = useState<Record<string, unknown> | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
-
-  // Donations
+  // Data States
   const [donations, setDonations] = useState<Record<string, unknown>[]>([]);
-  const [donationLoading, setDonationLoading] = useState<boolean>(true);
-  const [donationError, setDonationError] = useState<string | null>(null);
-  const [donationSearch, setDonationSearch] = useState("");
-  const [donationFilterStatus, setDonationFilterStatus] = useState("");
+  const [sponsorships, setSponsorships] = useState<Record<string, unknown>[]>([]);
+  const [donors, setDonors] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Filters State
+  const [searchQuery, setSearchQuery] = useState("");
   const [donationFilterType, setDonationFilterType] = useState("");
+  const [donationFilterStatus, setDonationFilterStatus] = useState("");
+  const [sponsorshipFilterStatus, setSponsorshipFilterStatus] = useState("");
 
   // Modals state
   const [isDonationModalOpen, setIsDonationModalOpen] = useState(() => searchParams.get("action") === "donation");
-  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(() => searchParams.get("action") === "expense");
-  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isSponsorshipModalOpen, setIsSponsorshipModalOpen] = useState(() => searchParams.get("action") === "sponsorship");
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [isSponStatusModalOpen, setIsSponStatusModalOpen] = useState(false);
+  const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
+
   const [selectedDonation, setSelectedDonation] = useState<Record<string, unknown> | null>(null);
-  const [donationStatusDraft, setDonationStatusDraft] = useState<DonationStatus>("success");
+  const [selectedSponsorship, setSelectedSponsorship] = useState<Record<string, unknown> | null>(null);
+
+  const [donationStatusDraft, setDonationStatusDraft] = useState<DonationStatus>("completed");
+  const [sponsorshipStatusDraft, setSponsorshipStatusDraft] = useState<string>("active");
+  const [reconcileNotesDraft, setReconcileNotesDraft] = useState<string>("Verified & Reconciled by Finance User");
 
   // Form states
   const [donationForm, setDonationForm] = useState({
@@ -119,816 +108,864 @@ const Finance = () => {
     donor_name: "",
     donor_email: "",
     donor_phone: "",
-    payment_method: "",
+    payment_method: "UPI / Online Payment",
     transaction_id: "",
-    purpose: "",
+    purpose: "General Animal Shelter Support",
   });
-  const [expenseForm, setExpenseForm] = useState({ entity: "", category: "Medical Expense", amount: "", date: "" });
+
+  const [sponsorshipForm, setSponsorshipForm] = useState({
+    dog_id: "",
+    amount: "",
+    currency: "INR",
+    sponsor_name: "",
+    sponsor_email: "",
+    sponsor_phone: "",
+    payment_method: "Razorpay / Online",
+    duration_months: 12,
+    notes: "",
+  });
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchFinance = useCallback(async () => {
+  const fetchAllFinanceData = useCallback(async () => {
     try {
-      setTxLoading(true);
-      setTxError(null);
-      const params: Record<string, unknown> = {};
-      if (txFilterType) params.transaction_type = txFilterType;
-      if (txFilterStatus) params.status = txFilterStatus;
-      if (txFilterAccountId) params.account_id = txFilterAccountId;
-      if (txStartDate) params.start_date = txStartDate;
-      if (txEndDate) params.end_date = txEndDate;
+      setLoading(true);
+      setError(null);
+      const [donRes, sponRes, donorRes] = await Promise.allSettled([
+        donationsService.getDonations(),
+        donationsService.getSponsorships(),
+        donationsService.getDonors(),
+      ]);
 
-      const response = await financeService.getFinanceRecords(params);
-      if (response && Array.isArray(response.data)) {
-        setTransactions(response.data);
-      } else {
-        setTransactions([]);
-      }
-    } catch (err: any) {
-      setTxError(err?.response?.data?.detail || err?.response?.data?.message || "Failed to load transaction ledger.");
-    } finally {
-      setTxLoading(false);
-    }
-  }, [txFilterType, txFilterStatus, txFilterAccountId, txStartDate, txEndDate]);
+      const donList = donRes.status === "fulfilled" ? (Array.isArray(donRes.value?.data) ? donRes.value.data : Array.isArray(donRes.value) ? donRes.value : []) : [];
+      const sponList = sponRes.status === "fulfilled" ? (Array.isArray(sponRes.value?.data) ? sponRes.value.data : Array.isArray(sponRes.value) ? sponRes.value : []) : [];
+      const donorList = donorRes.status === "fulfilled" ? (Array.isArray(donorRes.value?.data) ? donorRes.value.data : Array.isArray(donorRes.value) ? donorRes.value : []) : [];
 
-  const fetchAccounts = useCallback(async () => {
-    try {
-      const res = await financeService.getAccounts();
-      const list = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
-      setAccounts(list);
-    } catch {
-      // Quiet fail if accounts endpoint returns empty
-    }
-  }, []);
-
-  const fetchFinanceSummary = useCallback(async () => {
-    try {
-      setSummaryLoading(true);
-      const response = await financeService.getFinanceSummary();
-      setFinanceSummary(response?.data ?? response ?? null);
-    } catch {
-      setFinanceSummary(null);
-    } finally {
-      setSummaryLoading(false);
-    }
-  }, []);
-
-  const fetchDonations = useCallback(async () => {
-    try {
-      setDonationLoading(true);
-      setDonationError(null);
-      const response = await donationsService.getDonations({
-        status: donationFilterStatus ? (donationFilterStatus as DonationStatus) : undefined,
-        donation_type: donationFilterType ? (donationFilterType as DonationType) : undefined,
-        page: 1,
-        page_size: 100,
-        sort_by: "created_at",
-        sort_order: "desc",
+      const sortedDonations = [...donList].sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at || a.date || a.payment_date || 0).getTime();
+        const timeB = new Date(b.created_at || b.date || b.payment_date || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
       });
-      if (response && Array.isArray(response.data)) {
-        setDonations(response.data);
-      } else {
-        setDonations([]);
-      }
+
+      const sortedSponsorships = [...sponList].sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at || a.start_date || a.date || 0).getTime();
+        const timeB = new Date(b.created_at || b.start_date || b.date || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      const sortedDonors = [...donorList].sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at || a.last_donation_date || 0).getTime();
+        const timeB = new Date(b.created_at || b.last_donation_date || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setDonations(sortedDonations);
+      setSponsorships(sortedSponsorships);
+      setDonors(sortedDonors);
     } catch (err: any) {
-      setDonationError(err?.response?.data?.detail || err?.response?.data?.message || "Failed to load donations.");
+      setError(err?.response?.data?.detail || err?.message || "Failed to load financial records.");
     } finally {
-      setDonationLoading(false);
+      setLoading(false);
     }
-  }, [donationFilterStatus, donationFilterType]);
+  }, []);
 
   useEffect(() => {
-    void fetchFinance();
-    void fetchAccounts();
-    void fetchFinanceSummary();
-  }, [fetchFinance, fetchAccounts, fetchFinanceSummary]);
+    fetchAllFinanceData();
+  }, [fetchAllFinanceData]);
 
-  useEffect(() => {
-    const action = searchParams.get("action");
-    if (action === "donation" || action === "expense") {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, [searchParams]);
+  // Derived Totals
+  const totalDonationsSum = useMemo(
+    () =>
+      donations
+        .filter((d) => isCompletedDonationStatus(d.status))
+        .reduce((sum, d) => sum + numericValue(d.amount), 0),
+    [donations]
+  );
 
-  useEffect(() => {
-    void fetchDonations();
-  }, [fetchDonations]);
+  const sponsorshipRevenueSum = useMemo(
+    () =>
+      sponsorships
+        .filter((s) => isValidSponsorshipStatus(s.status))
+        .reduce((sum, s) => sum + numericValue(s.amount), 0),
+    [sponsorships]
+  );
 
-  const handleRecordDonation = async (e: React.FormEvent) => {
+  const totalRefundsSum = useMemo(
+    () =>
+      donations
+        .filter((d) => isRefundedDonationStatus(d.status))
+        .reduce((sum, d) => sum + numericValue(d.amount), 0),
+    [donations]
+  );
+
+  const netBalanceVal = totalDonationsSum + sponsorshipRevenueSum - totalRefundsSum;
+
+  // Filtered Datasets
+  const filteredDonations = useMemo(() => {
+    return donations.filter((d) => {
+      const q = searchQuery.toLowerCase().trim();
+      const donor = String(d.donorName || d.donor_name || d.donor_email || d.donorEmail || "").toLowerCase();
+      const notes = String(d.notes || d.purpose || "").toLowerCase();
+      const txId = String(d.id || d.transactionId || "").toLowerCase();
+      const matchesQ = !q || donor.includes(q) || notes.includes(q) || txId.includes(q);
+      const matchesType = !donationFilterType || String(d.type || d.donation_type || "").toLowerCase() === donationFilterType.toLowerCase();
+      const matchesStatus = !donationFilterStatus || String(d.status || "").toLowerCase() === donationFilterStatus.toLowerCase();
+      return matchesQ && matchesType && matchesStatus;
+    });
+  }, [donations, searchQuery, donationFilterType, donationFilterStatus]);
+
+  const filteredSponsorships = useMemo(() => {
+    return sponsorships.filter((s) => {
+      const q = searchQuery.toLowerCase().trim();
+      const sponsor = String(s.sponsor_name || s.donor_name || (s.user as any)?.full_name || "").toLowerCase();
+      const dogName = String(s.dog_name || s.pet_name || s.dog_id || "").toLowerCase();
+      const matchesQ = !q || sponsor.includes(q) || dogName.includes(q);
+      const matchesStatus = !sponsorshipFilterStatus || String(s.status || "").toLowerCase() === sponsorshipFilterStatus.toLowerCase();
+      return matchesQ && matchesStatus;
+    });
+  }, [sponsorships, searchQuery, sponsorshipFilterStatus]);
+
+  const filteredDonors = useMemo(() => {
+    return donors.filter((d) => {
+      const q = searchQuery.toLowerCase().trim();
+      const name = String(d.full_name || d.name || d.donor_name || "").toLowerCase();
+      const email = String(d.email || d.donor_email || "").toLowerCase();
+      return !q || name.includes(q) || email.includes(q);
+    });
+  }, [donors, searchQuery]);
+
+  // Action Handlers
+  const handleRecordDonationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amount = Number(donationForm.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      addToast("Please enter a valid donation amount greater than zero.", "error");
-      return;
-    }
-    if (!donationForm.donor_name) {
-      addToast("Donor name is required.", "error");
-      return;
-    }
-    if (!donationForm.donor_email) {
-      addToast("Donor email/phone is required.", "error");
+    if (!donationForm.amount || Number(donationForm.amount) <= 0) {
+      addToast("Valid donation amount is required.", "error");
       return;
     }
     try {
       setIsSubmitting(true);
       await donationsService.createDonation({
-        amount,
-        currency: donationForm.currency || "INR",
+        amount: Number(donationForm.amount),
+        currency: donationForm.currency,
         donation_type: donationForm.donation_type,
-        notes: donationForm.notes || undefined,
-        donor_name: donationForm.donor_name || undefined,
+        donor_name: donationForm.donor_name || "Anonymous Donor",
         donor_email: donationForm.donor_email || undefined,
         donor_phone: donationForm.donor_phone || undefined,
-        payment_method: donationForm.payment_method || undefined,
-        transaction_id: donationForm.transaction_id || undefined,
-        purpose: donationForm.purpose || undefined,
+        payment_method: donationForm.payment_method,
+        transaction_id: donationForm.transaction_id || `TX-${Date.now()}`,
+        purpose: donationForm.purpose,
+        notes: donationForm.notes,
       });
-      addToast(`Donation of ₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded!`, "success");
+
+      addToast("Donation recorded successfully!", "success");
       setIsDonationModalOpen(false);
-      setDonationForm({ amount: "", currency: "INR", donation_type: "one_time", notes: "", donor_name: "", donor_email: "", donor_phone: "", payment_method: "", transaction_id: "", purpose: "" });
-      fetchDonations();
-      fetchFinance();
-      fetchFinanceSummary();
-      notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to record donation.", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleLogExpense = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = Number(expenseForm.amount);
-    if (!expenseForm.entity) {
-      addToast("Vendor name is required", "error");
-      return;
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      addToast("Please enter a valid expense amount greater than zero.", "error");
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      await financeService.logExpense({
-        entity: expenseForm.entity,
-        category: expenseForm.category,
-        amount,
-        type: "expense",
-        status: "Completed",
-        date: expenseForm.date || undefined,
+      setDonationForm({
+        amount: "",
+        currency: "INR",
+        donation_type: "one_time",
+        notes: "",
+        donor_name: "",
+        donor_email: "",
+        donor_phone: "",
+        payment_method: "UPI / Online Payment",
+        transaction_id: "",
+        purpose: "General Animal Shelter Support",
       });
-      addToast(`Expense bill of ₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} logged for ${expenseForm.entity}!`, "success");
-      setIsExpenseModalOpen(false);
-      setExpenseForm({ entity: "", category: "Medical Expense", amount: "", date: "" });
-      fetchFinance();
-      fetchFinanceSummary();
+      fetchAllFinanceData();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to log expense.", "error");
+      addToast(err?.response?.data?.detail || err?.message || "Failed to record donation.", "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleReconcileTransaction = async (txId: string) => {
-    try {
-      await financeService.reconcileTransaction(txId);
-      addToast(`Transaction ${txId} marked as RECONCILED!`, "success");
-      fetchFinance();
-      fetchFinanceSummary();
-      notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to reconcile transaction.", "error");
-    }
-  };
-
-  const handleExportReport = async () => {
-    try {
-      addToast("Generating financial audit report...", "info");
-      const { period_start, period_end } = getCurrentFinancialYearPeriod();
-      await reportsService.generateAndDownloadReport({ report_type: "finance", format: "pdf", period_start, period_end });
-      addToast("Financial Audit Report PDF downloaded!", "success");
-      setIsReportModalOpen(false);
-    } catch (err: any) {
-      addToast(err?.message || "Failed to generate financial report.", "error");
-    }
-  };
-
-  const handleExportDonationReport = async () => {
-    try {
-      addToast("Generating donation report PDF...", "info");
-      const { period_start, period_end } = getCurrentFinancialYearPeriod();
-      await reportsService.generateAndDownloadReport({ report_type: "donation", format: "pdf", period_start, period_end });
-      addToast("Donation Report PDF downloaded!", "success");
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to generate donation report.";
-      if (err?.response?.status === 403) {
-        addToast("Access denied: You may not have permission to export donation reports.", "error");
-      } else {
-        addToast(msg, "error");
-      }
-    }
-  };
-
-  const openStatusModal = (row: any) => {
-    setSelectedDonation(row);
-    setDonationStatusDraft((row?.status || "success") as DonationStatus);
-    setIsStatusModalOpen(true);
-  };
-
-  const handleStatusUpdate = async (e: React.FormEvent) => {
+  const handleCreateSponsorshipSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const donationId = selectedDonation?.id ? String(selectedDonation.id) : "";
-    if (!donationId) return;
-    try {
-      setIsSubmitting(true);
-      await donationsService.updateDonationStatus(donationId, donationStatusDraft);
-      addToast(`Donation ${donationId} marked as ${donationStatusDraft}.`, "success");
-      setIsStatusModalOpen(false);
-      fetchDonations();
-      notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to update donation status.", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDownloadReceipt = async (row: any) => {
-    if (!row?.id) {
-      addToast("No donation record available for receipt.", "error");
+    if (!sponsorshipForm.dog_id || !sponsorshipForm.amount || Number(sponsorshipForm.amount) <= 0) {
+      addToast("Valid Dog Reference ID and Amount are required.", "error");
       return;
     }
     try {
-      addToast("Connecting to backend receipt service...", "info");
-      const receipt = await donationsService.getDonationReceipt(row.id);
-      const url = receipt?.download_url;
-      if (url) {
-        window.open(url, "_blank", "noopener,noreferrer");
-        addToast("Official Tax Receipt PDF downloaded.", "success");
-      } else {
-        // Backend dependency report per requirement 5
-        addToast(
-          "Official Tax Receipt PDF endpoint (/api/v1/donations/{id}/receipt) is pending backend release. Backend dependency reported.",
-          "error"
-        );
-      }
+      setIsSubmitting(true);
+      await donationsService.createSponsorship({
+        dog_id: sponsorshipForm.dog_id,
+        amount: Number(sponsorshipForm.amount),
+        currency: sponsorshipForm.currency,
+        sponsor_name: sponsorshipForm.sponsor_name || "Sponsor",
+        sponsor_email: sponsorshipForm.sponsor_email || undefined,
+        sponsor_phone: sponsorshipForm.sponsor_phone || undefined,
+        payment_method: sponsorshipForm.payment_method,
+        duration_months: Number(sponsorshipForm.duration_months) || 12,
+        notes: sponsorshipForm.notes,
+      });
+
+      addToast("Dog sponsorship registered successfully!", "success");
+      setIsSponsorshipModalOpen(false);
+      setSponsorshipForm({ dog_id: "", amount: "", currency: "INR", sponsor_name: "", sponsor_email: "", sponsor_phone: "", payment_method: "Razorpay / Online", duration_months: 12, notes: "" });
+      fetchAllFinanceData();
+      notifyDataChanged();
     } catch (err: any) {
-      // Backend dependency report per requirement 5
-      addToast(
-        err?.response?.data?.detail ||
-          "Official Tax Receipt PDF endpoint (/api/v1/donations/{id}/receipt) is not configured on backend. Backend dependency reported.",
-        "error"
-      );
+      addToast(err?.response?.data?.detail || err?.message || "Failed to register sponsorship.", "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Stats calculation
-  const summaryRevenue = financeSummary?.total_donations ?? financeSummary?.totalRevenue ?? financeSummary?.total_revenue ?? financeSummary?.total_income;
-  const summaryExpenses = financeSummary?.expenses ?? financeSummary?.operationalExpenses ?? financeSummary?.total_expenses;
-  const summaryDonors = financeSummary?.donor_count ?? financeSummary?.totalDonors ?? financeSummary?.donorCount;
-  const summaryNet = financeSummary?.net_balance ?? financeSummary?.netBalance ?? financeSummary?.net;
+  const handleUpdateDonationStatus = async () => {
+    if (!selectedDonation?.id) return;
+    try {
+      setIsSubmitting(true);
+      await donationsService.updateDonationStatus(String(selectedDonation.id), donationStatusDraft);
+      addToast(`Donation status updated to ${donationStatusDraft.toUpperCase()}!`, "success");
+      setIsStatusModalOpen(false);
+      setSelectedDonation(null);
+      fetchAllFinanceData();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to update donation status.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  const totalRevenue = transactions
-    .filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase()))
-    .reduce((sum, t) => sum + numericValue(t.amount), 0);
-  const totalExpenses = transactions
-    .filter((t) => /expense/.test(String(t.type || "").toLowerCase()))
-    .reduce((sum, t) => sum + Math.abs(numericValue(t.amount)), 0);
+  const handleUpdateSponsorshipStatus = async () => {
+    if (!selectedSponsorship?.id) return;
+    try {
+      setIsSubmitting(true);
+      await donationsService.updateSponsorshipStatus(String(selectedSponsorship.id), sponsorshipStatusDraft);
+      addToast(`Sponsorship status set to ${sponsorshipStatusDraft.toUpperCase()}!`, "success");
+      setIsSponStatusModalOpen(false);
+      setSelectedSponsorship(null);
+      fetchAllFinanceData();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to update sponsorship status.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  const donorCount = donations
-    .filter((d) => /income|donation|revenue/.test(String(d.type || "one_time").toLowerCase()))
-    .reduce((set, d) => {
-      const entity = String(d.donorId ?? d.transactionId ?? d.notes ?? "").trim();
-      if (entity) set.add(entity);
-      return set;
-    }, new Set<string>()).size;
+  const handleReconcileSubmit = async () => {
+    if (!selectedDonation?.id) return;
+    try {
+      setIsSubmitting(true);
+      await donationsService.reconcileDonation(String(selectedDonation.id), reconcileNotesDraft);
+      addToast(`Donation ${String(selectedDonation.id).slice(0, 8)} reconciled successfully!`, "success");
+      setIsReconcileModalOpen(false);
+      setSelectedDonation(null);
+      fetchAllFinanceData();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to reconcile donation.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  const stats = [
+  const handleDownloadReceipt = async (record: any) => {
+    const targetId = record.id || record.donation_id || record.donationId || record.txId || record.transactionId;
+    if (!targetId) {
+      addToast("Receipt not available for this donation", "error");
+      return;
+    }
+    try {
+      addToast("Resolving receipt document...", "info");
+      const res = await donationsService.getDonationReceipt(String(targetId));
+      const data = res?.data ?? res;
+      const url = data?.receipt_url || data?.url || data?.download_url || data?.pdf_url || res?.receipt_url || res?.url;
+
+      if (url) {
+        window.open(url, "_blank");
+        addToast("Receipt opened successfully!", "success");
+        return;
+      }
+
+      if (data instanceof Blob || (typeof data === "string" && data.startsWith("%PDF"))) {
+        const blob = data instanceof Blob ? data : new Blob([data], { type: "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.setAttribute("download", `receipt_${String(targetId).slice(0, 8)}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        addToast("Receipt downloaded successfully!", "success");
+        return;
+      }
+
+      addToast("Receipt not available for this donation", "error");
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err?.status === 404) {
+        addToast("Receipt not available for this donation", "error");
+      } else {
+        addToast(err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Receipt not available for this donation", "error");
+      }
+    }
+  };
+
+  // Table Columns Setup
+  const donationColumns = [
     {
-      title: "Total Revenue / Donations",
-      value: summaryLoading ? "..." : (summaryRevenue !== undefined && summaryRevenue !== null ? formatCurrency(summaryRevenue) : formatCurrency(totalRevenue)),
-      trend: summaryLoading ? "Loading..." : "Backend Summary",
-      color: "#10B981",
-      icon: <FaCoins />,
-      onClick: () => {
-        setActiveTab("donations");
-        setDonationFilterStatus("");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "id",
+      header: "Donation ID",
+      render: (v: string, r: any) => (
+        <div>
+          <strong style={{ color: "#0F172A" }}>{String(v).slice(0, 8)}</strong>
+          {r.transactionId && <div style={{ fontSize: "11px", color: "#64748B" }}>Tx: {r.transactionId}</div>}
+        </div>
+      ),
     },
     {
-      title: "Operational Expenses",
-      value: summaryLoading ? "..." : (summaryExpenses !== undefined && summaryExpenses !== null ? formatCurrency(summaryExpenses) : formatCurrency(totalExpenses)),
-      trend: summaryLoading ? "Loading..." : "Backend Summary",
-      color: "#2563EB",
-      icon: <FaFileInvoiceDollar />,
-      onClick: () => {
-        setActiveTab("transactions");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "donorName",
+      header: "Donor / Reference",
+      render: (v: string, r: any) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || r.donor_name || "Anonymous Donor"}</div>
+          <div style={{ fontSize: "12px", color: "#64748B" }}>{r.donorEmail || r.donor_email || "No email"}</div>
+        </div>
+      ),
     },
     {
-      title: "Donor Contributions",
-      value: summaryLoading ? "..." : String(summaryDonors ?? donorCount),
-      trend: summaryLoading ? "Loading..." : "Unique Donors",
-      color: "#6366F1",
-      icon: <FaHandHoldingHeart />,
-      onClick: () => {
-        setActiveTab("donations");
-        setDonationFilterStatus("");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "type",
+      header: "Donation Type",
+      render: (v: string) => <span style={{ fontWeight: 700, color: "#2563EB", textTransform: "capitalize" }}>{v || "one_time"}</span>,
     },
     {
-      title: "Net Reserve Balance",
-      value: summaryLoading ? "..." : (summaryNet !== undefined && summaryNet !== null ? formatCurrency(summaryNet) : formatCurrency(totalRevenue - totalExpenses)),
-      trend: summaryLoading ? "Loading..." : "Net Balance",
-      color: "#F59E0B",
-      icon: <FaChartLine />,
-      onClick: () => {
-        setActiveTab("transactions");
-        document.getElementById("finance-table-card")?.scrollIntoView({ behavior: "smooth" });
+      key: "amount",
+      header: "Amount (₹)",
+      render: (v: unknown) => <strong style={{ color: "#047857" }}>{formatCurrency(v)}</strong>,
+    },
+    {
+      key: "date",
+      header: "Date",
+      render: (v: unknown) => (v ? formatDateTime(v as string) : "-"),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (v: string) => {
+        const s = String(v || "completed").toLowerCase();
+        const color = s === "completed" || s === "success" ? "#047857" : s === "pending" ? "#D97706" : s === "refunded" ? "#7C3AED" : "#DC2626";
+        const bg = s === "completed" || s === "success" ? "#ECFDF5" : s === "pending" ? "#FEF3C7" : s === "refunded" ? "#F3E8FF" : "#FEE2E2";
+        return (
+          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
+            {s}
+          </span>
+        );
       },
     },
   ];
 
-  const txColumns = [
-    { key: "txId", title: "Transaction ID", render: (v: string) => <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#64748B" }}>{v ? String(v).slice(0, 12) : "-"}</span> },
-    { key: "entity", title: "Donor / Entity Description" },
+  const sponsorshipColumns = [
     {
-      key: "type",
-      title: "Type",
-      render: (v: string) => (
-        <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: v === "expense" ? "#DC2626" : "#047857" }}>
-          {v || "INCOME"}
+      key: "id",
+      header: "Sponsorship ID",
+      render: (v: string) => <strong style={{ color: "#0F172A" }}>{String(v).slice(0, 8)}</strong>,
+    },
+    {
+      key: "sponsor_name",
+      header: "Sponsor / Donor",
+      render: (_: string, r: any) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>{r.sponsor_name || r.donor_name || (r.user as any)?.full_name || "Sponsor Profile"}</div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>{r.sponsor_email || r.donor_email || "-"}</div>
+        </div>
+      ),
+    },
+    {
+      key: "dog_name",
+      header: "Sponsored Dog Reference",
+      render: (_: string, r: any) => (
+        <span style={{ fontWeight: 700, color: "#D97706", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+          <FaDog /> {r.dog_name || r.pet_name || r.dog_id || "Shelter Dog"}
         </span>
       ),
     },
-    { key: "amount", title: "Amount (₹)", render: (v: unknown) => <strong style={{ color: "#0F172A" }}>{formatCurrency(v)}</strong> },
-    { key: "date", title: "Date", render: (v: unknown) => formatDate(v) },
+    {
+      key: "amount",
+      header: "Sponsorship Amount",
+      render: (v: unknown) => <strong style={{ color: "#2563EB" }}>{formatCurrency(v)}</strong>,
+    },
     {
       key: "status",
-      title: "Reconciliation Status",
+      header: "Status",
       render: (v: string) => {
-        const s = String(v || "posted").toLowerCase();
-        const color = s === "reconciled" ? "#047857" : s === "posted" ? "#1D4ED8" : s === "pending" ? "#D97706" : "#DC2626";
-        const bg = s === "reconciled" ? "#D1FAE5" : s === "posted" ? "#EFF6FF" : s === "pending" ? "#FEF3C7" : "#FEE2E2";
+        const s = String(v || "active").toLowerCase();
+        const color = s === "active" || s === "completed" ? "#047857" : s === "pending" ? "#D97706" : "#DC2626";
+        const bg = s === "active" || s === "completed" ? "#ECFDF5" : s === "pending" ? "#FEF3C7" : "#FEE2E2";
         return (
-          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
+          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
             {s}
           </span>
         );
       },
     },
     {
-      key: "actions",
-      title: "Reconcile Action",
-      render: (_: unknown, row: any) => {
-        const status = String(row.status || "").toLowerCase();
-        const txId = String(row.txId || row.id || "");
-        if (status === "reconciled") {
-          return <span style={{ fontSize: "11px", color: "#059669", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}><FaCheckDouble /> Reconciled</span>;
-        }
-        return (
-          <button
-            onClick={() => void handleReconcileTransaction(txId)}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "1px solid #10B981",
-              background: "#ECFDF5",
-              color: "#047857",
-              fontSize: "11px",
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-            }}
-          >
-            <FaCheckCircle /> Reconcile
-          </button>
-        );
-      },
+      key: "created_at",
+      header: "Registered Date",
+      render: (v: unknown) => (v ? formatDateTime(v as string) : "-"),
     },
   ];
 
-  const filteredDonations = useMemo(() => {
-    if (!donationSearch.trim()) return donations;
-    const lower = donationSearch.toLowerCase();
-    return donations.filter((d) =>
-      ["id", "transactionId", "donorId", "notes", "type", "status"]
-        .some((key) => {
-          const val = d[key];
-          return val !== undefined && val !== null && String(val).toLowerCase().includes(lower);
-        })
-    );
-  }, [donations, donationSearch]);
+  const donorColumns = [
+    {
+      key: "id",
+      header: "Donor ID",
+      render: (v: string) => <strong style={{ color: "#0F172A" }}>{String(v || "DNR").slice(0, 8)}</strong>,
+    },
+    {
+      key: "full_name",
+      header: "Donor Name",
+      render: (_: string, r: any) => <strong style={{ color: "#0F172A" }}>{r.full_name || r.name || r.donor_name || "Donor Profile"}</strong>,
+    },
+    {
+      key: "email",
+      header: "Email",
+      render: (v: string, r: any) => <div>{v || r.donor_email || "-"}</div>,
+    },
+    {
+      key: "phone",
+      header: "Phone",
+      render: (v: string, r: any) => <div>{v || r.donor_phone || "-"}</div>,
+    },
+    {
+      key: "total_donated",
+      header: "Total Contributions",
+      render: (v: unknown) => <strong style={{ color: "#10B981" }}>{formatCurrency(v)}</strong>,
+    },
+  ];
 
   return (
-    <div>
-      {/* Banner */}
+    <div style={{ width: "100%", boxSizing: "border-box" }}>
+      {/* Header Banner */}
       <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Donations &amp; Financial Management</h1>
+        <h1 style={{ margin: 0, fontSize: "26px", fontWeight: 800 }}>Donations &amp; Financial Management</h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Authoritative backend revenue accounting, public sponsor donations, medical expenses, and financial reconciliation.
+          Official accounting suite: manage incoming public donations, dog sponsorships, donor records, and payment reconciliation.
         </p>
       </div>
 
-      {/* Quick Action Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <Can permission="create_finance">
-          <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log new sponsor contribution" color="#10B981" onClick={() => { setActiveTab("donations"); setIsDonationModalOpen(true); }} />
-        </Can>
-        <Can permission="create_finance">
-          <QuickActionCard icon={<FaFileInvoiceDollar />} title="Log Expense Bill" subtitle="Record medical or shelter bill" color="#2563EB" onClick={() => { setActiveTab("transactions"); setIsExpenseModalOpen(true); }} />
-        </Can>
-        <Can permission="export_finance">
-          <QuickActionCard icon={<FaChartLine />} title="Generate Financial Report" subtitle="Download quarterly balance" color="#6366F1" onClick={() => setIsReportModalOpen(true)} />
-        </Can>
-        <Can permission="export_finance">
-          <QuickActionCard icon={<FaReceipt />} title="Export Donation Report" subtitle="Download donation summary PDF" color="#10B981" onClick={handleExportDonationReport} />
-        </Can>
-      </div>
-
-      {/* Stat Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        {stats.map((s) => (
-          <StatCard key={s.title} {...s} />
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div id="finance-table-card" style={{ display: "flex", gap: "8px", borderBottom: "2px solid #E2E8F0", marginBottom: "20px" }}>
-        {(["donations", "transactions"] as TabKey[]).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: "10px 22px",
-              borderRadius: "10px 10px 0 0",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: 700,
-              background: activeTab === tab ? "#0F172A" : "transparent",
-              color: activeTab === tab ? "#FFFFFF" : "#64748B",
-              transition: "all 0.15s ease",
-            }}
-          >
-            {tab === "donations" ? "Donations History" : "Financial Ledger & Reconciliation"}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === "donations" ? (
-        <div className="soft-card" style={{ padding: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", gap: "12px", flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Public &amp; Sponsor Donation Records
-            </h3>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <input
-                type="text"
-                placeholder="Search donations..."
-                value={donationSearch}
-                onChange={(e) => setDonationSearch(e.target.value)}
-                style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", minWidth: "200px", outline: "none" }}
-              />
-              <select
-                value={donationFilterType}
-                onChange={(e) => setDonationFilterType(e.target.value)}
-                style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
-              >
-                {DONATION_TYPES.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <select
-                value={donationFilterStatus}
-                onChange={(e) => setDonationFilterStatus(e.target.value)}
-                style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
-              >
-                {DONATION_STATUSES.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <Can permission="create_finance">
-                <button
-                  onClick={() => setIsDonationModalOpen(true)}
-                  style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaPlus /> Record Donation
-                </button>
-              </Can>
-            </div>
-          </div>
-
-          {donationError && (
-            <div style={{ marginBottom: "16px", padding: "12px 16px", borderRadius: "8px", background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "13px", fontWeight: 600 }}>
-              ⚠️ {donationError}
-            </div>
-          )}
-
-          <div style={{ overflowX: "auto", width: "100%" }}>
-            <table style={{ width: "100%", minWidth: "max-content", borderCollapse: "separate", borderSpacing: 0, background: "#FFFFFF", fontSize: "13px", textAlign: "left", border: "1px solid #E2E8F0", borderRadius: "12px" }}>
-              <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
-                <tr style={{ background: "#F8FAFC" }}>
-                  {["Donation ID", "Donor / Reference", "Type", "Amount", "Status", "Date", "Actions"].map((h) => (
-                    <th key={h} style={{ padding: "14px 16px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {donationLoading ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "40px", textAlign: "center", color: "#2563EB" }}>
-                      Loading donations from server...
-                    </td>
-                  </tr>
-                ) : filteredDonations.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "32px", textAlign: "center", color: "#94A3B8" }}>
-                      No donation records match filters.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredDonations.map((d: any, idx) => (
-                    <tr key={idx} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                      <td style={{ padding: "14px 16px", color: "#0F172A", fontWeight: 600 }}>{d.id || "—"}</td>
-                      <td style={{ padding: "14px 16px", color: "#475569" }}>
-                        {d.donorName || d.transactionId || d.notes || (d.donorId ? `Donor ${String(d.donorId).slice(0, 8)}` : "Manual")}
-                      </td>
-                      <td style={{ padding: "14px 16px", color: "#0F172A", textTransform: "capitalize" }}>{String(d.type || "one_time").replace("_", " ")}</td>
-                      <td style={{ padding: "14px 16px", color: "#10B981", fontWeight: 700 }}>
-                        {(d.currency || "INR")} {Number(d.amount ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: "14px 16px" }}>
-                        <span style={{
-                          background: String(d.status) === "success" ? "#ECFDF5" : String(d.status) === "failed" ? "#FEF2F2" : "#FFFBEB",
-                          color: String(d.status) === "success" ? "#10B981" : String(d.status) === "failed" ? "#EF4444" : "#F59E0B",
-                          padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, textTransform: "capitalize", display: "inline-block",
-                        }}>
-                          {d.status || "pending"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "14px 16px", color: "#64748B" }}>{formatDate(d.date)}</td>
-                      <td style={{ padding: "14px 16px" }}>
-                        <Can permission="edit_finance">
-                          <button
-                            onClick={() => openStatusModal(d)}
-                            style={{ marginRight: "8px", padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#475569", cursor: "pointer", fontSize: "12px" }}
-                          >
-                            <FaEdit /> Status
-                          </button>
-                        </Can>
-                        <button
-                          onClick={() => handleDownloadReceipt(d)}
-                          style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#2563EB", cursor: "pointer", fontSize: "12px" }}
-                        >
-                          <FaDownload /> Tax Receipt
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="soft-card" style={{ padding: "20px" }}>
-          {/* Financial Reconciliation Filter Bar */}
-          <div style={{ background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px" }}>
-            <div style={{ fontSize: "14px", fontWeight: 800, color: "#0F172A", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-              <FaFilter color="#2563EB" /> Financial Reconciliation Query &amp; Audit Filters
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
-              {/* Date Range Start */}
-              <div>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Start Date</label>
-                <input
-                  type="date"
-                  value={txStartDate}
-                  onChange={(e) => setTxStartDate(e.target.value)}
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
-                />
-              </div>
-
-              {/* Date Range End */}
-              <div>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>End Date</label>
-                <input
-                  type="date"
-                  value={txEndDate}
-                  onChange={(e) => setTxEndDate(e.target.value)}
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
-                />
-              </div>
-
-              {/* Transaction Type Filter */}
-              <div>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Transaction Type</label>
-                <select
-                  value={txFilterType}
-                  onChange={(e) => setTxFilterType(e.target.value)}
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
-                >
-                  {TX_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Status Filter */}
-              <div>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Reconciliation Status</label>
-                <select
-                  value={txFilterStatus}
-                  onChange={(e) => setTxFilterStatus(e.target.value)}
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
-                >
-                  {TX_STATUSES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Account Filter */}
-              {accounts.length > 0 && (
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748B", marginBottom: "4px" }}>Account</label>
-                  <select
-                    value={txFilterAccountId}
-                    onChange={(e) => setTxFilterAccountId(e.target.value)}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12px", background: "#FFF" }}
-                  >
-                    <option value="">All Accounts</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name || a.account_number}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-              <button
-                onClick={() => {
-                  setTxFilterType("");
-                  setTxFilterStatus("");
-                  setTxFilterAccountId("");
-                  setTxStartDate("");
-                  setTxEndDate("");
-                }}
-                style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-              >
-                Reset Filters
-              </button>
-              <button
-                onClick={() => void fetchFinance()}
-                style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
-              >
-                <FaSync /> Apply Filters
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Financial Transaction Ledger ({transactions.length} Records)
-            </h3>
-            {txLoading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Fetching live ledger...</span>}
-          </div>
-
-          {txError && (
-            <div style={{ marginBottom: "16px", padding: "12px 16px", borderRadius: "8px", background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "13px", fontWeight: 600 }}>
-              ⚠️ {txError}
-            </div>
-          )}
-
-          <DataTable
-            columns={txColumns}
-            data={transactions}
-            module="finance"
-            onEdit={async (r) => {
-              await financeService.updateTransaction(String(r.txId || r.id || "1"), r);
-              fetchFinance();
-            }}
-            onDelete={async (r) => {
-              await financeService.deleteTransaction(String(r.txId || r.id || ""));
-              fetchFinance();
-            }}
-          />
+      {error && (
+        <div style={{ marginBottom: "20px", padding: "14px 18px", borderRadius: "10px", backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "14px", fontWeight: 600 }}>
+          ⚠️ {error}
         </div>
       )}
 
-      {/* Record Donation Modal */}
-      <Modal isOpen={isDonationModalOpen} onClose={() => setIsDonationModalOpen(false)} title="Record Sponsor Donation">
-        <form onSubmit={handleRecordDonation} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* Summary Stat Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+        <StatCard title="Total Donations" value={loading ? "..." : formatCurrency(totalDonationsSum)} trend="Verified Income" color="#10B981" icon={<FaCoins />} onClick={() => setActiveTab("donations")} />
+        <StatCard title="Sponsorship Revenue" value={loading ? "..." : formatCurrency(sponsorshipRevenueSum)} trend="Dog Sponsorships" color="#2563EB" icon={<FaHandHoldingHeart />} onClick={() => setActiveTab("sponsorships")} />
+        <StatCard title="Refunded Payments" value={loading ? "..." : formatCurrency(totalRefundsSum)} trend="Refunded Records" color="#F59E0B" icon={<FaUndo />} onClick={() => setActiveTab("donations")} />
+        <StatCard title="Net Reserve Revenue" value={loading ? "..." : formatCurrency(netBalanceVal)} trend="Net Revenue Balance" color="#6366F1" icon={<FaChartLine />} onClick={() => setActiveTab("donations")} />
+      </div>
+
+      {/* Main Tabbed Workspace */}
+      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+        {/* Workspace Navigation Bar */}
+        <div style={{ borderBottom: "2px solid #E2E8F0", paddingBottom: "12px", marginBottom: "20px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab("donations")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeTab === "donations" ? "2px solid #10B981" : "1px solid #CBD5E1",
+                background: activeTab === "donations" ? "#ECFDF5" : "#FFFFFF",
+                color: activeTab === "donations" ? "#047857" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaCoins /> Donations ({filteredDonations.length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("sponsorships")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeTab === "sponsorships" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                background: activeTab === "sponsorships" ? "#EFF6FF" : "#FFFFFF",
+                color: activeTab === "sponsorships" ? "#1D4ED8" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaDog /> Sponsorships ({filteredSponsorships.length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("donors")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeTab === "donors" ? "2px solid #6366F1" : "1px solid #CBD5E1",
+                background: activeTab === "donors" ? "#EEF2FF" : "#FFFFFF",
+                color: activeTab === "donors" ? "#4338CA" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaHandHoldingHeart /> Donor Roster ({filteredDonors.length})
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px" }}>
+            {activeTab === "donations" && (
+              <button
+                type="button"
+                onClick={() => setIsDonationModalOpen(true)}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <FaPlus /> Record Donation
+              </button>
+            )}
+            {activeTab === "sponsorships" && (
+              <button
+                type="button"
+                onClick={() => setIsSponsorshipModalOpen(true)}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <FaPlus /> Register Sponsorship
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* TAB 1: DONATIONS */}
+        {activeTab === "donations" && (
+          <DataTable
+            columns={donationColumns}
+            data={filteredDonations}
+            loading={loading}
+            emptyMessage="No donation records found matching criteria."
+            leftHeaderControls={
+              <>
+                <div style={{ position: "relative" }}>
+                  <FaSearch style={{ position: "absolute", left: "10px", top: "11px", color: "#94A3B8" }} size={12} />
+                  <input
+                    type="text"
+                    placeholder="Search donor, email, ID..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ padding: "8px 12px 8px 30px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "240px" }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FaFilter size={12} color="#64748B" />
+                  <select value={donationFilterType} onChange={(e) => setDonationFilterType(e.target.value)} style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+                    {DONATION_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <select value={donationFilterStatus} onChange={(e) => setDonationFilterStatus(e.target.value)} style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+                    {DONATION_STATUSES.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            }
+            renderRowActions={(row: any) => (
+              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDonation(row);
+                    setDonationStatusDraft((row.status as DonationStatus) || "completed");
+                    setIsStatusModalOpen(true);
+                  }}
+                  style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#475569", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaEdit /> Status
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDonation(row);
+                    setIsReconcileModalOpen(true);
+                  }}
+                  style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaCheckDouble /> Reconcile
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadReceipt(row)}
+                  style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaDownload /> Receipt
+                </button>
+              </div>
+            )}
+          />
+        )}
+
+        {/* TAB 2: SPONSORSHIPS */}
+        {activeTab === "sponsorships" && (
+          <DataTable
+            columns={sponsorshipColumns}
+            data={filteredSponsorships}
+            loading={loading}
+            emptyMessage="No dog sponsorship financial records found."
+            leftHeaderControls={
+              <>
+                <div style={{ position: "relative" }}>
+                  <FaSearch style={{ position: "absolute", left: "10px", top: "11px", color: "#94A3B8" }} size={12} />
+                  <input
+                    type="text"
+                    placeholder="Search sponsor, dog, ID..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ padding: "8px 12px 8px 30px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "240px" }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FaFilter size={12} color="#64748B" />
+                  <select value={sponsorshipFilterStatus} onChange={(e) => setSponsorshipFilterStatus(e.target.value)} style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+                    {SPONSORSHIP_STATUSES.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            }
+            renderRowActions={(row: any) => (
+              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSponsorship(row);
+                    setSponsorshipStatusDraft(row.status || "active");
+                    setIsSponStatusModalOpen(true);
+                  }}
+                  style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#475569", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaEdit /> Status
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadReceipt(row)}
+                  style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaDownload /> Receipt
+                </button>
+              </div>
+            )}
+          />
+        )}
+
+        {/* TAB 3: DONORS ROSTER */}
+        {activeTab === "donors" && (
+          <DataTable
+            columns={donorColumns}
+            data={filteredDonors}
+            loading={loading}
+            emptyMessage="No registered donor records found."
+            leftHeaderControls={
+              <div style={{ position: "relative" }}>
+                <FaSearch style={{ position: "absolute", left: "10px", top: "11px", color: "#94A3B8" }} size={12} />
+                <input
+                  type="text"
+                  placeholder="Search donor name, email..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ padding: "8px 12px 8px 30px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "240px" }}
+                />
+              </div>
+            }
+          />
+        )}
+      </div>
+
+      {/* MODAL 1: Record Manual Donation (POST /donations) */}
+      <Modal isOpen={isDonationModalOpen} onClose={() => setIsDonationModalOpen(false)} title="Record Incoming Donation">
+        <form onSubmit={handleRecordDonationSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donor Name *</label>
-              <input type="text" required placeholder="e.g. John Doe" value={donationForm.donor_name} onChange={(e) => setDonationForm({ ...donationForm, donor_name: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Donor Full Name *</label>
+              <input type="text" required placeholder="e.g. Rahul Sharma" value={donationForm.donor_name} onChange={(e) => setDonationForm({ ...donationForm, donor_name: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donor Email/Phone *</label>
-              <input type="text" required placeholder="e.g. john@example.com or +91-9876543210" value={donationForm.donor_email} onChange={(e) => setDonationForm({ ...donationForm, donor_email: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Donor Email</label>
+              <input type="email" placeholder="donor@example.com" value={donationForm.donor_email} onChange={(e) => setDonationForm({ ...donationForm, donor_email: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
             </div>
           </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Donation Amount (₹) *</label>
+              <input type="number" min="1" step="any" required placeholder="e.g. 2500" value={donationForm.amount} onChange={(e) => setDonationForm({ ...donationForm, amount: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Donation Type</label>
+              <select value={donationForm.donation_type} onChange={(e) => setDonationForm({ ...donationForm, donation_type: e.target.value as DonationType })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+                <option value="one_time">One-Time Contribution</option>
+                <option value="recurring">Recurring Monthly Subscription</option>
+                <option value="sponsorship">Dog Sponsorship</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Payment Method</label>
+              <input type="text" placeholder="UPI / NetBanking / Cheque" value={donationForm.payment_method} onChange={(e) => setDonationForm({ ...donationForm, payment_method: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Transaction Ref / ID</label>
+              <input type="text" placeholder="Optional gateway ref #" value={donationForm.transaction_id} onChange={(e) => setDonationForm({ ...donationForm, transaction_id: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+          </div>
+
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Amount (INR) *</label>
-            <input type="number" step="0.01" min="1" required placeholder="e.g. 5000.00" value={donationForm.amount} onChange={(e) => setDonationForm({ ...donationForm, amount: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Donation Purpose / Notes</label>
+            <textarea rows={2} placeholder="Attribution, campaign notes, or emergency medical fund..." value={donationForm.notes} onChange={(e) => setDonationForm({ ...donationForm, notes: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", resize: "vertical" }} />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Donation Type</label>
-              <select value={donationForm.donation_type} onChange={(e) => setDonationForm({ ...donationForm, donation_type: e.target.value as DonationType })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
-                <option value="one_time">One-Time</option>
-                <option value="recurring">Recurring</option>
-                <option value="sponsorship">Sponsorship</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Payment Method</label>
-              <select value={donationForm.payment_method} onChange={(e) => setDonationForm({ ...donationForm, payment_method: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
-                <option value="">Select Method</option>
-                <option value="upi">UPI</option>
-                <option value="net_banking">Net Banking</option>
-                <option value="card">Card</option>
-                <option value="cash">Cash</option>
-                <option value="cheque">Cheque</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsDonationModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: isSubmitting ? "not-allowed" : "pointer" }}>{isSubmitting ? "Recording..." : "Record Donation"}</button>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsDonationModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Saving..." : "Record Donation"}
+            </button>
           </div>
         </form>
       </Modal>
 
-      {/* Log Expense Bill Modal */}
-      <Modal isOpen={isExpenseModalOpen} onClose={() => setIsExpenseModalOpen(false)} title="Log Medical / Operational Expense">
-        <form onSubmit={handleLogExpense} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* MODAL 2: Register Sponsorship (POST /donations/sponsorships) */}
+      <Modal isOpen={isSponsorshipModalOpen} onClose={() => setIsSponsorshipModalOpen(false)} title="Register Dog Sponsorship">
+        <form onSubmit={handleCreateSponsorshipSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Vendor / Service Provider *</label>
-            <input type="text" required placeholder="e.g. VetCare Supplies Ltd" value={expenseForm.entity} onChange={(e) => setExpenseForm({ ...expenseForm, entity: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Sponsored Dog Reference / ID *</label>
+            <input type="text" required placeholder="e.g. dog_123 or Buddy" value={sponsorshipForm.dog_id} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, dog_id: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
           </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Sponsor Full Name</label>
+              <input type="text" placeholder="e.g. Vikram Malhotra" value={sponsorshipForm.sponsor_name} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, sponsor_name: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Sponsor Email</label>
+              <input type="email" placeholder="sponsor@example.com" value={sponsorshipForm.sponsor_email} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, sponsor_email: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Sponsorship Amount (₹) *</label>
+              <input type="number" min="1" step="any" required placeholder="e.g. 5000" value={sponsorshipForm.amount} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, amount: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Duration (Months)</label>
+              <input type="number" min="1" value={sponsorshipForm.duration_months} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, duration_months: Number(e.target.value) })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            </div>
+          </div>
+
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Category</label>
-            <select value={expenseForm.category} onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
-              <option value="Medical Expense">Medical Expense</option>
-              <option value="Operational Expense">Operational Expense</option>
-              <option value="Shelter Expense">Shelter Expense</option>
-              <option value="Supply Purchase">Supply Purchase</option>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Sponsorship Notes</label>
+            <textarea rows={2} placeholder="Monthly care, food & medical sponsorship notes..." value={sponsorshipForm.notes} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, notes: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", resize: "vertical" }} />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsSponsorshipModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Saving..." : "Register Sponsorship"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 3: Update Donation Status (PATCH /donations/{id}/status according to DonationStatusUpdate) */}
+      <Modal isOpen={isStatusModalOpen} onClose={() => setIsStatusModalOpen(false)} title="Update Donation Status">
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>
+            Updating backend status for donation ID <strong>{selectedDonation?.id ? String(selectedDonation.id).slice(0, 8) : ""}</strong>.
+          </p>
+
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Backend Status (DonationStatus)</label>
+            <select value={donationStatusDraft} onChange={(e) => setDonationStatusDraft(e.target.value as DonationStatus)} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+              <option value="pending">Pending</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="refunded">Refunded</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Bill Amount (INR) *</label>
-            <input type="number" step="0.01" min="1" required placeholder="e.g. 25000.00" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsStatusModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleUpdateDonationStatus} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Updating..." : "Save Status"}
+            </button>
           </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Bill Date</label>
-            <input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", boxSizing: "border-box" }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsExpenseModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: isSubmitting ? "not-allowed" : "pointer" }}>{isSubmitting ? "Logging..." : "Log Expense"}</button>
-          </div>
-        </form>
+        </div>
       </Modal>
 
-      {/* Donation Status Update Modal */}
-      <Modal isOpen={isStatusModalOpen} onClose={() => setIsStatusModalOpen(false)} title="Update Donation Status">
-        <form onSubmit={handleStatusUpdate} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0, fontSize: "14px" }}>
-            Update status for donation <strong>{selectedDonation?.id ? String(selectedDonation.id) : "—"}</strong>:
+      {/* MODAL 4: Update Sponsorship Status (PATCH /donations/sponsorships/{id}/status) */}
+      <Modal isOpen={isSponStatusModalOpen} onClose={() => setIsSponStatusModalOpen(false)} title="Update Sponsorship Status">
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>
+            Updating sponsorship status for ID <strong>{selectedSponsorship?.id ? String(selectedSponsorship.id).slice(0, 8) : ""}</strong>.
           </p>
-          <select value={donationStatusDraft} onChange={(e) => setDonationStatusDraft(e.target.value as DonationStatus)} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", outline: "none" }}>
-            <option value="pending">Pending</option>
-            <option value="success">Success</option>
-            <option value="failed">Failed</option>
-          </select>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsStatusModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600, cursor: isSubmitting ? "not-allowed" : "pointer" }}>{isSubmitting ? "Updating..." : "Update Status"}</button>
+
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Select Status</label>
+            <select value={sponsorshipStatusDraft} onChange={(e) => setSponsorshipStatusDraft(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+              <option value="active">active (Active Sponsorship)</option>
+              <option value="completed">completed (Completed Term)</option>
+              <option value="pending">pending (Pending Verification)</option>
+              <option value="cancelled">cancelled (Cancelled)</option>
+            </select>
           </div>
-        </form>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsSponStatusModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleUpdateSponsorshipStatus} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Updating..." : "Save Status"}
+            </button>
+          </div>
+        </div>
       </Modal>
 
-      {/* Financial Report Modal */}
-      <Modal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} title="Financial Statement Export">
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0 }}>
-            Generate executive quarterly financial statement and ledger audit summary:
+      {/* MODAL 5: Reconcile Donation (POST /donations/{id}/reconcile) */}
+      <Modal isOpen={isReconcileModalOpen} onClose={() => setIsReconcileModalOpen(false)} title="Reconcile Donation Record">
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>
+            Perform accounting reconciliation for donation ID <strong>{selectedDonation?.id ? String(selectedDonation.id).slice(0, 8) : ""}</strong>.
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <button type="button" onClick={() => setIsReportModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", cursor: "pointer" }}>Cancel</button>
-            <button type="button" onClick={handleExportReport} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600, cursor: "pointer" }}>Download PDF Report</button>
+
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Reconciliation Audit Notes</label>
+            <textarea rows={3} value={reconcileNotesDraft} onChange={(e) => setReconcileNotesDraft(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", resize: "vertical" }} />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsReconcileModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleReconcileSubmit} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Reconciling..." : "Confirm Reconciliation"}
+            </button>
           </div>
         </div>
       </Modal>
