@@ -32,10 +32,15 @@ export const getRecordDate = (record: AnyRecord): Date | null => {
     record.registered_at,
     record.timestamp,
     record.date,
+    record.payment_date,
+    record.submitted_at,
+    record.requested_at,
+    record.recorded_at,
     record.adoption_date,
     record.transaction_date,
     record.donation_date,
-    record.start_date
+    record.start_date,
+    record.updated_at
   );
   if (!raw) return null;
   const d = new Date(String(raw));
@@ -63,8 +68,9 @@ export function buildMonthlyTrend(
     const key = `${d.getFullYear()}-${d.getMonth()}`;
     let amount = 1;
     if (valueKey) {
-      const v = firstDefined(record[valueKey], record.amount, record.value);
-      amount = toNumber(v);
+      const v = firstDefined(record[valueKey], record.amount, record.total_amount, record.value, record.price);
+      const strVal = String(v ?? "").replace(/[^0-9.]/g, "");
+      amount = toNumber(strVal);
     }
     byMonth.set(key, (byMonth.get(key) || 0) + amount);
   });

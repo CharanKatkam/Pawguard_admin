@@ -198,7 +198,12 @@ export const notificationService = {
     const currentRole = getCurrentUserRole();
 
     const filtered = transformed.filter((item) => shouldUserReceiveNotification(item, currentUser, currentRole));
-    return deduplicateNotifications(filtered);
+    const sorted = deduplicateNotifications(filtered).sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+    });
+    return sorted;
   },
 
   // GET /api/v1/notifications/unread-count

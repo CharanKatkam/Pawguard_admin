@@ -127,8 +127,6 @@ function App() {
                     "super_admin",
                     "rescue_centre_admin",
                     "shelter_manager",
-                    "foster_coordinator",
-                    "volunteer_coordinator",
                   ]}
                 />
               }

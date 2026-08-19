@@ -13,6 +13,7 @@ const api = axios.create({
     "Content-Type": "application/json",
   },
   timeout: 15000,
+  withCredentials: true,
 });
 
 // Request Interceptor: Attach JWT Bearer Token if available & enforce 300s session inactivity timeout

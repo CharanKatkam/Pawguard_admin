@@ -87,7 +87,13 @@ const AuditLogs = () => {
         };
       });
 
-      setLogs(formatted);
+      const sortedFormatted = [...formatted].sort((a, b) => {
+        const timeA = new Date(a.rawTimestamp).getTime();
+        const timeB = new Date(b.rawTimestamp).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setLogs(sortedFormatted);
     } catch (err: any) {
       setError(err?.response?.data?.detail || err?.response?.data?.message || "Failed to load audit logs from backend.");
       addToast("Could not load audit logs from server.", "error");
