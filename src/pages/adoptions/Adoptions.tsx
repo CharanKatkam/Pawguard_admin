@@ -329,7 +329,12 @@ const Adoptions = () => {
       setLoading(true);
       const response = await adoptionService.getAdoptions();
       if (response && Array.isArray(response.data)) {
-        setAdoptions(response.data);
+        const sorted = [...response.data].sort((a: any, b: any) => {
+          const timeA = new Date(a.created_at || a.submitted_at || a.date || 0).getTime();
+          const timeB = new Date(b.created_at || b.submitted_at || b.date || 0).getTime();
+          return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+        });
+        setAdoptions(sorted);
       }
     } catch {
       addToast("Failed to load adoption queue.", "error");
