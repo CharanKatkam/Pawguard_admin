@@ -134,7 +134,13 @@ const RescueRequests = () => {
         };
       });
 
-      setRequests(formatted);
+      const sortedFormatted = [...formatted].sort((a, b) => {
+        const timeA = new Date(a.date).getTime();
+        const timeB = new Date(b.date).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setRequests(sortedFormatted);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } } };
       setError(e?.response?.data?.detail || "Failed to load incoming rescue requests.");

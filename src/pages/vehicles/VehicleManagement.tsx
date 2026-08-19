@@ -50,7 +50,13 @@ const VehicleManagement = () => {
         status: item.status || "",
       }));
 
-      setVehicles(formatted);
+      const sortedFormatted = formatted.sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at || a.date || a.updated_at || 0).getTime();
+        const timeB = new Date(b.created_at || b.date || b.updated_at || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setVehicles(sortedFormatted);
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to load vehicle fleet.");
     } finally {
