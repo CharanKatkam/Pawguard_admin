@@ -242,6 +242,19 @@ export const canViewNotifications = (role?: UserRole): boolean => {
 };
 
 /**
+ * Check if the current user can view and manage notification governance (Super Admin only)
+ */
+export const canManageNotificationGovernance = (role?: UserRole): boolean => {
+  if (!role) return false;
+  return (
+    role === "super_admin" ||
+    hasPermission("approve_notifications", role) ||
+    hasPermission("manage_notifications", role) ||
+    hasPermission("notification_governance", role)
+  );
+};
+
+/**
  * Check if the current user can view audit logs
  */
 export const canViewAuditLogs = (role?: UserRole): boolean => {

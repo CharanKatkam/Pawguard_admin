@@ -2,7 +2,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import type { UserRole } from "../../../types/auth";
 import { getCurrentUser, getCurrentUserRole, isInternalRole } from "../../../utils/roleUtils";
 import { hasPermission, hasAnyPermission } from "../../../utils/rbac";
-import { getAccessToken, clearAuthData, isSessionExpired } from "../../../utils/authStorage";
+import { clearAuthData, isSessionExpired } from "../../../utils/authStorage";
 import { notifyAuthChanged } from "../../../utils/dataSync";
 
 interface ProtectedRouteProps {
@@ -13,7 +13,6 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
   const user = getCurrentUser();
-  const token = getAccessToken();
 
   // Enforce exact 300-second (5 minute) session inactivity timeout
   if (isSessionExpired()) {
@@ -23,7 +22,7 @@ const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
   }
 
   // If user is not authenticated or not an internal staff role, redirect to Login page
-  if (!user || !token || !isInternalRole(user)) {
+  if (!user || !isInternalRole(user)) {
     return <Navigate to="/" replace />;
   }
 

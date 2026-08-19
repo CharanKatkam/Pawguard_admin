@@ -22,6 +22,78 @@ export interface NotificationsListResponse {
   unread_count: number;
 }
 
+export interface NotificationGovernanceOverview {
+  pending_approvals?: number;
+  pending?: number;
+  sent_today?: number;
+  sent?: number;
+  total_sent?: number;
+  blocked?: number;
+  paused?: number;
+  failed?: number;
+  delivery_rate?: number;
+  active_triggers?: number;
+  is_paused?: boolean;
+}
+
+export interface GlobalNotificationEngineStatus {
+  is_paused: boolean;
+  paused_reason?: string | null;
+  channels?: Record<string, boolean>;
+  rate_limit_per_minute?: number;
+}
+
+export interface NotificationApprovalItem {
+  id: string;
+  title: string;
+  body?: string;
+  message?: string;
+  module?: string;
+  trigger?: string;
+  recipient_count?: number;
+  recipients?: number;
+  priority?: "high" | "normal" | "urgent" | string;
+  created_at?: string;
+  submitted_at?: string;
+  status: "pending" | "approved" | "rejected" | "paused" | string;
+  rejection_reason?: string | null;
+  paused_reason?: string | null;
+  reason?: string | null;
+  [key: string]: unknown;
+}
+
+export interface NotificationDispatchLog {
+  id: string;
+  notification_title?: string;
+  title?: string;
+  module?: string;
+  trigger?: string;
+  status: "delivered" | "sent" | "failed" | "queued" | string;
+  recipient_count?: number;
+  created_at?: string;
+  sent_at?: string;
+  failure_reason?: string | null;
+  error?: string | null;
+  [key: string]: unknown;
+}
+
+export interface NotificationAuditLog {
+  id: string;
+  actor?: string;
+  actor_email?: string;
+  user?: string;
+  action: string;
+  approval_id?: string;
+  notification_id?: string;
+  module?: string;
+  trigger?: string;
+  timestamp?: string;
+  created_at?: string;
+  result?: string;
+  reason?: string | null;
+  [key: string]: unknown;
+}
+
 /**
  * Check if a notification is an Inventory / Low Stock alert
  */
@@ -286,6 +358,108 @@ export const notificationService = {
         timer = null;
       }
     };
+  },
+
+  // GET /api/v1/admin/notifications/overview
+  getGovernanceOverview: async (): Promise<NotificationGovernanceOverview> => {
+    const response = await api.get("/admin/notifications/overview");
+    return response.data;
+  },
+
+  // GET /api/v1/admin/notifications/global
+  getGlobalEngineStatus: async (): Promise<GlobalNotificationEngineStatus> => {
+    const response = await api.get("/admin/notifications/global");
+    return response.data;
+  },
+
+  // PUT /api/v1/admin/notifications/global
+  updateGlobalEngineStatus: async (payload: { is_paused: boolean; paused_reason?: string; channels?: Record<string, boolean> }) => {
+    const response = await api.put("/admin/notifications/global", payload);
+    return response.data;
+  },
+
+  // GET /api/v1/admin/notifications/approvals
+  getApprovalQueue: async (params?: Record<string, unknown>): Promise<NotificationApprovalItem[]> => {
+    const response = await api.get("/admin/notifications/approvals", { params });
+    return Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.data?.data)
+      ? response.data.data
+      : Array.isArray(response.data?.items)
+      ? response.data.items
+      : [];
+  },
+
+  // POST /api/v1/admin/notifications/approvals/{id}/approve
+  approveNotification: async (id: string) => {
+    const response = await api.post(`/admin/notifications/approvals/${id}/approve`);
+    return response.data;
+  },
+
+  // POST /api/v1/admin/notifications/approvals/{id}/reject
+  rejectNotification: async (id: string, reason: string) => {
+    const response = await api.post(`/admin/notifications/approvals/${id}/reject`, { reason });
+    return response.data;
+  },
+
+  // POST /api/v1/admin/notifications/approvals/{id}/pause
+  pauseNotification: async (id: string, reason: string) => {
+    const response = await api.post(`/admin/notifications/approvals/${id}/pause`, { reason });
+    return response.data;
+  },
+
+  // POST /api/v1/admin/notifications/approvals/{id}/resume
+  resumeNotification: async (id: string) => {
+    const response = await api.post(`/admin/notifications/approvals/${id}/resume`);
+    return response.data;
+  },
+
+  // GET /api/v1/admin/notifications/dispatch-logs
+  getDispatchLogs: async (params?: Record<string, unknown>): Promise<NotificationDispatchLog[]> => {
+    const response = await api.get("/admin/notifications/dispatch-logs", { params });
+    return Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.data?.data)
+      ? response.data.data
+      : Array.isArray(response.data?.items)
+      ? response.data.items
+      : [];
+  },
+
+  // GET /api/v1/admin/notifications/audit-logs
+  getGovernanceAuditLogs: async (params?: Record<string, unknown>): Promise<NotificationAuditLog[]> => {
+    const response = await api.get("/admin/notifications/audit-logs", { params });
+    return Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.data?.data)
+      ? response.data.data
+      : Array.isArray(response.data?.items)
+      ? response.data.items
+      : [];
+  },
+
+  // GET /api/v1/admin/notifications/modules
+  getModulesConfig: async (): Promise<any[]> => {
+    const response = await api.get("/admin/notifications/modules");
+    return Array.isArray(response.data) ? response.data : Array.isArray(response.data?.data) ? response.data.data : [];
+  },
+
+  // PUT /api/v1/admin/notifications/modules/{module_name}
+  updateModuleConfig: async (moduleName: string, payload: Record<string, unknown>) => {
+    const response = await api.put(`/admin/notifications/modules/${moduleName}`, payload);
+    return response.data;
+  },
+
+  // GET /api/v1/admin/notifications/triggers
+  getTriggersConfig: async (): Promise<any[]> => {
+    const response = await api.get("/admin/notifications/triggers");
+    return Array.isArray(response.data) ? response.data : Array.isArray(response.data?.data) ? response.data.data : [];
+  },
+
+  // PUT /api/v1/admin/notifications/triggers/{id}
+  updateTriggerConfig: async (triggerId: string, payload: Record<string, unknown>) => {
+    const response = await api.put(`/admin/notifications/triggers/${triggerId}`, payload);
+    return response.data;
   },
 };
 

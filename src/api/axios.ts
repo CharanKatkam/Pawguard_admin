@@ -1,6 +1,6 @@
 import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
-import { getAccessToken, clearAuthData, isSessionExpired, updateLastActivity } from "../utils/authStorage";
+import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser } from "../utils/authStorage";
 
 // Base API configuration for production and development environment
 const API_BASE_URL =
@@ -16,11 +16,11 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Request Interceptor: Attach JWT Bearer Token if available & enforce 300s session inactivity timeout
+// Request Interceptor: Enforce 300s session inactivity timeout for active user sessions
 api.interceptors.request.use(
   (config) => {
-    const token = getAccessToken();
-    if (token) {
+    const user = getStoredUser();
+    if (user) {
       if (isSessionExpired()) {
         clearAuthData();
         notifyAuthChanged();
@@ -28,9 +28,6 @@ api.interceptors.request.use(
         return Promise.reject(new axios.Cancel("Session expired due to 300 seconds of inactivity."));
       }
       updateLastActivity();
-      if (config.headers) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
     }
     return config;
   },

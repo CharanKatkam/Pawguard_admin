@@ -1,12 +1,10 @@
 /**
- * Centralized auth storage.
+ * Centralized auth storage supporting Secure HttpOnly Cookie authentication.
  *
- * - Default (Remember Me OFF): tokens live in sessionStorage and are cleared
- *   when the browser tab/window closes.
- * - Remember Me ON: tokens live in localStorage and survive browser restarts.
- * - Reads check sessionStorage first so a fresh session always wins over a
- *   stale persistent login.
- * - Passwords are NEVER stored.
+ * - HttpOnly cookies are automatically sent by the browser on cross-origin API requests.
+ * - Raw JWT access/refresh tokens are NOT stored in localStorage or sessionStorage.
+ * - User session metadata (`user`), preferences (`remember_me`, `remember_email`), and
+ *   session inactivity timestamp (`last_activity`) are persisted for UI role context.
  */
 
 export const AUTH_STORAGE_KEYS = {
@@ -63,9 +61,12 @@ const remove = (key: string): void => {
   }
 };
 
-export const getAccessToken = (): string | null => read(AUTH_STORAGE_KEYS.accessToken);
-
-export const getRefreshToken = (): string | null => read(AUTH_STORAGE_KEYS.refreshToken);
+/**
+ * Tokens are stored securely in HttpOnly cookies by the backend.
+ * Deprecated: JavaScript does not read or expose raw access tokens.
+ */
+export const getAccessToken = (): string | null => null;
+export const getRefreshToken = (): string | null => null;
 
 export const updateLastActivity = (): void => {
   const nowStr = Date.now().toString();
@@ -89,8 +90,8 @@ export const getLastActivity = (): number | null => {
 };
 
 export const isSessionExpired = (): boolean => {
-  const token = getAccessToken();
-  if (!token) return false;
+  const user = getStoredUser();
+  if (!user) return false;
 
   const lastActivity = getLastActivity();
   if (!lastActivity) {
@@ -154,29 +155,28 @@ export const setRememberedEmail = (email: string): void => {
 };
 
 export interface AuthData {
-  accessToken: string;
+  accessToken?: string | null;
   refreshToken?: string | null;
   user: unknown;
 }
 
 /**
- * Persist the authenticated session. The `rememberMe` flag controls the target
- * storage (localStorage vs sessionStorage) and is persisted as a preference so
- * the login form can restore the checkbox on the next visit.
+ * Persist user session metadata.
+ * Raw tokens are removed from browser storage in compliance with HttpOnly cookie security.
  */
 export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
   setRememberMe(rememberMe);
-  write(AUTH_STORAGE_KEYS.accessToken, data.accessToken);
-  if (data.refreshToken) {
-    write(AUTH_STORAGE_KEYS.refreshToken, data.refreshToken);
-  } else {
-    remove(AUTH_STORAGE_KEYS.refreshToken);
-  }
+
+  // Clear obsolete token storage
+  remove(AUTH_STORAGE_KEYS.accessToken);
+  remove(AUTH_STORAGE_KEYS.refreshToken);
+
+  // Store user metadata & update activity timestamp
   write(AUTH_STORAGE_KEYS.user, JSON.stringify(data.user));
   updateLastActivity();
 };
 
-/** Remove credentials from BOTH storages (leaves remember-email preference). */
+/** Remove session metadata from BOTH storages (leaves remember-email preference). */
 export const clearAuthData = (): void => {
   remove(AUTH_STORAGE_KEYS.accessToken);
   remove(AUTH_STORAGE_KEYS.refreshToken);

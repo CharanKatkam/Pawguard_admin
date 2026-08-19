@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { isSessionExpired, updateLastActivity, clearAuthData, getAccessToken } from "../utils/authStorage";
+import { isSessionExpired, updateLastActivity, clearAuthData, getStoredUser } from "../utils/authStorage";
 import { notifyAuthChanged } from "../utils/dataSync";
 import { useToast } from "../context/ToastContext";
 
@@ -14,8 +14,8 @@ export const useInactivityTimeout = () => {
   const lastThrottleRef = useRef<number>(0);
 
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) return;
+    const user = getStoredUser();
+    if (!user) return;
 
     // Refresh lastActivity timestamp on user interaction (throttled to max 1 update per 1000ms)
     const handleUserActivity = () => {
@@ -31,7 +31,7 @@ export const useInactivityTimeout = () => {
 
     // Check for 300s inactivity timeout every 1000ms
     const interval = setInterval(() => {
-      if (getAccessToken() && isSessionExpired()) {
+      if (getStoredUser() && isSessionExpired()) {
         clearAuthData();
         notifyAuthChanged();
         addToast("Your session has expired due to 5 minutes of inactivity. Please log in again.", "error");

@@ -40,91 +40,10 @@ const LoginForm = () => {
     return response?.data?.data || response?.data || response;
   };
 
-  const findAccessToken = (payload: any) => {
-    return (
-      payload?.access_token ||
-      payload?.token ||
-      payload?.auth_token ||
-      payload?.authToken ||
-      payload?.data?.access_token ||
-      payload?.data?.token
-    );
-  };
-
-  const findRefreshToken = (payload: any) => {
-    return payload?.refresh_token || payload?.refreshToken || payload?.data?.refresh_token || payload?.data?.refreshToken;
-  };
-
-  const authorizeUser = async (payload: any) => {
-    const userObj = resolveUserObject(payload);
-    if (!userObj || typeof userObj !== "object") {
-      return null;
-    }
-
-    return {
-      ...userObj,
-      email: userObj.email || userObj.email_address || userObj.username || undefined,
-    };
-  };
-
-  const completeLogin = async (authPayload: any) => {
-    const access_token = findAccessToken(authPayload);
-    const refresh_token = findRefreshToken(authPayload);
-
-    if (!access_token) {
-      throw new Error("Authentication response did not include an access token.");
-    }
-
-    let userObj = await authorizeUser(authPayload);
-
-    if (!userObj || (typeof userObj === "object" && !userObj.role && !userObj.roles && !userObj.role_name && !userObj.user_type && !userObj.type && !userObj.slug && !userObj.title && !userObj.name)) {
-      try {
-        const meResponse = await authService.getMe();
-        const meData = meResponse?.data || meResponse;
-        const resolvedMeUser = resolveUserObject(meData);
-        userObj = {
-          ...(typeof userObj === "object" ? userObj : {}),
-          ...(resolvedMeUser && typeof resolvedMeUser === "object" ? resolvedMeUser : meData),
-        };
-      } catch {
-        // fallback to existing values
-      }
-    }
-
-    if (!userObj || typeof userObj !== "object") {
-      userObj = { email: email.trim() };
-    } else if (!userObj.email) {
-      userObj.email = email.trim();
-    }
-
-    const userRole = normalizeRole(userObj);
-
-    if (!userRole) {
-      throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
-    }
-
-    userObj.role = userRole;
-
-    // Remember Me controls persistence:
-    // checked  -> localStorage (session survives browser restarts)
-    // unchecked -> sessionStorage (cleared when the browser/tab closes).
-    // Passwords are never stored; only the email is remembered for convenience.
-    setAuthData(
-      {
-        accessToken: String(access_token),
-        refreshToken: refresh_token ? String(refresh_token) : null,
-        user: userObj,
-      },
-      rememberMe
-    );
-    setRememberedEmail(rememberMe ? email.trim() : "");
-
-    notifyAuthChanged();
-    navigate(getDashboardPathForRole(userRole), { replace: true });
-  };
-
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+
+    // 1. Immediately clear any previous login error when a new attempt begins
     setErrorMsg(null);
 
     if (!email || !password) {
@@ -135,13 +54,53 @@ const LoginForm = () => {
     try {
       setLoading(true);
 
+      // 2. POST /auth/login with credentials: true
       const response = await authService.login({
         email: email.trim(),
         password,
       });
 
-      const payload = unifyAuthPayload(response);
-      await completeLogin(payload);
+      // 3. HTTP 200 received -> clear error explicitly
+      setErrorMsg(null);
+
+      // 4. Retrieve authenticated user profile via GET /auth/me (sent with credentials)
+      let userObj: any = null;
+      try {
+        const meResponse = await authService.getMe();
+        const meData = meResponse?.data || meResponse;
+        userObj = resolveUserObject(meData);
+      } catch {
+        // Fallback to user object in login response payload if /auth/me call returns inline data
+        const loginPayload = unifyAuthPayload(response);
+        userObj = resolveUserObject(loginPayload);
+      }
+
+      if (!userObj || typeof userObj !== "object") {
+        userObj = { email: email.trim() };
+      } else if (!userObj.email) {
+        userObj.email = email.trim();
+      }
+
+      const userRole = normalizeRole(userObj);
+
+      if (!userRole) {
+        throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
+      }
+
+      userObj.role = userRole;
+
+      // 5. Store safe user/session info needed by the UI
+      setAuthData(
+        {
+          user: userObj,
+        },
+        rememberMe
+      );
+      setRememberedEmail(rememberMe ? email.trim() : "");
+
+      // 6. Update auth state and navigate to correct dashboard
+      notifyAuthChanged();
+      navigate(getDashboardPathForRole(userRole), { replace: true });
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         if (!error.response) {
@@ -232,7 +191,7 @@ const LoginForm = () => {
         className="login-button"
         disabled={loading}
       >
-        {loading ? "Signing In..." : "Sign In"}
+        {loading ? "Logging In..." : "Login"}
       </button>
 
       <ForgotPasswordModal
