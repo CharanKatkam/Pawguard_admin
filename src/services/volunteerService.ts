@@ -18,22 +18,26 @@ export interface VolunteerApplicationPayload {
 
 export interface VolunteerProfileUpdatePayload {
   status?: "applied" | "onboarded" | "active" | "inactive";
-  emergency_contact_name?: string;
-  emergency_contact_phone?: string;
-  full_name?: string;
-  email?: string;
-  phone?: string;
-  preferred_role?: "Foster Care" | "Transport" | "Events & Outreach" | "Shelter Support" | string;
-  availability?: string;
-  message?: string;
-  skills?: string;
-  notes?: string;
-  medical_conditions?: string;
-  animal_handling_experience?: string;
-  background_check_completed?: boolean;
-  background_check_notes?: string;
-  [key: string]: unknown;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  skills?: string | null;
+  availability?: string | null;
+  notes?: string | null;
+  medical_conditions?: string | null;
+  animal_handling_experience?: string | null;
+  background_check_completed?: boolean | null;
+  background_check_notes?: string | null;
 }
+
+export type PublicVolunteerStatus = "NOT_APPLIED" | "PENDING" | "APPROVED" | "INACTIVE";
+
+export const mapBackendStatusToPublic = (status?: string): PublicVolunteerStatus => {
+  const s = String(status || "").toLowerCase().trim();
+  if (s === "active" || s === "onboarded") return "APPROVED";
+  if (s === "applied") return "PENDING";
+  if (s === "inactive") return "INACTIVE";
+  return "NOT_APPLIED";
+};
 
 export interface ShiftCreatePayload {
   shelter_facility_id?: string | null;
@@ -131,6 +135,48 @@ export const volunteerService = {
     if (notes) payload.notes = notes;
     if (checkOutAt) payload.check_out_at = checkOutAt;
     const response = await api.post(`/volunteers/attendance/${attendanceId}/check-out`, payload);
+    return response.data;
+  },
+
+  // GET /volunteers/applications - List volunteer applications
+  getApplications: async (params?: Record<string, unknown>) => {
+    try {
+      const response = await api.get("/volunteers/applications", { params });
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        const response = await api.get("/volunteers", { params });
+        return response.data;
+      }
+      throw err;
+    }
+  },
+
+  // GET /volunteers/applications/{id} - Get application details
+  getApplicationById: async (id: string) => {
+    try {
+      const response = await api.get(`/volunteers/applications/${id}`);
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        const response = await api.get(`/volunteers/${id}`);
+        return response.data;
+      }
+      throw err;
+    }
+  },
+
+  // POST /api/v1/volunteers/applications/{id}/approve - Approve application
+  approveApplication: async (id: string, notes?: string) => {
+    const payload = notes ? { notes } : {};
+    const response = await api.post(`/volunteers/applications/${id}/approve`, payload);
+    return response.data;
+  },
+
+  // POST /api/v1/volunteers/applications/{id}/reject - Reject application
+  rejectApplication: async (id: string, reason?: string) => {
+    const payload = reason ? { reason, rejection_reason: reason } : {};
+    const response = await api.post(`/volunteers/applications/${id}/reject`, payload);
     return response.data;
   },
 

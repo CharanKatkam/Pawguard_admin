@@ -5,11 +5,9 @@ import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
 import {
-  FaUserFriends,
   FaClipboardList,
   FaPlus,
   FaUserCheck,
-  FaUserTimes,
   FaClock,
   FaSignInAlt,
   FaSignOutAlt,
@@ -18,33 +16,42 @@ import {
   FaSync,
   FaSearch,
   FaEye,
+  FaExclamationCircle,
+  FaBan,
+  FaFileAlt,
+  FaHistory,
+  FaPhoneAlt,
+  FaEnvelope,
+  FaCheckCircle,
 } from "react-icons/fa";
 import volunteerService from "../../services/volunteerService";
 import shelterService from "../../services/shelterService";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
-type TabKey = "directory" | "shifts";
+type TabKey = "applications" | "active" | "shifts";
 
 const STATUS_OPTIONS = [
-  { value: "", label: "All Statuses" },
-  { value: "applied", label: "Applied" },
-  { value: "onboarded", label: "Onboarded" },
-  { value: "active", label: "Active" },
+  { value: "", label: "All Application Statuses" },
+  { value: "pending", label: "Pending (Action Required)" },
+  { value: "applied", label: "Applied / Pending" },
+  { value: "approved", label: "Approved / Active" },
+  { value: "active", label: "Active Roster" },
+  { value: "rejected", label: "Rejected" },
   { value: "inactive", label: "Inactive" },
 ];
 
 const VolunteerManagement = () => {
-  const [activeTab, setActiveTab] = useState<TabKey>("directory");
+  const [activeTab, setActiveTab] = useState<TabKey>("applications");
 
-  // Volunteers State
-  const [volunteers, setVolunteers] = useState<any[]>([]);
+  // Applications & Volunteer Profiles Roster State
+  const [applications, setApplications] = useState<any[]>([]);
   const [volLoading, setVolLoading] = useState(true);
   const [volError, setVolError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Shifts State
+  // Shifts & Attendance State
   const [shifts, setShifts] = useState<any[]>([]);
   const [shiftLoading, setShiftLoading] = useState(true);
   const [shiftError, setShiftError] = useState<string | null>(null);
@@ -57,24 +64,34 @@ const VolunteerManagement = () => {
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+
   const [selectedVolunteer, setSelectedVolunteer] = useState<any | null>(null);
+  const [rejectTargetApp, setRejectTargetApp] = useState<any | null>(null);
+  const [rejectionReason, setRejectionReason] = useState<string>("");
   const [selectedShift, setSelectedShift] = useState<any | null>(null);
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
-  const [attLoading, setAttLoading] = useState(false);
+  const [serviceSummaryData, setServiceSummaryData] = useState<any | null>(null);
 
+  const [attLoading, setAttLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { addToast } = useToast();
 
   // Application Form
   const [applyForm, setApplyForm] = useState({
+    full_name: "",
+    email: "",
+    phone: "",
+    preferred_role: "Foster Care",
     emergency_contact_name: "",
     emergency_contact_phone: "",
-    skills: "Dog Handling, Sanitation",
-    availability: "Weekends & Mornings",
+    skills: "Dog Handling, Sanitation, Animal Rescue",
+    availability: "Weekends & Morning Shifts",
     notes: "",
     medical_conditions: "None",
-    animal_handling_experience: "2 years volunteer experience",
+    animal_handling_experience: "2 years volunteer experience at local shelter",
   });
 
   // Shift Form
@@ -86,29 +103,46 @@ const VolunteerManagement = () => {
     capacity: 5,
   });
 
-  const fetchVolunteers = useCallback(async () => {
+  // Fetch Applications / Roster
+  const fetchApplications = useCallback(async () => {
     try {
       setVolLoading(true);
       setVolError(null);
       const params: Record<string, unknown> = {};
       if (statusFilter) params.status = statusFilter;
 
-      const response = await volunteerService.getVolunteers(params);
-      const list = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-        ? response.data
-        : Array.isArray(response?.items)
-        ? response.items
+      let res: any;
+      try {
+        res = await volunteerService.getApplications(params);
+      } catch {
+        res = await volunteerService.getVolunteers(params);
+      }
+
+      const list = Array.isArray(res)
+        ? res
+        : Array.isArray(res?.data)
+        ? res.data
+        : Array.isArray(res?.items)
+        ? res.items
         : [];
-      setVolunteers(list);
+
+      const sorted = [...list].sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at || a.submitted_at || a.applied_at || a.date || 0).getTime();
+        const timeB = new Date(b.created_at || b.submitted_at || b.applied_at || b.date || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setApplications(sorted);
     } catch (err: any) {
-      setVolError(err?.response?.data?.detail || "Failed to load volunteer roster.");
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to load volunteer applications.";
+      setVolError(`[HTTP ${status || "Error"}] ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
     } finally {
       setVolLoading(false);
     }
   }, [statusFilter]);
 
+  // Fetch Shifts
   const fetchShifts = useCallback(async () => {
     try {
       setShiftLoading(true);
@@ -121,14 +155,22 @@ const VolunteerManagement = () => {
         : Array.isArray(response?.items)
         ? response.items
         : [];
-      setShifts(list);
+      const sortedShifts = [...list].sort((a: any, b: any) => {
+        const timeA = new Date(a.start_at || a.created_at || a.date || 0).getTime();
+        const timeB = new Date(b.start_at || b.created_at || b.date || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+      setShifts(sortedShifts);
     } catch (err: any) {
-      setShiftError(err?.response?.data?.detail || "Failed to load scheduled shifts.");
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to load scheduled shifts.";
+      setShiftError(`[HTTP ${status || "Error"}] ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
     } finally {
       setShiftLoading(false);
     }
   }, []);
 
+  // Fetch Facilities
   const fetchFacilities = useCallback(async () => {
     try {
       const res = await shelterService.getShelters();
@@ -140,31 +182,40 @@ const VolunteerManagement = () => {
   }, []);
 
   useEffect(() => {
-    void fetchVolunteers();
+    void fetchApplications();
     void fetchShifts();
     void fetchFacilities();
-  }, [fetchVolunteers, fetchShifts, fetchFacilities]);
+  }, [fetchApplications, fetchShifts, fetchFacilities]);
 
+  // Submit Application
   const handleApplyVolunteer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!applyForm.emergency_contact_name || !applyForm.emergency_contact_phone) {
       addToast("Emergency contact name and phone are required.", "error");
       return;
     }
+
     try {
       setIsSubmitting(true);
       await volunteerService.applyVolunteer(applyForm);
-      addToast("Volunteer profile registered successfully!", "success");
+      addToast("Volunteer application registered successfully!", "success");
       setIsApplyModalOpen(false);
-      fetchVolunteers();
+      fetchApplications();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to register volunteer.", "error");
+      const errorMsg =
+        typeof err?.response?.data?.detail === "string"
+          ? err.response.data.detail
+          : Array.isArray(err?.response?.data?.detail)
+          ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
+          : err?.response?.data?.message || err?.message || "Failed to register application.";
+      addToast(`[HTTP ${err?.response?.status || 422}] ${errorMsg}`, "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Create Shift Schedule
   const handleCreateShift = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!shiftForm.role_name || !shiftForm.start_at || !shiftForm.end_at) {
@@ -180,22 +231,58 @@ const VolunteerManagement = () => {
         end_at: new Date(shiftForm.end_at).toISOString(),
         capacity: Number(shiftForm.capacity || 5),
       });
-      addToast("Volunteer shift created!", "success");
+      addToast("Volunteer shift schedule created successfully!", "success");
       setIsShiftModalOpen(false);
       fetchShifts();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to create shift.", "error");
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to create shift schedule.", "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleUpdateStatus = async (profileId: string, status: "applied" | "onboarded" | "active" | "inactive") => {
+  // APPROVE Application: POST /api/v1/volunteers/applications/{id}/approve
+  const handleApproveApplication = async (appRow: any) => {
+    const appId = appRow?.id || appRow?.application_id || appRow?.profile_id;
+    if (!appId) {
+      addToast("Invalid application ID.", "error");
+      return;
+    }
+
     try {
-      await volunteerService.updateVolunteerProfile(profileId, { status });
-      addToast(`Volunteer profile status updated to ${status.toUpperCase()}!`, "success");
-      fetchVolunteers();
+      setIsSubmitting(true);
+      let result: any;
+      try {
+        // Standard backend endpoint: POST /api/v1/volunteers/applications/{id}/approve
+        result = await volunteerService.approveApplication(appId);
+      } catch (err: any) {
+        if (err?.response?.status === 404 || err?.response?.status === 405) {
+          result = await volunteerService.updateVolunteerProfile(appId, { status: "active" });
+        } else {
+          throw err;
+        }
+      }
+
+      const updated = result?.volunteer_profile || result?.profile || result?.data || result || {};
+      addToast(`Application #${String(appId).slice(0, 8)} approved! Volunteer profile active.`, "success");
+
+      setApplications((prev) =>
+        prev.map((app) => {
+          const curId = app?.id || app?.application_id || app?.profile_id;
+          if (curId === appId) {
+            return { ...app, ...updated, status: "approved" };
+          }
+          return app;
+        })
+      );
+
+      if (selectedVolunteer && (selectedVolunteer.id || selectedVolunteer.profile_id) === appId) {
+        setSelectedVolunteer((prev: any) => (prev ? { ...prev, ...updated, status: "approved" } : null));
+      }
+
+      fetchApplications();
+      fetchShifts();
       notifyDataChanged();
     } catch (err: any) {
       const errorMsg =
@@ -203,16 +290,104 @@ const VolunteerManagement = () => {
           ? err.response.data.detail
           : Array.isArray(err?.response?.data?.detail)
           ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
-          : err?.response?.data?.message || err?.message || "Failed to update profile status.";
-      addToast(errorMsg, "error");
+          : err?.response?.data?.message || err?.message || "Failed to approve application.";
+      addToast(`[HTTP ${err?.response?.status || 500}] ${errorMsg}`, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // REJECT Application Modal Trigger
+  const handleOpenRejectModal = (appRow: any) => {
+    setRejectTargetApp(appRow);
+    setRejectionReason("");
+    setIsRejectModalOpen(true);
+  };
+
+  // REJECT Application Submit: POST /api/v1/volunteers/applications/{id}/reject
+  const handleConfirmReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectTargetApp) return;
+
+    const appId = rejectTargetApp.id || rejectTargetApp.application_id || rejectTargetApp.profile_id;
+    if (!appId) {
+      addToast("Invalid application ID.", "error");
+      return;
+    }
+
+    if (!rejectionReason.trim()) {
+      addToast("Rejection reason is required.", "error");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      let result: any;
+      try {
+        // Standard backend endpoint: POST /api/v1/volunteers/applications/{id}/reject
+        result = await volunteerService.rejectApplication(appId, rejectionReason.trim());
+      } catch (err: any) {
+        if (err?.response?.status === 404 || err?.response?.status === 405) {
+          result = await volunteerService.updateVolunteerProfile(appId, {
+            status: "inactive",
+            notes: `Rejected: ${rejectionReason.trim()}`,
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      addToast(`Application #${String(appId).slice(0, 8)} rejected. Reason recorded.`, "info");
+      setIsRejectModalOpen(false);
+      setRejectTargetApp(null);
+      setRejectionReason("");
+
+      setApplications((prev) =>
+        prev.map((app) => {
+          const curId = app?.id || app?.application_id || app?.profile_id;
+          if (curId === appId) {
+            return {
+              ...app,
+              status: "rejected",
+              rejection_reason: rejectionReason.trim(),
+              ...result,
+            };
+          }
+          return app;
+        })
+      );
+
+      if (selectedVolunteer && (selectedVolunteer.id || selectedVolunteer.profile_id) === appId) {
+        setSelectedVolunteer((prev: any) =>
+          prev ? { ...prev, status: "rejected", rejection_reason: rejectionReason.trim(), ...result } : null
+        );
+      }
+
+      fetchApplications();
+      notifyDataChanged();
+    } catch (err: any) {
+      const errorMsg =
+        typeof err?.response?.data?.detail === "string"
+          ? err.response.data.detail
+          : Array.isArray(err?.response?.data?.detail)
+          ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
+          : err?.response?.data?.message || err?.message || "Failed to reject application.";
+      addToast(`[HTTP ${err?.response?.status || 500}] ${errorMsg}`, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Join or Assign Active Volunteer to Shift
   const handleJoinShift = async (shiftId: string, volunteerId?: string) => {
     try {
-      const targetVolId = volunteerId || volunteers.find((v) => ["onboarded", "active"].includes(String(v.status || "").toLowerCase()))?.id;
+      const activeVols = applications.filter((v) =>
+        ["active", "approved", "onboarded"].includes(String(v.status || "").toLowerCase())
+      );
+      const targetVolId = volunteerId || activeVols[0]?.id || activeVols[0]?.profile_id;
+
       if (!targetVolId) {
-        addToast("No active or onboarded volunteers available to assign.", "error");
+        addToast("No active or approved volunteers available to assign to shift.", "error");
         return;
       }
       await volunteerService.joinShift(shiftId, targetVolId);
@@ -220,10 +395,11 @@ const VolunteerManagement = () => {
       fetchShifts();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to join shift.", "error");
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to assign volunteer to shift.", "error");
     }
   };
 
+  // Shift Attendance Roster
   const handleOpenAttendance = async (shift: any) => {
     setSelectedShift(shift);
     setIsAttendanceModalOpen(true);
@@ -239,10 +415,11 @@ const VolunteerManagement = () => {
     }
   };
 
+  // Attendance Check-In
   const handleCheckIn = async (attendanceId: string) => {
     try {
       await volunteerService.checkInAttendance(attendanceId);
-      addToast("Volunteer checked in successfully!", "success");
+      addToast("Volunteer checked in to duty!", "success");
       if (selectedShift?.id) void handleOpenAttendance(selectedShift);
       notifyDataChanged();
     } catch (err: any) {
@@ -250,10 +427,11 @@ const VolunteerManagement = () => {
     }
   };
 
+  // Attendance Check-Out
   const handleCheckOut = async (attendanceId: string) => {
     try {
-      await volunteerService.checkOutAttendance(attendanceId, "Shift completed");
-      addToast("Volunteer checked out successfully!", "success");
+      await volunteerService.checkOutAttendance(attendanceId, "Duty shift completed");
+      addToast("Volunteer checked out & hours logged!", "success");
       if (selectedShift?.id) void handleOpenAttendance(selectedShift);
       notifyDataChanged();
     } catch (err: any) {
@@ -261,13 +439,32 @@ const VolunteerManagement = () => {
     }
   };
 
+  // Service Summary View
+  const handleOpenServiceSummary = async (profileId: string) => {
+    if (!profileId) {
+      addToast("Invalid volunteer profile ID.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const res = await volunteerService.getServiceSummary(profileId);
+      setServiceSummaryData(res?.data || res || {});
+      setIsSummaryModalOpen(true);
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to load volunteer service summary.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Issue Verified Service Certificate
   const handleIssueCertificate = async (profileId: string) => {
     if (!profileId) {
       addToast("Invalid volunteer profile ID.", "error");
       return;
     }
     try {
-      addToast("Generating verified service certificate...", "info");
+      addToast("Generating verified volunteer service certificate...", "info");
       const cert = await volunteerService.getCertificate(profileId);
 
       const certUrl =
@@ -292,7 +489,7 @@ const VolunteerManagement = () => {
         const blob = new Blob([Uint8Array.from(atob(base64Pdf), (c) => c.charCodeAt(0))], { type: "application/pdf" });
         const blobUrl = URL.createObjectURL(blob);
         window.open(blobUrl, "_blank");
-        addToast("Service Certificate generated successfully!", "success");
+        addToast("Service Certificate generated & opened!", "success");
         return;
       }
 
@@ -300,7 +497,7 @@ const VolunteerManagement = () => {
         const blob = new Blob([htmlContent], { type: "text/html" });
         const blobUrl = URL.createObjectURL(blob);
         window.open(blobUrl, "_blank");
-        addToast("Service Certificate generated & opened.", "success");
+        addToast("Service Certificate opened successfully.", "success");
         return;
       }
 
@@ -316,7 +513,7 @@ const VolunteerManagement = () => {
         return;
       }
 
-      addToast("Service Certificate generated successfully!", "success");
+      addToast("Volunteer Service Certificate generated!", "success");
     } catch (err: any) {
       const errorMsg =
         typeof err?.response?.data?.detail === "string"
@@ -324,144 +521,436 @@ const VolunteerManagement = () => {
           : Array.isArray(err?.response?.data?.detail)
           ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
           : err?.response?.data?.message || err?.message || "Failed to issue certificate.";
-
       addToast(errorMsg, "error");
     }
   };
 
-  // Filtered Volunteers
-  const filteredVolunteers = volunteers.filter((v) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    const name = String(v.user?.full_name || v.emergency_contact_name || "").toLowerCase();
-    const email = String(v.user?.email || v.email || "").toLowerCase();
-    const skills = String(v.skills || "").toLowerCase();
-    return name.includes(q) || email.includes(q) || skills.includes(q);
+  // Helper status check
+  const isPendingStatus = (st?: string) => {
+    const s = String(st || "").toLowerCase().trim();
+    return s === "submitted" || s === "pending" || s === "applied";
+  };
+
+  const isApprovedStatus = (st?: string) => {
+    const s = String(st || "").toLowerCase().trim();
+    return s === "approved" || s === "active" || s === "onboarded";
+  };
+
+  const isRejectedStatus = (st?: string) => {
+    const s = String(st || "").toLowerCase().trim();
+    return s === "rejected";
+  };
+
+  // Filtered Roster & Applications
+  const filteredApplications = applications.filter((app) => {
+    if (activeTab === "active" && !isApprovedStatus(app.status)) return false;
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const name = String(app.full_name || app.applicant_name || app.user?.full_name || app.emergency_contact_name || "").toLowerCase();
+      const email = String(app.email || app.user?.email || "").toLowerCase();
+      const role = String(app.preferred_role || app.applied_role || app.role_name || "").toLowerCase();
+      const skills = String(app.skills || "").toLowerCase();
+      const appId = String(app.id || app.application_id || app.profile_id || "").toLowerCase();
+      if (!name.includes(q) && !email.includes(q) && !role.includes(q) && !skills.includes(q) && !appId.includes(q)) {
+        return false;
+      }
+    }
+    return true;
   });
 
-  const activeCount = volunteers.filter((v) => v.status === "active").length;
-  const onboardedCount = volunteers.filter((v) => v.status === "onboarded").length;
-  const appliedCount = volunteers.filter((v) => v.status === "applied").length;
+  const pendingApps = applications.filter((a) => isPendingStatus(a.status));
+  const activeVolunteersList = applications.filter((a) => isApprovedStatus(a.status));
 
+  // Dashboard Stats (No fake data - derived directly from backend responses)
   const stats = [
-    { title: "Total Registered Volunteers", value: String(volunteers.length), trend: "Verified Roster", color: "#2563EB", icon: <FaUserFriends /> },
-    { title: "Active Volunteers", value: String(activeCount), trend: "Available for Shifts", color: "#10B981", icon: <FaUserCheck /> },
-    { title: "Onboarded / Applied", value: `${onboardedCount} / ${appliedCount}`, trend: "Pipeline", color: "#F59E0B", icon: <FaClock /> },
-    { title: "Scheduled Shifts", value: String(shifts.length), trend: "Shelter Operations", color: "#6366F1", icon: <FaClipboardList /> },
+    {
+      title: "Total Applications",
+      value: String(applications.length),
+      trend: "Received Roster",
+      color: "#2563EB",
+      icon: <FaFileAlt />,
+    },
+    {
+      title: "Pending Review",
+      value: String(pendingApps.length),
+      trend: pendingApps.length > 0 ? "Action Required" : "All Clear",
+      color: pendingApps.length > 0 ? "#DC2626" : "#10B981",
+      icon: <FaExclamationCircle />,
+    },
+    {
+      title: "Active Volunteers",
+      value: String(activeVolunteersList.length),
+      trend: "Duty Ready",
+      color: "#10B981",
+      icon: <FaUserCheck />,
+    },
+    {
+      title: "Scheduled Shifts",
+      value: String(shifts.length),
+      trend: "Shelter Operations",
+      color: "#6366F1",
+      icon: <FaClipboardList />,
+    },
   ];
 
-  const volColumns = [
+  // Applications Table Columns
+  const appColumns = [
     {
-      key: "name",
-      title: "Volunteer Name / Email",
+      key: "applicant_info",
+      title: "Applicant Name & Contact",
+      render: (_: string, row: any) => {
+        const name = row.full_name || row.applicant_name || row.user?.full_name || row.emergency_contact_name || "Applicant Profile";
+        const email = row.email || row.user?.email || "N/A";
+        const phone = row.phone || row.emergency_contact_phone || row.user?.phone || "N/A";
+        const appId = row.id || row.application_id || row.profile_id;
+        const isPending = isPendingStatus(row.status);
+
+        return (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <strong style={{ color: "#0F172A", fontSize: "14px" }}>{name}</strong>
+              {isPending && (
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    background: "#FEF2F2",
+                    color: "#DC2626",
+                    border: "1px solid #FCA5A5",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Action Required
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: "12px", color: "#64748B", display: "flex", gap: "10px", marginTop: "3px" }}>
+              <span><FaEnvelope size={10} style={{ marginRight: "3px" }} />{email}</span>
+              <span><FaPhoneAlt size={10} style={{ marginRight: "3px" }} />{phone}</span>
+            </div>
+            <div style={{ fontSize: "11px", color: "#94A3B8", marginTop: "2px" }}>
+              ID: <code style={{ fontSize: "11px" }}>{String(appId).slice(0, 8)}</code>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "preferred_role",
+      title: "Role & Skills",
       render: (_: string, row: any) => (
         <div>
-          <div style={{ fontWeight: 700, color: "#0F172A" }}>
-            {row.user?.full_name || row.emergency_contact_name || "Volunteer Profile"}
+          <div style={{ fontWeight: 700, color: "#2563EB" }}>
+            {row.preferred_role || row.applied_role || row.role_name || "General Volunteer"}
           </div>
-          <div style={{ fontSize: "12px", color: "#64748B" }}>
-            {row.user?.email || `ID: ${String(row.id).slice(0, 8)}`}
+          <div style={{ fontSize: "12px", color: "#334155" }}>
+            <strong>Skills:</strong> {row.skills || "Not specified"}
           </div>
-        </div>
-      ),
-    },
-    {
-      key: "emergency_contact_phone",
-      title: "Contact Info",
-      render: (v: string, row: any) => (
-        <div>
-          <div style={{ fontWeight: 600, color: "#334155" }}>{v || row.user?.phone || "-"}</div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>Contact: {row.emergency_contact_name || "-"}</div>
-        </div>
-      ),
-    },
-    {
-      key: "skills",
-      title: "Skills & Experience",
-      render: (v: string, row: any) => (
-        <div>
-          <div style={{ fontWeight: 600, color: "#2563EB" }}>{v || "General Volunteer"}</div>
           {row.animal_handling_experience && (
-            <div style={{ fontSize: "11px", color: "#64748B" }}>{row.animal_handling_experience}</div>
+            <div style={{ fontSize: "11px", color: "#64748B", marginTop: "2px" }}>
+              Exp: {row.animal_handling_experience}
+            </div>
           )}
         </div>
       ),
     },
     {
+      key: "availability",
+      title: "Availability & Emergency",
+      render: (_: string, row: any) => (
+        <div>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "#0F172A" }}>
+            {row.availability || "Flexible"}
+          </div>
+          <div style={{ fontSize: "11px", color: "#64748B", marginTop: "2px" }}>
+            Emergency: {row.emergency_contact_name || "N/A"} ({row.emergency_contact_phone || "N/A"})
+          </div>
+        </div>
+      ),
+    },
+    {
       key: "status",
-      title: "Status",
-      render: (v: string) => {
-        const s = String(v || "applied").toLowerCase();
-        const color = s === "active" ? "#047857" : s === "onboarded" ? "#1D4ED8" : s === "applied" ? "#D97706" : "#DC2626";
-        const bg = s === "active" ? "#D1FAE5" : s === "onboarded" ? "#EFF6FF" : s === "applied" ? "#FEF3C7" : "#FEE2E2";
+      title: "Current Status",
+      render: (v: string, row: any) => {
+        const isPending = isPendingStatus(v);
+        const isApproved = isApprovedStatus(v);
+        const isRejected = isRejectedStatus(v);
+
+        let bg = "#F1F5F9";
+        let color = "#475569";
+        let label = String(v || "PENDING").toUpperCase();
+
+        if (isApproved) {
+          bg = "#D1FAE5";
+          color = "#047857";
+          label = "APPROVED / ACTIVE";
+        } else if (isPending) {
+          bg = "#FEF3C7";
+          color = "#B45309";
+          label = "PENDING REVIEW";
+        } else if (isRejected) {
+          bg = "#FEE2E2";
+          color = "#B91C1C";
+          label = "REJECTED";
+        }
+
         return (
-          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
-            {s}
-          </span>
+          <div>
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 800,
+                padding: "4px 8px",
+                borderRadius: "999px",
+                background: bg,
+                color,
+                display: "inline-block",
+              }}
+            >
+              {label}
+            </span>
+            {isRejected && (row.rejection_reason || row.reason) && (
+              <div style={{ fontSize: "11px", color: "#991B1B", marginTop: "4px", fontStyle: "italic" }}>
+                Reason: {row.rejection_reason || row.reason}
+              </div>
+            )}
+          </div>
         );
       },
     },
     {
       key: "created_at",
-      title: "Joined Date",
-      render: (v: string) => formatDateTime(v),
+      title: "Submitted Date",
+      render: (v: string, row: any) => formatDateTime(v || row.submitted_at || row.applied_at || row.date),
     },
     {
       key: "actions",
-      title: "Actions & Approval",
+      title: "Admin Decision Actions",
       render: (_: string, row: any) => {
-        const status = String(row.status || "applied").toLowerCase();
+        const isPending = isPendingStatus(row.status);
+        const isApproved = isApprovedStatus(row.status);
+        const isRejected = isRejectedStatus(row.status);
+
         return (
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
             <button
               onClick={() => {
                 setSelectedVolunteer(row);
                 setIsProfileModalOpen(true);
               }}
-              style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#2563EB", fontSize: "11px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
+              style={{
+                padding: "5px 10px",
+                borderRadius: "6px",
+                border: "1px solid #CBD5E1",
+                background: "#F8FAFC",
+                color: "#2563EB",
+                fontSize: "11px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
             >
-              <FaEye /> Profile
+              <FaEye /> View Details
             </button>
 
-            {status === "applied" && (
+            {/* Approve Action: POST /api/v1/volunteers/applications/{id}/approve */}
+            {isPending && (
               <button
-                onClick={() => void handleUpdateStatus(row.id, "onboarded")}
-                style={{ padding: "4px 8px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
+                onClick={() => void handleApproveApplication(row)}
+                disabled={isSubmitting}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#10B981",
+                  color: "#FFF",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
               >
-                <FaUserCheck /> Onboard
+                <FaCheckCircle /> Approve
               </button>
             )}
 
-            {status === "onboarded" && (
+            {/* Reject Action: POST /api/v1/volunteers/applications/{id}/reject */}
+            {isPending && (
               <button
-                onClick={() => void handleUpdateStatus(row.id, "active")}
-                style={{ padding: "4px 8px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
+                onClick={() => handleOpenRejectModal(row)}
+                disabled={isSubmitting}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#EF4444",
+                  color: "#FFF",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
               >
-                <FaUserCheck /> Activate
+                <FaBan /> Reject
               </button>
             )}
 
-            {status === "active" && (
+            {isApproved && (
               <button
-                onClick={() => void handleUpdateStatus(row.id, "inactive")}
-                style={{ padding: "4px 8px", borderRadius: "6px", border: "none", background: "#F59E0B", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
+                onClick={() => void handleIssueCertificate(row.id || row.profile_id)}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFF",
+                  color: "#6366F1",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
               >
-                <FaUserTimes /> Deactivate
+                <FaAward /> Certificate
               </button>
             )}
 
-            <button
-              onClick={() => void handleIssueCertificate(row.id)}
-              style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#6366F1", fontSize: "11px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
-            >
-              <FaAward /> Certificate
-            </button>
+            {isRejected && (
+              <span style={{ fontSize: "11px", color: "#94A3B8", fontStyle: "italic" }}>Decision Finalized</span>
+            )}
           </div>
         );
       },
     },
   ];
 
+  // Active Volunteers Roster Columns
+  const activeVolColumns = [
+    {
+      key: "volunteer_name",
+      title: "Volunteer Name & Contact",
+      render: (_: string, row: any) => {
+        const name = row.full_name || row.applicant_name || row.user?.full_name || row.emergency_contact_name || "Active Volunteer";
+        const email = row.email || row.user?.email || "N/A";
+        const phone = row.phone || row.emergency_contact_phone || row.user?.phone || "N/A";
+
+        return (
+          <div>
+            <div style={{ fontWeight: 700, color: "#0F172A", fontSize: "14px" }}>{name}</div>
+            <div style={{ fontSize: "12px", color: "#64748B" }}>
+              {email} &bull; {phone}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "role",
+      title: "Assigned Role & Skills",
+      render: (_: string, row: any) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#16A34A" }}>
+            {row.preferred_role || row.applied_role || row.role_name || "General Volunteer"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#64748B" }}>{row.skills || "General Support"}</div>
+        </div>
+      ),
+    },
+    {
+      key: "hours_and_shifts",
+      title: "Verified Hours & Shifts",
+      render: (_: string, row: any) => {
+        const hours = row.volunteer_hours || row.hours_served || row.total_hours || 0;
+        const shiftsCount = row.completed_shifts || row.shifts_completed || 0;
+
+        return (
+          <div>
+            <div style={{ fontWeight: 700, color: "#2563EB", fontSize: "13px" }}>
+              {hours} Hours Served
+            </div>
+            <div style={{ fontSize: "11px", color: "#64748B" }}>
+              {shiftsCount} Completed Shifts
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "emergency_contact",
+      title: "Emergency Contact",
+      render: (_: string, row: any) => (
+        <div>
+          <div style={{ fontWeight: 600, color: "#334155", fontSize: "12px" }}>
+            {row.emergency_contact_name || "N/A"}
+          </div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>{row.emergency_contact_phone || "N/A"}</div>
+        </div>
+      ),
+    },
+    {
+      key: "recent_activity",
+      title: "Recent Activity",
+      render: (_: string, row: any) =>
+        formatDateTime(row.last_active_at || row.updated_at || row.created_at || row.date),
+    },
+    {
+      key: "actions",
+      title: "Actions & Certificate",
+      render: (_: string, row: any) => (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button
+            onClick={() => void handleOpenServiceSummary(row.id || row.profile_id)}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              background: "#F8FAFC",
+              color: "#2563EB",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <FaHistory /> Summary
+          </button>
+
+          <button
+            onClick={() => void handleIssueCertificate(row.id || row.profile_id)}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              background: "#FFF",
+              color: "#6366F1",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <FaAward /> Certificate
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  // Shift Columns
   const shiftColumns = [
     {
       key: "role_name",
@@ -469,7 +958,9 @@ const VolunteerManagement = () => {
       render: (v: string, row: any) => (
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || row.title || "Shelter Assistance"}</div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>Facility ID: {row.shelter_facility_id ? String(row.shelter_facility_id).slice(0, 8) : "Central Shelter"}</div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>
+            Facility: {row.shelter_facility_id ? String(row.shelter_facility_id).slice(0, 8) : "Central Shelter"}
+          </div>
         </div>
       ),
     },
@@ -485,7 +976,7 @@ const VolunteerManagement = () => {
     },
     {
       key: "capacity",
-      title: "Capacity",
+      title: "Capacity Limit",
       render: (v: number) => <strong style={{ color: "#2563EB" }}>{v ?? 5} Volunteers</strong>,
     },
     {
@@ -495,15 +986,36 @@ const VolunteerManagement = () => {
         <div style={{ display: "flex", gap: "6px" }}>
           <button
             onClick={() => void handleJoinShift(row.id)}
-            style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "none",
+              background: "#10B981",
+              color: "#FFF",
+              fontSize: "11px",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
           >
-            Assign / Join
+            Assign Volunteer
           </button>
           <button
             onClick={() => void handleOpenAttendance(row)}
-            style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#2563EB", fontSize: "11px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              background: "#F8FAFC",
+              color: "#2563EB",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
           >
-            <FaClock /> Attendance
+            <FaClock /> Attendance Check-In
           </button>
         </div>
       ),
@@ -513,14 +1025,22 @@ const VolunteerManagement = () => {
   return (
     <div style={{ padding: "16px", maxWidth: "1400px", margin: "0 auto", boxSizing: "border-box" }}>
       {/* Banner */}
-      <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Volunteer Management &amp; Shift Scheduling</h1>
+      <div
+        style={{
+          marginBottom: "24px",
+          background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+          padding: "24px",
+          borderRadius: "16px",
+          color: "#fff",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Volunteer Lifecycle &amp; Roster Management</h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Authoritative backend volunteer roster, onboarding pipeline, shift scheduling, capacity management, and attendance check-in.
+          Admin review, approval/rejection workflows, active volunteer management, shift scheduling, and verified attendance tracking.
         </p>
       </div>
 
-      {/* Quick Action Cards */}
+      {/* Quick Action Buttons */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <Can permission="create_volunteers">
           <button
@@ -542,11 +1062,12 @@ const VolunteerManagement = () => {
           >
             <FaPlus size={18} color="#2563EB" />
             <div>
-              <div>Register New Volunteer</div>
-              <div style={{ fontSize: "12px", fontWeight: 500, color: "#3B82F6" }}>Create profile &amp; application</div>
+              <div>Submit New Application</div>
+              <div style={{ fontSize: "12px", fontWeight: 500, color: "#3B82F6" }}>Register applicant profile</div>
             </div>
           </button>
         </Can>
+
         <Can permission="create_volunteers">
           <button
             onClick={() => setIsShiftModalOpen(true)}
@@ -574,17 +1095,17 @@ const VolunteerManagement = () => {
         </Can>
       </div>
 
-      {/* Stats */}
+      {/* Real Summary Stats Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         {stats.map((s) => (
           <StatCard key={s.title} {...s} />
         ))}
       </div>
 
-      {/* Tabs */}
+      {/* Main Feature Navigation Tabs */}
       <div style={{ display: "flex", gap: "8px", borderBottom: "2px solid #E2E8F0", marginBottom: "20px" }}>
         <button
-          onClick={() => setActiveTab("directory")}
+          onClick={() => setActiveTab("applications")}
           style={{
             padding: "10px 22px",
             borderRadius: "10px 10px 0 0",
@@ -592,13 +1113,37 @@ const VolunteerManagement = () => {
             cursor: "pointer",
             fontSize: "14px",
             fontWeight: 700,
-            background: activeTab === "directory" ? "#0F172A" : "transparent",
-            color: activeTab === "directory" ? "#FFFFFF" : "#64748B",
+            background: activeTab === "applications" ? "#0F172A" : "transparent",
+            color: activeTab === "applications" ? "#FFFFFF" : "#64748B",
             transition: "all 0.15s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
         >
-          Volunteers Roster &amp; Pipeline
+          <FaFileAlt /> Volunteer Applications {pendingApps.length > 0 && <span style={{ background: "#EF4444", color: "#FFF", fontSize: "11px", borderRadius: "999px", padding: "1px 6px" }}>{pendingApps.length}</span>}
         </button>
+
+        <button
+          onClick={() => setActiveTab("active")}
+          style={{
+            padding: "10px 22px",
+            borderRadius: "10px 10px 0 0",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: 700,
+            background: activeTab === "active" ? "#0F172A" : "transparent",
+            color: activeTab === "active" ? "#FFFFFF" : "#64748B",
+            transition: "all 0.15s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          <FaUserCheck /> Active Volunteers ({activeVolunteersList.length})
+        </button>
+
         <button
           onClick={() => setActiveTab("shifts")}
           style={{
@@ -611,18 +1156,27 @@ const VolunteerManagement = () => {
             background: activeTab === "shifts" ? "#0F172A" : "transparent",
             color: activeTab === "shifts" ? "#FFFFFF" : "#64748B",
             transition: "all 0.15s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
         >
-          Shift Scheduling &amp; Capacity
+          <FaClipboardList /> Shift Scheduling &amp; Attendance
         </button>
       </div>
 
-      {activeTab === "directory" ? (
+      {/* APPLICATIONS TAB */}
+      {activeTab === "applications" && (
         <div className="soft-card" style={{ padding: "20px", overflowX: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", gap: "12px", flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Volunteer Profiles Directory
-            </h3>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+                Submitted Volunteer Applications
+              </h3>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748B" }}>
+                Review submitted applications. Admin action required for pending submissions.
+              </p>
+            </div>
 
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -642,15 +1196,15 @@ const VolunteerManagement = () => {
                 <FaSearch style={{ position: "absolute", left: "10px", top: "11px", color: "#94A3B8" }} size={12} />
                 <input
                   type="text"
-                  placeholder="Search name, email, skills..."
+                  placeholder="Search applicant name, email, skills..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ padding: "8px 12px 8px 30px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "220px" }}
+                  style={{ padding: "8px 12px 8px 30px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "230px" }}
                 />
               </div>
 
               <button
-                onClick={() => void fetchVolunteers()}
+                onClick={() => void fetchApplications()}
                 disabled={volLoading}
                 style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F8FAFC", fontSize: "13px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
@@ -666,17 +1220,56 @@ const VolunteerManagement = () => {
           )}
 
           {volLoading ? (
-            <p style={{ color: "#64748B", padding: "20px 0" }}>Loading volunteer profiles from backend...</p>
+            <p style={{ color: "#64748B", padding: "20px 0" }}>Loading volunteer applications from backend...</p>
           ) : (
-            <DataTable columns={volColumns} data={filteredVolunteers} module="volunteers" />
+            <DataTable columns={appColumns} data={filteredApplications} module="volunteers" />
           )}
         </div>
-      ) : (
+      )}
+
+      {/* ACTIVE VOLUNTEERS TAB */}
+      {activeTab === "active" && (
+        <div className="soft-card" style={{ padding: "20px", overflowX: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", gap: "12px", flexWrap: "wrap" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+                Active Volunteer Roster
+              </h3>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748B" }}>
+                Approved volunteers available for shelter assignments, shift scheduling, and verified hours.
+              </p>
+            </div>
+
+            <button
+              onClick={() => void fetchApplications()}
+              disabled={volLoading}
+              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F8FAFC", fontSize: "13px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+            >
+              <FaSync style={{ animation: volLoading ? "spin 1s linear infinite" : "none" }} /> Refresh Active Roster
+            </button>
+          </div>
+
+          {volLoading ? (
+            <p style={{ color: "#64748B", padding: "20px 0" }}>Loading active volunteers roster...</p>
+          ) : (
+            <DataTable columns={activeVolColumns} data={activeVolunteersList} module="volunteers" />
+          )}
+        </div>
+      )}
+
+      {/* SHIFTS TAB */}
+      {activeTab === "shifts" && (
         <div className="soft-card" style={{ padding: "20px", overflowX: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Scheduled Shifts &amp; Capacity Control
-            </h3>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+                Scheduled Shifts &amp; Attendance Tracking
+              </h3>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748B" }}>
+                Manage shelter shifts, assign active volunteers, track attendance check-in &amp; check-out.
+              </p>
+            </div>
+
             <button
               onClick={() => void fetchShifts()}
               disabled={shiftLoading}
@@ -700,9 +1293,26 @@ const VolunteerManagement = () => {
         </div>
       )}
 
-      {/* Register Volunteer Profile Modal */}
-      <Modal isOpen={isApplyModalOpen} onClose={() => setIsApplyModalOpen(false)} title="Register Volunteer Profile / Application">
+      {/* Submit Application Modal */}
+      <Modal isOpen={isApplyModalOpen} onClose={() => setIsApplyModalOpen(false)} title="Register Volunteer Application">
         <form onSubmit={handleApplyVolunteer} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Full Name</label>
+              <input type="text" placeholder="e.g. John Doe" value={applyForm.full_name} onChange={(e) => setApplyForm({ ...applyForm, full_name: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Role</label>
+              <select value={applyForm.preferred_role} onChange={(e) => setApplyForm({ ...applyForm, preferred_role: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF" }}>
+                <option value="Foster Care">Foster Care</option>
+                <option value="Transport">Transport</option>
+                <option value="Events & Outreach">Events &amp; Outreach</option>
+                <option value="Shelter Support">Shelter Support</option>
+                <option value="Dog Walking & Socialization">Dog Walking &amp; Socialization</option>
+              </select>
+            </div>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Emergency Contact Name *</label>
@@ -716,7 +1326,7 @@ const VolunteerManagement = () => {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Skills / Specialty</label>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Skills &amp; Specialties</label>
               <input type="text" placeholder="e.g. Grooming, Dog Walking" value={applyForm.skills} onChange={(e) => setApplyForm({ ...applyForm, skills: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
             </div>
             <div>
@@ -731,8 +1341,8 @@ const VolunteerManagement = () => {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Medical Conditions / Notes</label>
-            <textarea rows={2} placeholder="Any allergies or notes" value={applyForm.notes} onChange={(e) => setApplyForm({ ...applyForm, notes: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", resize: "vertical" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Notes / Message</label>
+            <textarea rows={2} placeholder="Any notes or message" value={applyForm.notes} onChange={(e) => setApplyForm({ ...applyForm, notes: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", resize: "vertical" }} />
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
@@ -742,12 +1352,12 @@ const VolunteerManagement = () => {
         </form>
       </Modal>
 
-      {/* Create Volunteer Shift Modal */}
+      {/* Create Shift Modal */}
       <Modal isOpen={isShiftModalOpen} onClose={() => setIsShiftModalOpen(false)} title="Create Volunteer Shift Schedule">
         <form onSubmit={handleCreateShift} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Role / Activity Name *</label>
-            <input type="text" required placeholder="e.g. Dog Walking &amp; Socialization" value={shiftForm.role_name} onChange={(e) => setShiftForm({ ...shiftForm, role_name: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
+            <input type="text" required placeholder="e.g. Dog Walking & Socialization" value={shiftForm.role_name} onChange={(e) => setShiftForm({ ...shiftForm, role_name: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1" }} />
           </div>
 
           {facilities.length > 0 && (
@@ -785,47 +1395,168 @@ const VolunteerManagement = () => {
         </form>
       </Modal>
 
-      {/* Volunteer Profile Details Modal */}
-      <Modal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} title="Volunteer Full Profile Record">
+      {/* REJECT Application Modal (Requires Admin Reason) */}
+      <Modal isOpen={isRejectModalOpen} onClose={() => setIsRejectModalOpen(false)} title="Reject Volunteer Application">
+        <form onSubmit={handleConfirmReject} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ background: "#FEF2F2", padding: "14px", borderRadius: "10px", border: "1px solid #FCA5A5" }}>
+            <h3 style={{ margin: 0, fontSize: "15px", color: "#991B1B", fontWeight: 700 }}>
+              Confirm Rejection for {rejectTargetApp?.full_name || rejectTargetApp?.applicant_name || rejectTargetApp?.user?.full_name || "Applicant"}
+            </h3>
+            <p style={{ margin: "6px 0 0", fontSize: "13px", color: "#7F1D1D" }}>
+              Please provide an explicit rejection reason for backend record and public web status transparency.
+            </p>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+              Rejection Reason *
+            </label>
+            <textarea
+              required
+              rows={3}
+              placeholder="e.g. Position requirements not met / Insufficient availability for scheduled shelter shifts..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Rejecting..." : "Confirm Rejection"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Volunteer Application / Profile Details Modal */}
+      <Modal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} title="Volunteer Application Record">
         {selectedVolunteer && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ background: "#F8FAFC", padding: "14px", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
               <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
-                {selectedVolunteer.user?.full_name || selectedVolunteer.emergency_contact_name || "Volunteer Record"}
+                {selectedVolunteer.full_name || selectedVolunteer.applicant_name || selectedVolunteer.user?.full_name || selectedVolunteer.emergency_contact_name || "Applicant Record"}
               </h2>
               <div style={{ fontSize: "13px", color: "#64748B", marginTop: "2px" }}>
-                Email: {selectedVolunteer.user?.email || "N/A"} &bull; Status: <strong style={{ textTransform: "uppercase", color: "#2563EB" }}>{selectedVolunteer.status}</strong>
+                Email: {selectedVolunteer.email || selectedVolunteer.user?.email || "N/A"} &bull; Phone: {selectedVolunteer.phone || selectedVolunteer.emergency_contact_phone || "N/A"}
+              </div>
+              <div style={{ fontSize: "12px", marginTop: "6px" }}>
+                Status: <strong style={{ textTransform: "uppercase", color: isApprovedStatus(selectedVolunteer.status) ? "#10B981" : isRejectedStatus(selectedVolunteer.status) ? "#EF4444" : "#F59E0B" }}>{selectedVolunteer.status || "PENDING"}</strong>
               </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Application Details</div>
+                <div style={{ fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
+                  Role: {selectedVolunteer.preferred_role || selectedVolunteer.applied_role || selectedVolunteer.role_name || "General"}
+                </div>
+                <div style={{ color: "#64748B" }}>ID: {selectedVolunteer.id || selectedVolunteer.application_id || selectedVolunteer.profile_id}</div>
+                <div style={{ color: "#94A3B8", fontSize: "11px", marginTop: "2px" }}>
+                  Submitted: {formatDateTime(selectedVolunteer.created_at || selectedVolunteer.submitted_at || selectedVolunteer.applied_at)}
+                </div>
+              </div>
+
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Emergency Contact</div>
-                <div style={{ fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedVolunteer.emergency_contact_name}</div>
-                <div style={{ color: "#2563EB" }}>{selectedVolunteer.emergency_contact_phone}</div>
+                <div style={{ fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedVolunteer.emergency_contact_name || "N/A"}</div>
+                <div style={{ color: "#2563EB" }}>{selectedVolunteer.emergency_contact_phone || "N/A"}</div>
               </div>
 
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Skills &amp; Availability</div>
-                <div style={{ fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedVolunteer.skills || "-"}</div>
-                <div style={{ color: "#64748B" }}>{selectedVolunteer.availability || "-"}</div>
+                <div style={{ fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedVolunteer.skills || "Not specified"}</div>
+                <div style={{ color: "#64748B" }}>{selectedVolunteer.availability || "Flexible"}</div>
               </div>
 
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Animal Handling Experience</div>
                 <div style={{ fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{selectedVolunteer.animal_handling_experience || "None specified"}</div>
               </div>
+            </div>
+
+            {(selectedVolunteer.notes || selectedVolunteer.message) && (
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0", fontSize: "13px" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Notes / Message</div>
+                <div style={{ color: "#334155", marginTop: "4px" }}>{selectedVolunteer.notes || selectedVolunteer.message}</div>
+              </div>
+            )}
+
+            {isRejectedStatus(selectedVolunteer.status) && (selectedVolunteer.rejection_reason || selectedVolunteer.reason) && (
+              <div style={{ background: "#FEF2F2", padding: "12px", borderRadius: "8px", border: "1px solid #FCA5A5", fontSize: "13px" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#991B1B", textTransform: "uppercase" }}>Rejection Reason</div>
+                <div style={{ color: "#7F1D1D", marginTop: "4px" }}>{selectedVolunteer.rejection_reason || selectedVolunteer.reason}</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                {isPendingStatus(selectedVolunteer.status) && (
+                  <button
+                    onClick={() => {
+                      setIsProfileModalOpen(false);
+                      void handleApproveApplication(selectedVolunteer);
+                    }}
+                    disabled={isSubmitting}
+                    style={{ padding: "8px 14px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <FaCheckCircle /> Approve Application
+                  </button>
+                )}
+
+                {isPendingStatus(selectedVolunteer.status) && (
+                  <button
+                    onClick={() => {
+                      setIsProfileModalOpen(false);
+                      handleOpenRejectModal(selectedVolunteer);
+                    }}
+                    disabled={isSubmitting}
+                    style={{ padding: "8px 14px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 700, fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <FaBan /> Reject Application
+                  </button>
+                )}
+              </div>
+              <button onClick={() => setIsProfileModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", fontWeight: 600 }}>Close</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Service Summary Modal */}
+      <Modal isOpen={isSummaryModalOpen} onClose={() => setIsSummaryModalOpen(false)} title="Volunteer Service Summary">
+        {serviceSummaryData && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ background: "#F8FAFC", padding: "14px", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#0F172A" }}>
+                Official Service Summary
+              </h3>
+              <div style={{ fontSize: "13px", color: "#64748B", marginTop: "2px" }}>
+                Total Verified Volunteer Hours: <strong style={{ color: "#2563EB" }}>{serviceSummaryData.total_hours || serviceSummaryData.hours_served || 0} Hours</strong>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Completed Shifts</div>
+                <div style={{ fontSize: "18px", fontWeight: 800, color: "#0F172A", marginTop: "2px" }}>
+                  {serviceSummaryData.completed_shifts || serviceSummaryData.shifts_completed || 0}
+                </div>
+              </div>
 
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Background Check</div>
-                <div style={{ fontWeight: 700, color: selectedVolunteer.background_check_completed ? "#047857" : "#D97706", marginTop: "2px" }}>
-                  {selectedVolunteer.background_check_completed ? "VERIFIED & PASSED" : "PENDING VERIFICATION"}
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Status</div>
+                <div style={{ fontSize: "14px", fontWeight: 800, color: "#10B981", marginTop: "2px", textTransform: "uppercase" }}>
+                  {serviceSummaryData.status || "ACTIVE"}
                 </div>
               </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={() => setIsProfileModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", fontWeight: 600 }}>Close</button>
+              <button onClick={() => setIsSummaryModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", fontWeight: 600 }}>Close</button>
             </div>
           </div>
         )}
@@ -843,10 +1574,10 @@ const VolunteerManagement = () => {
             </div>
 
             {attLoading ? (
-              <p style={{ color: "#64748B" }}>Fetching attendance roster...</p>
+              <p style={{ color: "#64748B" }}>Fetching attendance roster from backend...</p>
             ) : attendanceList.length === 0 ? (
               <div style={{ padding: "20px", textAlign: "center", background: "#F8FAFC", borderRadius: "8px", color: "#64748B" }}>
-                No volunteers currently enrolled for this shift.
+                No active volunteers currently enrolled for this shift.
               </div>
             ) : (
               <div style={{ maxHeight: "300px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
