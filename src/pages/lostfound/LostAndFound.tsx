@@ -353,7 +353,12 @@ const LostAndFound = () => {
         total = res.meta?.total ?? rows.length;
       }
       const dogOnly = rows.filter((r) => r.species === "dog");
-      setReports(dogOnly as RegistryReport[]);
+      const sortedDogOnly = [...dogOnly].sort((a, b) => {
+        const timeA = new Date(a.created_at || a.lost_at || a.found_at || 0).getTime();
+        const timeB = new Date(b.created_at || b.lost_at || b.found_at || 0).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+      setReports(sortedDogOnly as RegistryReport[]);
       setTotalCount(total);
     } catch (err) {
       setError(extractError(err, "Failed to load lost & found listings."));
