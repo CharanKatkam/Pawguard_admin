@@ -198,18 +198,29 @@ const VolunteerManagement = () => {
       fetchVolunteers();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to update profile status.", "error");
+      const errorMsg =
+        typeof err?.response?.data?.detail === "string"
+          ? err.response.data.detail
+          : Array.isArray(err?.response?.data?.detail)
+          ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
+          : err?.response?.data?.message || err?.message || "Failed to update profile status.";
+      addToast(errorMsg, "error");
     }
   };
 
-  const handleJoinShift = async (shiftId: string) => {
+  const handleJoinShift = async (shiftId: string, volunteerId?: string) => {
     try {
-      await volunteerService.joinShift(shiftId);
-      addToast("Volunteer joined/assigned to shift successfully!", "success");
+      const targetVolId = volunteerId || volunteers.find((v) => ["onboarded", "active"].includes(String(v.status || "").toLowerCase()))?.id;
+      if (!targetVolId) {
+        addToast("No active or onboarded volunteers available to assign.", "error");
+        return;
+      }
+      await volunteerService.joinShift(shiftId, targetVolId);
+      addToast("Volunteer assigned to shift successfully!", "success");
       fetchShifts();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to join shift.", "error");
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to join shift.", "error");
     }
   };
 
@@ -251,17 +262,70 @@ const VolunteerManagement = () => {
   };
 
   const handleIssueCertificate = async (profileId: string) => {
+    if (!profileId) {
+      addToast("Invalid volunteer profile ID.", "error");
+      return;
+    }
     try {
       addToast("Generating verified service certificate...", "info");
       const cert = await volunteerService.getCertificate(profileId);
-      if (cert?.certificate_url || cert?.download_url) {
-        window.open(cert.certificate_url || cert.download_url, "_blank");
-        addToast("Service Certificate opened.", "success");
-      } else {
-        addToast("Service Certificate generated successfully!", "success");
+
+      const certUrl =
+        cert?.certificate_url ||
+        cert?.download_url ||
+        cert?.url ||
+        cert?.pdf_url ||
+        cert?.data?.certificate_url ||
+        cert?.data?.download_url ||
+        cert?.data?.url;
+
+      if (certUrl) {
+        window.open(certUrl, "_blank");
+        addToast("Service Certificate opened in a new tab.", "success");
+        return;
       }
+
+      const htmlContent = cert?.certificate_html || cert?.html || cert?.content;
+      const base64Pdf = cert?.pdf_base64 || cert?.base64;
+
+      if (base64Pdf) {
+        const blob = new Blob([Uint8Array.from(atob(base64Pdf), (c) => c.charCodeAt(0))], { type: "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, "_blank");
+        addToast("Service Certificate generated successfully!", "success");
+        return;
+      }
+
+      if (htmlContent) {
+        const blob = new Blob([htmlContent], { type: "text/html" });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, "_blank");
+        addToast("Service Certificate generated & opened.", "success");
+        return;
+      }
+
+      if (cert instanceof Blob) {
+        const blobUrl = URL.createObjectURL(cert);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `volunteer_certificate_${String(profileId).slice(0, 8)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        addToast("Service Certificate downloaded successfully!", "success");
+        return;
+      }
+
+      addToast("Service Certificate generated successfully!", "success");
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to issue certificate.", "error");
+      const errorMsg =
+        typeof err?.response?.data?.detail === "string"
+          ? err.response.data.detail
+          : Array.isArray(err?.response?.data?.detail)
+          ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
+          : err?.response?.data?.message || err?.message || "Failed to issue certificate.";
+
+      addToast(errorMsg, "error");
     }
   };
 

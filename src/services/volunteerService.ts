@@ -3,8 +3,13 @@ import api from "../api/axios";
 export interface VolunteerApplicationPayload {
   emergency_contact_name: string;
   emergency_contact_phone: string;
-  skills?: string;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  preferred_role?: "Foster Care" | "Transport" | "Events & Outreach" | "Shelter Support" | string;
   availability?: string;
+  message?: string;
+  skills?: string;
   notes?: string;
   medical_conditions?: string;
   animal_handling_experience?: string;
@@ -15,8 +20,13 @@ export interface VolunteerProfileUpdatePayload {
   status?: "applied" | "onboarded" | "active" | "inactive";
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
-  skills?: string;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  preferred_role?: "Foster Care" | "Transport" | "Events & Outreach" | "Shelter Support" | string;
   availability?: string;
+  message?: string;
+  skills?: string;
   notes?: string;
   medical_conditions?: string;
   animal_handling_experience?: string;
@@ -95,9 +105,10 @@ export const volunteerService = {
     return response.data;
   },
 
-  // POST /volunteers/shifts/{shift_id}/join - Join shift
-  joinShift: async (shiftId: string) => {
-    const response = await api.post(`/volunteers/shifts/${shiftId}/join`);
+  // POST /volunteers/shifts/{shift_id}/join - Join or assign volunteer to shift
+  joinShift: async (shiftId: string, volunteerId?: string) => {
+    const payload = volunteerId ? { volunteer_id: volunteerId, volunteer_profile_id: volunteerId } : {};
+    const response = await api.post(`/volunteers/shifts/${shiftId}/join`, payload);
     return response.data;
   },
 
