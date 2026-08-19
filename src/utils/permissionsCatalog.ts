@@ -566,7 +566,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   ],
   volunteer_coordinator: [
     "view_dashboard",
-    ...perm("users", "view"),
     ...perm("volunteers", "view", "create", "edit", "approve", "export", "manage"),
     ...perm("reports", "view", "export"),
     ...perm("notifications", "view"),

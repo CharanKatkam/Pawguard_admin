@@ -536,7 +536,6 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "Volunteers Directory", path: "/volunteers", iconType: "volunteers" },
-        { name: "User Directory", path: "/users", iconType: "users" },
         { name: "Schedules & Reports", path: "/reports", iconType: "tasks" },
       ];
 

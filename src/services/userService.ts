@@ -208,6 +208,41 @@ export const userService = {
     const response = await api.get("/admin/permissions");
     return unwrap<unknown>(response.data);
   },
+
+  // Per-User Permission Overrides
+  // GET /api/v1/admin/users/{id}/permissions
+  getUserPermissions: async (userId: string) => {
+    const response = await api.get(`/admin/users/${userId}/permissions`);
+    return unwrap<unknown>(response.data);
+  },
+
+  // POST /api/v1/admin/users/{id}/permissions
+  grantUserPermission: async (userId: string, permissionCode: string) => {
+    const response = await api.post(`/admin/users/${userId}/permissions`, {
+      permission_code: permissionCode,
+    });
+    await publishActionEvent({
+      module: "user",
+      action: "update",
+      title: "User Permission Granted",
+      message: `Direct permission ${permissionCode} granted to user ${userId}.`,
+      targetRoles: ["super_admin"],
+    });
+    return unwrap<unknown>(response.data);
+  },
+
+  // DELETE /api/v1/admin/users/{id}/permissions/{code}
+  revokeUserPermission: async (userId: string, permissionCode: string) => {
+    const response = await api.delete(`/admin/users/${userId}/permissions/${permissionCode}`);
+    await publishActionEvent({
+      module: "user",
+      action: "update",
+      title: "User Permission Revoked",
+      message: `Direct permission ${permissionCode} revoked from user ${userId}.`,
+      targetRoles: ["super_admin"],
+    });
+    return unwrap<unknown>(response.data);
+  },
 };
 
 export default userService;

@@ -198,6 +198,63 @@ const RolesPermissions = () => {
   const [assignRole, setAssignRole] = useState("");
   const [revokeTarget, setRevokeTarget] = useState<RoleAssignment | null>(null);
 
+  // User Permission Overrides State
+  const [userPermModalOpen, setUserPermModalOpen] = useState(false);
+  const [userPermTarget, setUserPermTarget] = useState<RoleAssignment | null>(null);
+  const [userDirectPerms, setUserDirectPerms] = useState<string[]>([]);
+  const [userPermLoading, setUserPermLoading] = useState(false);
+  const [customPermCode, setCustomPermCode] = useState("");
+
+  const openUserPermModal = async (user: RoleAssignment) => {
+    setUserPermTarget(user);
+    setUserPermModalOpen(true);
+    setUserPermLoading(true);
+    try {
+      const res = await userService.getUserPermissions(user.id);
+      const codes = extractPermissionCodes(res);
+      setUserDirectPerms(codes);
+    } catch {
+      setUserDirectPerms([]);
+    } finally {
+      setUserPermLoading(false);
+    }
+  };
+
+  const handleGrantUserPerm = async (code: string) => {
+    if (!userPermTarget || !code.trim()) return;
+    try {
+      setIsSubmitting(true);
+      await userService.grantUserPermission(userPermTarget.id, code.trim());
+      addToast(`Granted permission "${code}" to ${userPermTarget.name}`, "success");
+      const res = await userService.getUserPermissions(userPermTarget.id);
+      setUserDirectPerms(extractPermissionCodes(res));
+      setCustomPermCode("");
+      notifyPermissionsChanged();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      addToast(getErrorMsg(err, "Failed to grant user permission."), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRevokeUserPerm = async (code: string) => {
+    if (!userPermTarget || !code) return;
+    try {
+      setIsSubmitting(true);
+      await userService.revokeUserPermission(userPermTarget.id, code);
+      addToast(`Revoked permission "${code}" from ${userPermTarget.name}`, "success");
+      const res = await userService.getUserPermissions(userPermTarget.id);
+      setUserDirectPerms(extractPermissionCodes(res));
+      notifyPermissionsChanged();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      addToast(getErrorMsg(err, "Failed to revoke user permission."), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchRolesAndPermissions = useCallback(async () => {
@@ -945,7 +1002,14 @@ const RolesPermissions = () => {
                             style={actionButtonStyle("#6D28D9", "#F5F3FF")}
                             title="Edit this role's permission matrix"
                           >
-                            <FaKey /> Permissions
+                            <FaKey /> Role Policy
+                          </button>
+                          <button
+                            onClick={() => openUserPermModal(u)}
+                            style={actionButtonStyle("#0284C7", "#E0F2FE")}
+                            title="Direct User Permission Overrides"
+                          >
+                            <FaKey /> User Overrides
                           </button>
                           {u.is_active ? (
                             <button
@@ -1342,6 +1406,77 @@ const RolesPermissions = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Direct User Permission Overrides Modal */}
+      <Modal
+        isOpen={userPermModalOpen}
+        onClose={() => setUserPermModalOpen(false)}
+        title={`Direct User Permission Overrides — ${userPermTarget?.name || "Staff Member"}`}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ margin: 0, color: "#64748B", fontSize: "13px" }}>
+            Grant or revoke specific permission overrides directly for <strong>{userPermTarget?.name}</strong> (`{userPermTarget?.email}`), overriding default role policy (`{roleTitle(userPermTarget?.role || "")}`).
+          </p>
+
+          <div style={{ background: "#F8FAFC", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0", display: "flex", gap: "8px", alignItems: "center" }}>
+            <input
+              type="text"
+              placeholder="Permission code (e.g. inventory:create, foster:update)"
+              value={customPermCode}
+              onChange={(e) => setCustomPermCode(e.target.value)}
+              style={{ flex: 1, padding: "8px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12.5px" }}
+            />
+            <button
+              onClick={() => handleGrantUserPerm(customPermCode)}
+              disabled={isSubmitting || !customPermCode.trim()}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+            >
+              Grant
+            </button>
+          </div>
+
+          <div>
+            <h4 style={{ margin: "0 0 8px", color: "#0F172A", fontSize: "13.5px", fontWeight: 700 }}>
+              Active Direct Overrides ({userDirectPerms.length})
+            </h4>
+
+            {userPermLoading ? (
+              <div style={{ padding: "16px", textAlign: "center", color: "#2563EB" }}>Loading permissions...</div>
+            ) : userDirectPerms.length === 0 ? (
+              <div style={{ padding: "16px", textAlign: "center", color: "#64748B", background: "#F8FAFC", borderRadius: "6px", border: "1px solid #E2E8F0", fontSize: "12.5px" }}>
+                No direct user permission overrides granted. User operates strictly under assigned role defaults.
+              </div>
+            ) : (
+              <div style={{ maxHeight: "200px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+                {userDirectPerms.map((code) => (
+                  <div key={code} style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #E2E8F0", background: "#FFF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#0F172A", fontFamily: "monospace", fontSize: "12px" }}>{code}</div>
+                      <div style={{ fontSize: "11px", color: "#64748B" }}>{describePermission(code)}</div>
+                    </div>
+                    <button
+                      onClick={() => handleRevokeUserPerm(code)}
+                      disabled={isSubmitting}
+                      style={{ padding: "4px 8px", borderRadius: "4px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              onClick={() => setUserPermModalOpen(false)}
+              style={cancelButtonStyle}
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

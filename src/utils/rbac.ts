@@ -5,6 +5,7 @@ import {
   PERMISSION_ACTIONS,
   parsePermissionKey,
   permissionKey,
+  normalizePermissionCode,
 } from "./permissionsCatalog";
 
 /** Custom event broadcast whenever a role's permission set changes. */
@@ -212,11 +213,18 @@ export const hasPermission = (permission: string, role?: UserRole): boolean => {
   const currentRole = role || getCurrentUserRole();
   if (!currentRole) return false;
 
-  // Super Admin has unrestricted access to all permissions
-  if (currentRole === "super_admin") return true;
+  // super_admin and system:admin have unrestricted full access to all permissions
+  const roleStr = String(currentRole).toLowerCase();
+  if (roleStr === "super_admin" || roleStr === "system:admin" || roleStr.includes("super_admin") || roleStr.includes("system_admin")) {
+    return true;
+  }
 
   const permissions = getPermissionsForRole(currentRole);
-  return permissions.includes(permission);
+  if (permissions.includes(permission)) return true;
+
+  // Also check normalized colon/matrix format
+  const norm = normalizePermissionCode(permission);
+  return norm ? permissions.includes(norm) : false;
 };
 
 /**
