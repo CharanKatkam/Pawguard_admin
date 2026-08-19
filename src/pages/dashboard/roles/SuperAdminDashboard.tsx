@@ -358,6 +358,7 @@ const SuperAdminDashboard = () => {
             adoptions={adoptions}
             rescues={rescues}
             finance={finance}
+            donations={donations}
             inventory={inventory}
             medical={medical}
             shelters={shelters}
