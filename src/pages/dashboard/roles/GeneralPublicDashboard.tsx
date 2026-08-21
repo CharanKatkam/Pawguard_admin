@@ -5,11 +5,13 @@ import DataTable from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaPaw, FaAmbulance, FaHeart, FaHome } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
+import petService from "../../../services/petService";
 import { useDataSync } from "../../../utils/dataSync";
 
 const GeneralPublicDashboard = () => {
   const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<any>(null);
+  const [adoptableDogs, setAdoptableDogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,14 +19,24 @@ const GeneralPublicDashboard = () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await dashboardService.getStaffDashboard();
-      const data = res?.data || res || {};
-      setDashboardData(data);
+      const [pubRes, petRes] = await Promise.allSettled([
+        dashboardService.getPublicDashboard(),
+        petService.getPets({ is_adoptable: true }),
+      ]);
+
+      const pubData = pubRes.status === "fulfilled" ? (pubRes.value?.data || pubRes.value || {}) : {};
+      const petList = petRes.status === "fulfilled"
+        ? (Array.isArray(petRes.value?.data) ? petRes.value.data : Array.isArray(petRes.value) ? petRes.value : [])
+        : [];
+
+      setDashboardData(pubData);
+      setAdoptableDogs(petList);
     } catch (err: any) {
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
-        "Failed to load community portal data. Access may be restricted."
+        err?.message ||
+        "Failed to load community portal data."
       );
     } finally {
       setLoading(false);
@@ -37,18 +49,40 @@ const GeneralPublicDashboard = () => {
 
   useDataSync(fetchDashboard);
 
-  const dogsList = Array.isArray(dashboardData?.dogs)
+  const dogsList = adoptableDogs.length > 0
+    ? adoptableDogs
+    : Array.isArray(dashboardData?.dogs)
     ? dashboardData.dogs
     : Array.isArray(dashboardData?.pets)
     ? dashboardData.pets
-    : Array.isArray(dashboardData)
-    ? dashboardData
+    : Array.isArray(dashboardData?.items)
+    ? dashboardData.items
     : [];
 
+  const adoptableCount = Number(
+    dashboardData?.adoptable_dogs ??
+    dashboardData?.adoptableDogs ??
+    dogsList.length
+  );
+
+  const rescueFacilitiesCount = Number(
+    dashboardData?.rescue_facilities ??
+    dashboardData?.rescueFacilities ??
+    dashboardData?.facilities_count ??
+    0
+  );
+
+  const totalRescuedCount = Number(
+    dashboardData?.total_rescued ??
+    dashboardData?.totalRescued ??
+    dashboardData?.rescued_count ??
+    0
+  );
+
   const stats = [
-    { title: "Adoptable Dogs", value: loading ? "..." : String(dashboardData?.adoptable_dogs ?? dashboardData?.adoptableDogs ?? dogsList.length), trend: "Browsing Open", color: "#2563EB", icon: <FaPaw /> },
-    { title: "Rescue Facilities", value: loading ? "..." : String(dashboardData?.rescue_facilities ?? dashboardData?.rescueFacilities ?? "0"), trend: "Open Visitors", color: "#10B981", icon: <FaHome /> },
-    { title: "Total Rescued", value: loading ? "..." : String(dashboardData?.total_rescued ?? dashboardData?.totalRescued ?? "0"), trend: "Saved", color: "#F59E0B", icon: <FaHeart /> },
+    { title: "Adoptable Dogs", value: loading ? "..." : String(adoptableCount), trend: "Browsing Open", color: "#2563EB", icon: <FaPaw /> },
+    { title: "Rescue Facilities", value: loading ? "..." : String(rescueFacilitiesCount), trend: "Open Visitors", color: "#10B981", icon: <FaHome /> },
+    { title: "Total Rescued", value: loading ? "..." : String(totalRescuedCount), trend: "Saved", color: "#F59E0B", icon: <FaHeart /> },
   ];
 
   const columns = [
@@ -61,12 +95,12 @@ const GeneralPublicDashboard = () => {
   ];
 
   const formattedDogs = dogsList.map((dog: any) => ({
-    petId: dog.id ?? dog.pet_id ?? "",
-    name: dog.name ?? "",
-    breed: dog.breed ?? "",
-    age: dog.estimated_age ?? dog.age ?? "",
-    shelter: dog.shelter ?? dog.location ?? "",
-    status: dog.status ?? "",
+    petId: dog.registration_number || dog.id || "-",
+    name: dog.name || "Unnamed Dog",
+    breed: dog.breed || "Canine",
+    age: dog.estimated_age || (dog.age_months ? `${dog.age_months} months` : "-"),
+    shelter: dog.location_found || dog.shelter || dog.location || "Central Shelter",
+    status: dog.is_adoptable ? "Ready for Adoption" : (dog.status || "Rescued"),
   }));
 
   return (

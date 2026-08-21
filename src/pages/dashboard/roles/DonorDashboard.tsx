@@ -5,12 +5,26 @@ import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { useToast } from "../../../context/ToastContext";
 import reportsService from "../../../services/reportsService";
 import { FaHeart, FaCoins, FaFileInvoice, FaAward } from "react-icons/fa";
-import dashboardService from "../../../services/dashboardService";
+import donationsService from "../../../services/donationsService";
 import { useDataSync } from "../../../utils/dataSync";
+import { formatDateTime } from "../../../utils/dateUtils";
+
+const formatINR = (val: unknown): string => {
+  const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));
+  return `₹${(Number.isFinite(n) ? n : 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+};
+
+const getDonorTier = (totalAmount: number): string => {
+  if (totalAmount >= 50000) return "Gold Patron";
+  if (totalAmount >= 10000) return "Silver Patron";
+  if (totalAmount > 0) return "Bronze Patron";
+  return "Patron";
+};
 
 const DonorDashboard = () => {
   const { addToast } = useToast();
-  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [summaryData, setSummaryData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,14 +32,24 @@ const DonorDashboard = () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await dashboardService.getStaffDashboard();
-      const data = res?.data || res || {};
-      setDashboardData(data);
+      const [historyRes, summaryRes] = await Promise.allSettled([
+        donationsService.getDonationHistory(),
+        donationsService.getDonationSummary(),
+      ]);
+
+      const historyList = historyRes.status === "fulfilled"
+        ? (Array.isArray(historyRes.value) ? historyRes.value : (historyRes.value as any)?.data || [])
+        : [];
+      const summaryObj = summaryRes.status === "fulfilled" ? summaryRes.value : null;
+
+      setHistory(historyList);
+      setSummaryData(summaryObj);
     } catch (err: any) {
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
-        "Failed to load donor portal data. Access may be restricted."
+        err?.message ||
+        "Failed to load donor portal data."
       );
     } finally {
       setLoading(false);
@@ -38,40 +62,40 @@ const DonorDashboard = () => {
 
   useDataSync(fetchDashboard);
 
-  const donationsList = Array.isArray(dashboardData?.donations)
-    ? dashboardData.donations
-    : Array.isArray(dashboardData?.history)
-    ? dashboardData.history
-    : Array.isArray(dashboardData)
-    ? dashboardData
-    : [];
+  const totalContributions = Number(
+    summaryData?.total_donations_amount ??
+    summaryData?.totalContributions ??
+    history.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  );
 
-  const formatCurrency = (val: any, fallback: string) => {
-    if (val === undefined || val === null) return fallback;
-    if (typeof val === "number") return `$${val.toLocaleString()}`;
-    return String(val);
-  };
+  const rescuesFunded = Number(
+    summaryData?.rescues_funded ??
+    summaryData?.rescuesFunded ??
+    history.length
+  );
+
+  const donorTier = summaryData?.donor_tier || getDonorTier(totalContributions);
 
   const stats = [
-    { title: "Total Contributions", value: loading ? "..." : formatCurrency(dashboardData?.total_contributions ?? dashboardData?.totalContributions, "$0"), trend: "Contributions", color: "#10B981", icon: <FaCoins /> },
-    { title: "Rescues Funded", value: loading ? "..." : String(dashboardData?.rescues_funded ?? dashboardData?.rescuesFunded ?? donationsList.length), trend: "Impact", color: "#2563EB", icon: <FaHeart /> },
-    { title: "Donor Tier", value: loading ? "..." : String(dashboardData?.donor_tier ?? dashboardData?.donorTier ?? "Patron"), trend: "Tier", color: "#F59E0B", icon: <FaAward /> },
+    { title: "Total Contributions", value: loading ? "..." : formatINR(totalContributions), trend: "Contributions", color: "#10B981", icon: <FaCoins /> },
+    { title: "Rescues Funded", value: loading ? "..." : String(rescuesFunded), trend: "Impact", color: "#2563EB", icon: <FaHeart /> },
+    { title: "Donor Tier", value: loading ? "..." : donorTier, trend: "Tier", color: "#F59E0B", icon: <FaAward /> },
   ];
 
   const columns = [
     { key: "txId", title: "Receipt ID" },
-    { key: "campaign", title: "Funded Campaign / Cause" },
-    { key: "amount", title: "Contribution ($)" },
+    { key: "campaign", title: "Funded Campaign / Purpose" },
+    { key: "amount", title: "Contribution (₹)" },
     { key: "date", title: "Date" },
-    { key: "taxReceipt", title: "Tax Receipt Status" },
+    { key: "status", title: "Status" },
   ];
 
-  const formattedData = donationsList.map((item: any) => ({
-    txId: item.id ?? item.transaction_id ?? item.tx_id ?? "",
-    campaign: item.campaign ?? item.cause ?? item.title ?? "",
-    amount: item.amount !== undefined && item.amount !== null ? `$${item.amount}` : "",
-    date: item.date ?? item.created_at ?? "",
-    taxReceipt: item.receipt_status ?? item.taxReceipt ?? "",
+  const formattedData = history.map((item: any) => ({
+    txId: item.transactionId || item.id || "-",
+    campaign: item.notes || item.purpose || item.campaignId || "General Rescue Contribution",
+    amount: formatINR(item.amount),
+    date: item.date ? formatDateTime(item.date) : "-",
+    status: item.status || "completed",
   }));
 
   return (
