@@ -1,9 +1,11 @@
+import { useEffect } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import type { UserRole } from "../../../types/auth";
-import { getCurrentUser, getCurrentUserRole, isInternalRole } from "../../../utils/roleUtils";
+import { getCurrentUser, getCurrentUserRole, isInternalRole, normalizeRole } from "../../../utils/roleUtils";
 import { hasPermission, hasAnyPermission } from "../../../utils/rbac";
-import { clearAuthData, isSessionExpired } from "../../../utils/authStorage";
+import { clearAuthData, getRememberMe, isSessionExpired, setAuthData } from "../../../utils/authStorage";
 import { notifyAuthChanged } from "../../../utils/dataSync";
+import authService from "../../../services/auth/authService";
 
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
@@ -13,6 +15,30 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
   const user = getCurrentUser();
+
+  // Validate live session via GET /auth/me on route entry (browser automatically sends HttpOnly cookies)
+  useEffect(() => {
+    if (user) {
+      authService
+        .getMe()
+        .then((meResponse) => {
+          const meData = meResponse?.data || meResponse;
+          const fetchedUser =
+            meData?.user || (typeof meData === "object" && meData.email ? meData : null);
+          if (fetchedUser) {
+            const userRole = normalizeRole(fetchedUser) || getCurrentUserRole();
+            if (userRole) {
+              fetchedUser.role = userRole;
+              setAuthData({ user: fetchedUser }, getRememberMe());
+            }
+          }
+        })
+        .catch(() => {
+          // Automatic 401 handling in axios interceptor will trigger /auth/refresh or redirect to login
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Enforce exact 300-second (5 minute) session inactivity timeout
   if (isSessionExpired()) {

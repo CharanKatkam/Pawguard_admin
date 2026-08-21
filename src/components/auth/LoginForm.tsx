@@ -54,7 +54,7 @@ const LoginForm = () => {
     try {
       setLoading(true);
 
-      // 2. POST /auth/login with credentials: true
+      // 2. POST /auth/login (HttpOnly cookies set automatically by browser)
       const response = await authService.login({
         email: email.trim(),
         password,
@@ -63,16 +63,21 @@ const LoginForm = () => {
       // 3. HTTP 200 received -> clear error explicitly
       setErrorMsg(null);
 
-      // 4. Retrieve authenticated user profile via GET /auth/me (sent with credentials)
-      let userObj: any = null;
+      // Extract inline user from login response payload (if present)
+      const loginPayload = unifyAuthPayload(response);
+      const inlineUser = resolveUserObject(loginPayload);
+
+      // 4. Retrieve authenticated user profile via GET /auth/me (browser automatically sends HttpOnly cookies)
+      let userObj: any = inlineUser;
       try {
         const meResponse = await authService.getMe();
         const meData = meResponse?.data || meResponse;
-        userObj = resolveUserObject(meData);
+        const fetchedUser = resolveUserObject(meData);
+        if (fetchedUser && typeof fetchedUser === "object") {
+          userObj = { ...userObj, ...fetchedUser };
+        }
       } catch {
-        // Fallback to user object in login response payload if /auth/me call returns inline data
-        const loginPayload = unifyAuthPayload(response);
-        userObj = resolveUserObject(loginPayload);
+        // Fallback to inline login user object if /auth/me fails
       }
 
       if (!userObj || typeof userObj !== "object") {
@@ -89,7 +94,7 @@ const LoginForm = () => {
 
       userObj.role = userRole;
 
-      // 5. Store safe user/session info needed by the UI
+      // 5. Store authenticated user session metadata needed by the UI
       setAuthData(
         {
           user: userObj,

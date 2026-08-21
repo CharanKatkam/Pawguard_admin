@@ -8,8 +8,6 @@
  */
 
 export const AUTH_STORAGE_KEYS = {
-  accessToken: "access_token",
-  refreshToken: "refresh_token",
   user: "user",
   rememberMe: "remember_me",
   rememberEmail: "remember_email",
@@ -89,13 +87,6 @@ const remove = (key: string): void => {
     /* storage unavailable; ignore */
   }
 };
-
-/**
- * Tokens are stored securely in HttpOnly cookies by the backend.
- * Deprecated: JavaScript does not read or expose raw access tokens.
- */
-export const getAccessToken = (): string | null => null;
-export const getRefreshToken = (): string | null => null;
 
 export const updateLastActivity = (): void => {
   const nowStr = Date.now().toString();
@@ -184,29 +175,24 @@ export const setRememberedEmail = (email: string): void => {
 };
 
 export interface AuthData {
-  accessToken?: string | null;
-  refreshToken?: string | null;
   user: unknown;
 }
 
 /**
- * Persist user session metadata.
- * Raw tokens are removed from browser storage in compliance with HttpOnly cookie security.
+ * Persist user session metadata required for UI role context.
  */
 export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
   setRememberMe(rememberMe);
 
-  // Clear obsolete token storage
-  clearObsoleteTokens();
-
-  // Store user metadata & update activity timestamp
-  write(AUTH_STORAGE_KEYS.user, JSON.stringify(data.user));
+  if (data.user) {
+    write(AUTH_STORAGE_KEYS.user, JSON.stringify(data.user));
+  }
   updateLastActivity();
 };
 
-/** Remove session metadata from BOTH storages (leaves remember-email preference). */
+/** Remove session user metadata from BOTH storages (leaves remember-email preference). */
 export const clearAuthData = (): void => {
-  clearObsoleteTokens();
   remove(AUTH_STORAGE_KEYS.user);
   remove(AUTH_STORAGE_KEYS.lastActivity);
 };
+

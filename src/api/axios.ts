@@ -2,10 +2,9 @@ import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
 import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser } from "../utils/authStorage";
 
-// Base API configuration for production and development environment
+// Base API configuration: use VITE_API_BASE_URL or fallback to relative /api/v1 (Vite dev proxy)
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string) ||
-  "https://pawguard-backend-mqri.onrender.com/api/v1";
+  (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -16,7 +15,7 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Request Interceptor: Enforce 300s session inactivity timeout for active user sessions
+// Request Interceptor: Enforce 300s session inactivity timeout (browser automatically handles HttpOnly cookies)
 api.interceptors.request.use(
   (config) => {
     const user = getStoredUser();
