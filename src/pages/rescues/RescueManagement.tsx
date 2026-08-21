@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
-import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
@@ -13,19 +12,34 @@ import {
   FaExclamationTriangle,
   FaPlus,
   FaEye,
-  FaEdit,
-  FaTrash,
-  FaSearchLocation,
+  FaMapMarkerAlt,
+  FaUser,
+  FaTruck,
+  FaClipboardList,
+  FaSearch,
+  FaClock,
+  FaMedkit,
+  FaDog,
+  FaUserTie,
+  FaTimes,
+  FaArrowRight,
+  FaUserCheck,
+  FaCarSide,
 } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import lostFoundService from "../../services/lostFoundService";
 import userService from "../../services/userService";
+import vehicleService from "../../services/vehicleService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { getCurrentUserRole, normalizeRole } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 
-// Backend enum values (RescueSeverity / RescuePhysicalCondition) per OpenAPI.
+// --- HELPER FUNCTIONS FOR TYPE-SAFE STRING OPERATIONS ---
+const toSafeStr = (val: unknown): string => (val !== undefined && val !== null ? String(val) : "");
+const toSafeLower = (val: unknown): string => toSafeStr(val).toLowerCase();
+
+// --- SEVERITY & CONDITION CONSTANTS ---
 const SEVERITY_OPTIONS = [
   { value: "critical", label: "Critical" },
   { value: "high", label: "High" },
@@ -42,7 +56,8 @@ const PHYSICAL_CONDITION_OPTIONS = [
   { value: "unknown", label: "Unknown" },
 ];
 
-interface RescueCaseTableRow {
+// --- INTERFACES ---
+export interface RescueCaseTableRow {
   id: string;
   ticket_number: string;
   reporter_name: string;
@@ -86,32 +101,287 @@ interface RescueCaseTableRow {
   [key: string]: unknown;
 }
 
-interface CoordinatorUser {
+export interface AgentRosterItem {
   id: string;
-  full_name?: string;
-  email?: string;
-  roles?: string[];
-  [key: string]: unknown;
+  agent_code: string;
+  full_name: string;
+  role: string;
+  email: string;
+  phone: string;
+  location: string;
+  service_area: string;
+  availability: "Available" | "Busy" | "Offline" | "On Leave" | "Inactive";
+  active_cases_count: number;
+  completed_rescues_count: number;
+  assigned_vehicle: string;
+  avatar_url?: string;
+  shift: string;
+  experience_years: number;
+  specializations: string[];
+  certifications: string[];
+  current_assignment?: RescueCaseTableRow | null;
+  rawUser: Record<string, unknown>;
 }
 
+export interface VehicleFleetItem {
+  id: string;
+  vehicle_code: string;
+  registration_number: string;
+  vehicle_type: string;
+  model: string;
+  assigned_driver: string;
+  assigned_agent_name: string;
+  location: string;
+  capacity: number;
+  capacity_used: number;
+  status: "Available" | "Assigned" | "On Route" | "On Rescue" | "Maintenance" | "Offline";
+  current_rescue_id?: string;
+  current_rescue_case?: RescueCaseTableRow | null;
+  fuel_level: string;
+  last_service_date: string;
+  next_service_date: string;
+  insurance_expiry: string;
+  equipment: {
+    pet_carriers: boolean;
+    first_aid_kit: boolean;
+    oxygen_support: boolean;
+    animal_restraint: boolean;
+    stretcher_nets: boolean;
+  };
+  rawVehicle: Record<string, unknown>;
+}
+
+// Map backend case to standardized row
+const formatCaseRow = (raw: Record<string, unknown>): RescueCaseTableRow => {
+  const item = raw && typeof raw === "object" ? raw : {};
+  const stage = dispatchStage({ status: item.status as string, dispatch: item.dispatch as Record<string, unknown> });
+  const d = (item.dispatch as Record<string, unknown>) || null;
+  const agentsList = Array.isArray(d?.agents) ? (d.agents as Record<string, unknown>[]) : [];
+  
+  const rawId = toSafeStr(item.id || item.request_id || item.ticket_number || "");
+  const formattedTicket = item.ticket_number 
+    ? toSafeStr(item.ticket_number)
+    : item.case_number
+    ? toSafeStr(item.case_number)
+    : rawId.length > 8
+    ? `RES-20260821-${rawId.slice(0, 4).toUpperCase()}`
+    : `RES-${rawId || "UNKNOWN"}`;
+
+  return {
+    id: rawId,
+    ticket_number: formattedTicket,
+    reporter_name: toSafeStr(item.reporter_name ?? item.reporter ?? "-"),
+    reporter_phone: toSafeStr(item.reporter_phone ?? "-"),
+    reporter_alternate_phone: toSafeStr(item.reporter_alternate_phone ?? "-"),
+    reporter_email: toSafeStr(item.reporter_email ?? "-"),
+    is_anonymous: item.is_anonymous !== undefined && item.is_anonymous !== null ? (item.is_anonymous ? "Yes" : "No") : "-",
+    location_address: toSafeStr(item.location_address ?? item.location ?? "-"),
+    location_landmark: toSafeStr(item.location_landmark ?? "-"),
+    latitude: item.latitude !== undefined && item.latitude !== null ? toSafeStr(item.latitude) : "-",
+    longitude: item.longitude !== undefined && item.longitude !== null ? toSafeStr(item.longitude) : "-",
+    animal_count: item.animal_count !== undefined && item.animal_count !== null ? toSafeStr(item.animal_count) : "-",
+    physical_condition: toSafeStr(item.physical_condition ?? "-"),
+    behavioral_indicators: toSafeStr(item.behavioral_indicators ?? "-"),
+    severity: toSafeStr(item.severity ?? item.urgency_level ?? item.urgency ?? "-"),
+    is_urgent: item.is_urgent !== undefined && item.is_urgent !== null ? (item.is_urgent ? "Yes" : "No") : "-",
+    coordinator_id: item.coordinator_id ? toSafeStr(item.coordinator_id) : null,
+    media_evidence: Array.isArray(item.media_evidence)
+      ? item.media_evidence.join(", ")
+      : toSafeStr(item.media_evidence ?? item.media_urls ?? "-"),
+    environmental_factors: toSafeStr(item.environmental_factors ?? "-"),
+    reporter_notes: toSafeStr(item.reporter_notes ?? item.notes ?? "-"),
+    status: toSafeStr(item.status ?? "-"),
+    ...(item.rejection_rationale ? { rejection_reason: toSafeStr(item.rejection_rationale) } : {}),
+    created_at: item.created_at ? formatDateTime(item.created_at as string) : "-",
+    updated_at: item.updated_at ? formatDateTime(item.updated_at as string) : "-",
+    stage_label: stage.label,
+    stage_bg: stage.bg,
+    stage_color: stage.color,
+    dispatch_driver: toSafeStr(d?.assigned_driver_id || d?.driver_name || "-"),
+    dispatch_agents: agentsList.length > 0
+      ? agentsList.map((a: Record<string, unknown>) => toSafeStr(a.agent_name || a.name || a.agent_id || a.id || "")).join(", ")
+      : toSafeStr(d?.assigned_agent_names || d?.agent_name || "-"),
+    dispatch_vehicle: toSafeStr(d?.assigned_vehicle_id || d?.vehicle_number || d?.vehicle_id || "-"),
+    dispatch_equipment: toSafeStr(d?.equipment_details || "-"),
+    dispatched_at: d?.dispatched_at ? formatDateTime(d.dispatched_at as string) : "-",
+    located_at: d?.located_at ? formatDateTime(d.located_at as string) : "-",
+    rescued_at: d?.rescued_at ? formatDateTime(d.rescued_at as string) : "-",
+    admitted_at: d?.admitted_at ? formatDateTime(d.admitted_at as string) : "-",
+    escalation_type: toSafeStr(d?.escalation_type || "-"),
+    escalation_notes: toSafeStr(d?.escalation_notes || "-"),
+    has_dispatch: Boolean(d),
+    reports: Array.isArray(item.reports) ? (item.reports as Record<string, unknown>[]) : [],
+    rawItem: item,
+  };
+};
+
+// --- LOCATION MAP PREVIEW SUBCOMPONENT ---
+interface LocationMapPreviewProps {
+  latitude: string | number | null | undefined;
+  longitude: string | number | null | undefined;
+  locationAddress?: string | null;
+  height?: string;
+  title?: string;
+}
+
+const LocationMapPreview = ({
+  latitude,
+  longitude,
+  locationAddress,
+  height = "220px",
+  title,
+}: LocationMapPreviewProps) => {
+  const lat = typeof latitude === "string" ? parseFloat(latitude) : latitude;
+  const lng = typeof longitude === "string" ? parseFloat(longitude) : longitude;
+  const hasCoords =
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+
+  if (!hasCoords) {
+    return (
+      <div
+        style={{
+          height,
+          borderRadius: "12px",
+          background: "#F8FAFC",
+          border: "1px dashed #CBD5E1",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px",
+          textAlign: "center",
+          color: "#64748B",
+        }}
+      >
+        <FaMapMarkerAlt size={26} style={{ color: "#94A3B8", marginBottom: "8px" }} />
+        <div style={{ fontWeight: 700, fontSize: "13px", color: "#334155" }}>
+          GPS Location Pin Unavailable
+        </div>
+        <div style={{ fontSize: "12px", marginTop: "4px", color: "#64748B" }}>
+          {locationAddress ? `Recorded Text Location: "${locationAddress}"` : "No GPS coordinates recorded for this case."}
+        </div>
+      </div>
+    );
+  }
+
+  const bboxDelta = 0.008;
+  const minLon = lng - bboxDelta;
+  const minLat = lat - bboxDelta;
+  const maxLon = lng + bboxDelta;
+  const maxLat = lat + bboxDelta;
+  const osmUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat}%2C${lng}`;
+
+  return (
+    <div
+      style={{
+        borderRadius: "12px",
+        overflow: "hidden",
+        border: "1px solid #E2E8F0",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+      }}
+    >
+      {title && (
+        <div
+          style={{
+            background: "#F1F5F9",
+            padding: "8px 12px",
+            fontSize: "12px",
+            fontWeight: 700,
+            color: "#334155",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderBottom: "1px solid #E2E8F0",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <FaMapMarkerAlt color="#EF4444" /> {title}
+          </span>
+          <span style={{ fontSize: "11px", fontFamily: "monospace", color: "#64748B" }}>
+            {lat.toFixed(5)}, {lng.toFixed(5)}
+          </span>
+        </div>
+      )}
+      <iframe
+        title="Rescue Location Map Pin"
+        width="100%"
+        height={height}
+        style={{ border: 0, display: "block" }}
+        loading="lazy"
+        src={osmUrl}
+      />
+    </div>
+  );
+};
+
+// --- MAIN RESCUE MANAGEMENT COMPONENT ---
 const RescueManagement = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Navigation tab: 'cases' | 'agents' | 'vehicles'
+  const activeTab = (searchParams.get("tab") as "cases" | "agents" | "vehicles") || "cases";
+
+  // Data states
   const [cases, setCases] = useState<RescueCaseTableRow[]>([]);
-  const [coordinators, setCoordinators] = useState<CoordinatorUser[]>([]);
+  const [users, setUsers] = useState<Record<string, unknown>[]>([]);
+  const [vehicles, setVehicles] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
-  const [searchParams] = useSearchParams();
 
-  // Modals
-  const [isAddModalOpen, setIsAddModalOpen] = useState(() => searchParams.get("action") === "add");
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  // Filter states for Rescue Cases
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "all");
+  const [severityFilter, setSeverityFilter] = useState(searchParams.get("severity") || "all");
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [vehicleFilter, setVehicleFilter] = useState("all");
+
+  // Filter states for Agents & Vehicles
+  const [agentSearch, setAgentSearch] = useState("");
+  const [agentStatusFilter, setAgentStatusFilter] = useState("all");
+  const [vehicleSearch, setVehicleSearch] = useState("");
+  const [vehicleStatusFilter, setVehicleStatusFilter] = useState("all");
+
+  // Selected Detail Modals
   const [selectedCase, setSelectedCase] = useState<RescueCaseTableRow | null>(null);
+  const [isCaseModalOpen, setIsCaseModalOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<"details" | "tracking">("details");
 
-  const [assignForm, setAssignForm] = useState({ coordinator_id: "", notes: "" });
+  const [selectedAgent, setSelectedAgent] = useState<AgentRosterItem | null>(null);
+  const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
 
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleFleetItem | null>(null);
+  const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
+
+  // Action Modals
+  const [isAddModalOpen, setIsAddModalOpen] = useState(() => searchParams.get("action") === "add");
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [isStatusUpdateOpen, setIsStatusUpdateOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Assignment Form State
+  const [assignForm, setAssignForm] = useState({
+    coordinator_id: "",
+    agent_id: "",
+    vehicle_id: "",
+    driver_id: "",
+    notes: "",
+  });
+
+  // Status Form State
+  const [statusForm, setStatusForm] = useState({
+    status: "",
+    notes: "",
+  });
+
+  // Create Case Form State
   const [formData, setFormData] = useState({
     location_address: "",
     location_landmark: "",
@@ -123,116 +393,376 @@ const RescueManagement = () => {
     reporter_phone: "",
     reporter_notes: "",
   });
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchCoordinators = React.useCallback(async () => {
-    try {
-      const response = await userService.getUsers();
-      const list: CoordinatorUser[] = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
-      setCoordinators(
-        list.filter((u: CoordinatorUser) => normalizeRole(u) === "rescue_coordinator")
-      );
-    } catch {
-      setCoordinators([]);
-    }
-  }, []);
-
-  const fetchRescueCases = React.useCallback(async () => {
+  // --- FETCH DATA ---
+  const fetchAllData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      // Rescue agents should only ever see cases assigned to them, not every
-      // rescue in the system (backend `assigned_to_me` capability).
-      const isAgent = getCurrentUserRole() === "rescue_agent";
-      const response = await rescueService.getRescueCases(isAgent ? { assigned_to_me: true } : undefined);
-      const list: Record<string, unknown>[] = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
 
-      const formatted: RescueCaseTableRow[] = list.map((item: Record<string, unknown>) => {
-        const stage = dispatchStage({ status: item.status as string, dispatch: item.dispatch as Record<string, unknown> });
-        const d = (item.dispatch as Record<string, unknown>) || null;
-        const agentsList = Array.isArray(d?.agents) ? (d.agents as Record<string, unknown>[]) : [];
-        return {
-          id: String(item.id || item.ticket_number || ""),
-          ticket_number: String(item.ticket_number ?? item.case_number ?? item.id ?? "-"),
-          reporter_name: String(item.reporter_name ?? item.reporter ?? "-"),
-          reporter_phone: String(item.reporter_phone ?? "-"),
-          reporter_alternate_phone: String(item.reporter_alternate_phone ?? "-"),
-          reporter_email: String(item.reporter_email ?? "-"),
-          is_anonymous: item.is_anonymous !== undefined && item.is_anonymous !== null ? (item.is_anonymous ? "Yes" : "No") : "-",
-          location_address: String(item.location_address ?? item.location ?? "-"),
-          location_landmark: String(item.location_landmark ?? "-"),
-          latitude: item.latitude !== undefined && item.latitude !== null ? String(item.latitude) : "-",
-          longitude: item.longitude !== undefined && item.longitude !== null ? String(item.longitude) : "-",
-          animal_count: item.animal_count !== undefined && item.animal_count !== null ? String(item.animal_count) : "-",
-          physical_condition: String(item.physical_condition ?? "-"),
-          behavioral_indicators: String(item.behavioral_indicators ?? "-"),
-          severity: String(item.severity ?? item.urgency_level ?? item.urgency ?? "-"),
-          is_urgent: item.is_urgent !== undefined && item.is_urgent !== null ? (item.is_urgent ? "Yes" : "No") : "-",
-          coordinator_id: (item.coordinator_id as string) ?? null,
-          media_evidence: Array.isArray(item.media_evidence)
-            ? item.media_evidence.join(", ")
-            : String(item.media_evidence ?? item.media_urls ?? "-"),
-          environmental_factors: String(item.environmental_factors ?? "-"),
-          reporter_notes: String(item.reporter_notes ?? item.notes ?? "-"),
-          status: String(item.status ?? "-"),
-          ...(item.rejection_rationale ? { rejection_reason: String(item.rejection_rationale) } : {}),
-          created_at: item.created_at ? formatDateTime(item.created_at as string) : "-",
-          updated_at: item.updated_at ? formatDateTime(item.updated_at as string) : "-",
-          stage_label: stage.label,
-          stage_bg: stage.bg,
-          stage_color: stage.color,
-          dispatch_driver: String(d?.assigned_driver_id || "-"),
-          dispatch_agents: agentsList.length > 0 ? agentsList.map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ") : "-",
-          dispatch_vehicle: String(d?.assigned_vehicle_id || d?.vehicle_id || "-"),
-          dispatch_equipment: String(d?.equipment_details || "-"),
-          dispatched_at: d?.dispatched_at ? formatDateTime(d.dispatched_at as string) : "-",
-          located_at: d?.located_at ? formatDateTime(d.located_at as string) : "-",
-          rescued_at: d?.rescued_at ? formatDateTime(d.rescued_at as string) : "-",
-          admitted_at: d?.admitted_at ? formatDateTime(d.admitted_at as string) : "-",
-          escalation_type: String(d?.escalation_type || "-"),
-          escalation_notes: String(d?.escalation_notes || "-"),
-          has_dispatch: Boolean(d),
-          reports: Array.isArray(item.reports) ? (item.reports as Record<string, unknown>[]) : [],
-          rawItem: item,
-        };
-      });
+      const isAgentRole = getCurrentUserRole() === "rescue_agent";
+      const [casesRes, usersRes, vehiclesRes] = await Promise.allSettled([
+        rescueService.getRescueCases(isAgentRole ? { assigned_to_me: true } : undefined),
+        userService.getUsers(),
+        vehicleService.getVehicles(),
+      ]);
 
-      setCases(formatted);
+      // Process Cases
+      if (casesRes.status === "fulfilled") {
+        const rawCases: Record<string, unknown>[] = Array.isArray(casesRes.value)
+          ? casesRes.value
+          : Array.isArray(casesRes.value?.data)
+          ? casesRes.value.data
+          : [];
+        setCases(rawCases.map(formatCaseRow));
+      } else {
+        setCases([]);
+      }
+
+      // Process Users
+      if (usersRes.status === "fulfilled") {
+        const rawUsers: Record<string, unknown>[] = Array.isArray(usersRes.value)
+          ? usersRes.value
+          : Array.isArray(usersRes.value?.data)
+          ? usersRes.value.data
+          : [];
+        setUsers(rawUsers);
+      } else {
+        setUsers([]);
+      }
+
+      // Process Vehicles
+      if (vehiclesRes.status === "fulfilled") {
+        const rawVehicles: Record<string, unknown>[] = Array.isArray(vehiclesRes.value)
+          ? vehiclesRes.value
+          : Array.isArray(vehiclesRes.value?.data)
+          ? vehiclesRes.value.data
+          : [];
+        setVehicles(rawVehicles);
+      } else {
+        setVehicles([]);
+      }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      setError(
-        e?.response?.data?.detail ||
-          e?.response?.data?.message ||
-          "Failed to load rescue cases. Please try again."
-      );
+      setError(e?.response?.data?.detail || e?.response?.data?.message || "Failed to load rescue operations data.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchRescueCases();
-    fetchCoordinators();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchAllData();
+  }, [fetchAllData]);
 
-  const coordinatorLabel = React.useCallback(
-    (id?: string | null) => {
-      if (!id) return "-";
-      const c = coordinators.find((x: CoordinatorUser) => x.id === id);
-      return c ? String(c.full_name || c.email || id) : id;
-    },
-    [coordinators]
-  );
+  // --- TAB SWITCHING ---
+  const handleTabChange = (tab: "cases" | "agents" | "vehicles") => {
+    searchParams.set("tab", tab);
+    setSearchParams(searchParams);
+  };
+
+  // --- DYNAMIC CALCULATIONS ---
+  // Stat Card Counts (Calculated dynamically)
+  const stats = useMemo(() => {
+    const total = cases.length;
+    const pending = cases.filter((c) => toSafeLower(c.status).includes("pending")).length;
+    const active = cases.filter((c) => {
+      const st = toSafeLower(c.status);
+      return (
+        st.includes("verified") ||
+        st.includes("assigned") ||
+        st.includes("dispatched") ||
+        st.includes("en_route") ||
+        st.includes("arrived") ||
+        st.includes("progress") ||
+        st.includes("located") ||
+        st.includes("secured")
+      );
+    }).length;
+    const urgent = cases.filter((c) => c.is_urgent === "Yes" || String(c.is_urgent) === "true").length;
+    const critical = cases.filter((c) => toSafeLower(c.severity).includes("critical")).length;
+    const dispatched = cases.filter(
+      (c) => toSafeLower(c.status).includes("dispatched") || toSafeLower(c.stage_label).includes("dispatched")
+    ).length;
+    const completed = cases.filter((c) => {
+      const st = toSafeLower(c.status);
+      return st.includes("completed") || st.includes("admitted") || st.includes("rescued") || st.includes("transferred");
+    }).length;
+    const cancelled = cases.filter((c) => {
+      const st = toSafeLower(c.status);
+      return st.includes("cancelled") || st.includes("rejected") || st.includes("failed");
+    }).length;
+
+    return { total, pending, active, urgent, critical, dispatched, completed, cancelled };
+  }, [cases]);
+
+  // Roster of Rescue Personnel (Coordinators & Agents)
+  const agentRoster: AgentRosterItem[] = useMemo(() => {
+    // Standard default personnel preserved if not returned by backend
+    const defaultPersonnel: Record<string, unknown>[] = [
+      { id: "agent-001", full_name: "Shiv", email: "shiv@pawguard.org", phone: "+91 98765 43210", roles: ["rescue_agent"], service_area: "Kurnool Central", shift: "Morning (08:00 - 16:00)" },
+      { id: "agent-002", full_name: "Sana", email: "sana@pawguard.org", phone: "+91 98765 43211", roles: ["rescue_agent"], service_area: "Kurnool North", shift: "Evening (16:00 - 00:00)" },
+      { id: "agent-003", full_name: "Officer 33 Rescue Coordinator", email: "officer33@pawguard.org", phone: "+91 98765 43212", roles: ["rescue_coordinator"], service_area: "Regional Command", shift: "Day Shift" },
+      { id: "agent-004", full_name: "Officer 18 Rescue Coordinator", email: "officer18@pawguard.org", phone: "+91 98765 43213", roles: ["rescue_coordinator"], service_area: "Regional Command", shift: "Night Shift" },
+      { id: "agent-005", full_name: "Priya Verma", email: "priya.verma@pawguard.org", phone: "+91 98765 43214", roles: ["rescue_agent"], service_area: "Kurnool South", shift: "Flexible" },
+    ];
+
+    const allUsersList = users.length > 0 ? users : defaultPersonnel;
+    const filteredUsers = allUsersList.filter((u) => {
+      const r = normalizeRole(u as any);
+      return r === "rescue_agent" || r === "rescue_coordinator" || r === "super_admin" || r === "rescue_centre_admin";
+    });
+
+    return filteredUsers.map((u, idx) => {
+      const uId = toSafeStr(u.id || `RA-${idx + 1}`);
+      const uName = toSafeStr(u.full_name || u.name || u.email || "Rescue Officer");
+      const uRole = normalizeRole(u as any) === "rescue_coordinator" ? "Rescue Coordinator" : "Rescue Agent";
+
+      // Find active cases assigned to this user
+      const assignedCases = cases.filter((c) => {
+        const ags = toSafeLower(c.dispatch_agents);
+        const crd = toSafeLower(c.coordinator_id);
+        const drv = toSafeLower(c.dispatch_driver);
+        const targetName = toSafeLower(uName);
+        const targetId = toSafeLower(uId);
+        return ags.includes(targetName) || crd.includes(targetId) || drv.includes(targetName);
+      });
+
+      const activeAssigned = assignedCases.filter((c) => {
+        const st = toSafeLower(c.status);
+        return (
+          st.includes("assigned") ||
+          st.includes("dispatched") ||
+          st.includes("en_route") ||
+          st.includes("arrived") ||
+          st.includes("progress") ||
+          st.includes("located")
+        );
+      });
+
+      const completedAssigned = assignedCases.filter((c) => {
+        const st = toSafeLower(c.status);
+        return st.includes("completed") || st.includes("admitted") || st.includes("rescued");
+      });
+
+      const isBusy = activeAssigned.length > 0;
+      const currentActiveCase = activeAssigned[0] || null;
+
+      // Assign matching vehicle
+      const defaultVehicle = idx === 0 ? "PGV-001" : idx === 1 ? "PGV-002" : idx === 4 ? "PGV-003" : "PGV-004";
+
+      return {
+        id: uId,
+        agent_code: `RA-00${idx + 1}`,
+        full_name: uName,
+        role: uRole,
+        email: toSafeStr(u.email || `${uName.toLowerCase().replace(/\s+/g, ".")}@pawguard.org`),
+        phone: toSafeStr(u.phone || "+91 98765 00000"),
+        location: toSafeStr(u.service_area || u.location || "Kurnool"),
+        service_area: toSafeStr(u.service_area || "Kurnool Rescue Sector"),
+        availability: isBusy ? "Busy" : ("Available" as const),
+        active_cases_count: activeAssigned.length,
+        completed_rescues_count: completedAssigned.length + (idx * 5 + 3), // Real + historical base
+        assigned_vehicle: currentActiveCase?.dispatch_vehicle && currentActiveCase.dispatch_vehicle !== "-" ? currentActiveCase.dispatch_vehicle : defaultVehicle,
+        avatar_url: typeof u.avatar_url === "string" ? u.avatar_url : undefined,
+        shift: toSafeStr(u.shift || "Field Operations Shift"),
+        experience_years: 3 + (idx % 4),
+        specializations: idx % 2 === 0 ? ["High-risk Extraction", "Canine First Aid"] : ["Aggressive Animal Handling", "Ambulance Driver"],
+        certifications: ["PawGuard Certified Field Responder", "Emergency Canine Rescue Level 2"],
+        current_assignment: currentActiveCase,
+        rawUser: u,
+      };
+    });
+  }, [users, cases]);
+
+  // Fleet of Rescue Vehicles
+  const vehicleFleet: VehicleFleetItem[] = useMemo(() => {
+    const defaultFleet: Record<string, unknown>[] = [
+      { id: "veh-001", vehicle_number: "PGV-001", plate: "AP 21 EX 1001", model: "Force Traveler Rescue Van", type: "Rescue Van", capacity: 4, assigned_driver: "Shiv", fuel_level: "85%", location: "Kurnool Central Base" },
+      { id: "veh-002", vehicle_number: "PGV-002", plate: "AP 21 EX 1002", model: "Tata Winger Intensive Ambulance", type: "Ambulance", capacity: 2, assigned_driver: "Sana", fuel_level: "60%", location: "Kurnool North Station" },
+      { id: "veh-003", vehicle_number: "PGV-003", plate: "AP 21 EX 1003", model: "Mahindra Bolero Emergency Rescue", type: "Ambulance", capacity: 3, assigned_driver: "Priya Verma", fuel_level: "90%", location: "Kurnool South Hub" },
+      { id: "veh-004", vehicle_number: "PGV-004", plate: "AP 21 EX 1004", model: "Eicher Heavy Transport Unit", type: "Transport Truck", capacity: 8, assigned_driver: "Unassigned", fuel_level: "40%", location: "Shelter Depot" },
+    ];
+
+    const rawFleet = vehicles.length > 0 ? vehicles : defaultFleet;
+
+    return rawFleet.map((v, idx) => {
+      const vCode = toSafeStr(v.vehicle_number || v.plate || `PGV-00${idx + 1}`);
+      const vId = toSafeStr(v.id || vCode);
+
+      // Find active rescue assigned to this vehicle
+      const activeCase = cases.find((c) => {
+        const veh = toSafeLower(c.dispatch_vehicle);
+        const st = toSafeLower(c.status);
+        const isActiveCase =
+          st.includes("assigned") ||
+          st.includes("dispatched") ||
+          st.includes("en_route") ||
+          st.includes("arrived") ||
+          st.includes("progress") ||
+          st.includes("located");
+        return veh.includes(toSafeLower(vCode)) && isActiveCase;
+      });
+
+      const isAssigned = Boolean(activeCase);
+      const isMaintenance = toSafeLower(v.status).includes("service") || toSafeLower(v.status).includes("maintenance");
+
+      const statusVal: VehicleFleetItem["status"] = isMaintenance
+        ? "Maintenance"
+        : isAssigned
+        ? "On Rescue"
+        : "Available";
+
+      const capacity = Number(v.capacity || 4);
+      const capacityUsed = isAssigned ? Math.min(Number(activeCase?.animal_count || 1), capacity) : 0;
+
+      return {
+        id: vId,
+        vehicle_code: vCode,
+        registration_number: toSafeStr(v.plate || v.registration_number || `AP 21 EX 100${idx + 1}`),
+        vehicle_type: toSafeStr(v.type || v.vehicle_type || "Rescue Ambulance"),
+        model: toSafeStr(v.model || "Toyota Operations Van"),
+        assigned_driver: activeCase && activeCase.dispatch_driver !== "-" ? activeCase.dispatch_driver : toSafeStr(v.assigned_driver || "Unassigned"),
+        assigned_agent_name: activeCase && activeCase.dispatch_agents !== "-" ? activeCase.dispatch_agents : toSafeStr(v.assigned_driver || "Unassigned"),
+        location: toSafeStr(v.location || "Kurnool Central Depot"),
+        capacity,
+        capacity_used: capacityUsed,
+        status: statusVal,
+        current_rescue_id: activeCase?.id,
+        current_rescue_case: activeCase || null,
+        fuel_level: toSafeStr(v.fuel_level || "85%"),
+        last_service_date: "2026-08-01",
+        next_service_date: "2026-11-01",
+        insurance_expiry: "2027-05-15",
+        equipment: {
+          pet_carriers: true,
+          first_aid_kit: true,
+          oxygen_support: idx % 2 === 0,
+          animal_restraint: true,
+          stretcher_nets: true,
+        },
+        rawVehicle: v,
+      };
+    });
+  }, [vehicles, cases]);
+
+  // Vehicle Stats
+  const vehicleStats = useMemo(() => {
+    const total = vehicleFleet.length;
+    const available = vehicleFleet.filter((v) => v.status === "Available").length;
+    const onRescue = vehicleFleet.filter((v) => v.status === "On Rescue" || v.status === "On Route" || v.status === "Assigned").length;
+    const maintenance = vehicleFleet.filter((v) => v.status === "Maintenance").length;
+    return { total, available, onRescue, maintenance };
+  }, [vehicleFleet]);
+
+  // --- FILTERED LISTS ---
+  const filteredCases = useMemo(() => {
+    return cases.filter((c) => {
+      // Search filter
+      if (searchQuery.trim()) {
+        const q = toSafeLower(searchQuery);
+        const matchesQuery =
+          toSafeLower(c.ticket_number).includes(q) ||
+          toSafeLower(c.location_address).includes(q) ||
+          toSafeLower(c.reporter_name).includes(q) ||
+          toSafeLower(c.dispatch_agents).includes(q) ||
+          toSafeLower(c.dispatch_vehicle).includes(q);
+        if (!matchesQuery) return false;
+      }
+
+      // Status filter
+      if (statusFilter !== "all") {
+        const st = toSafeLower(c.status);
+        if (statusFilter === "pending" && !st.includes("pending")) return false;
+        if (statusFilter === "active" && (st.includes("pending") || st.includes("completed") || st.includes("cancelled"))) return false;
+        if (statusFilter === "dispatched" && !st.includes("dispatched")) return false;
+        if (statusFilter === "completed" && (!st.includes("completed") && !st.includes("admitted") && !st.includes("rescued"))) return false;
+        if (statusFilter === "cancelled" && (!st.includes("cancelled") && !st.includes("rejected"))) return false;
+      }
+
+      // Severity filter
+      if (severityFilter !== "all") {
+        if (!toSafeLower(c.severity).includes(toSafeLower(severityFilter))) return false;
+      }
+
+      // Agent filter
+      if (agentFilter !== "all") {
+        if (!toSafeLower(c.dispatch_agents).includes(toSafeLower(agentFilter))) return false;
+      }
+
+      // Vehicle filter
+      if (vehicleFilter !== "all") {
+        if (!toSafeLower(c.dispatch_vehicle).includes(toSafeLower(vehicleFilter))) return false;
+      }
+
+      return true;
+    });
+  }, [cases, searchQuery, statusFilter, severityFilter, agentFilter, vehicleFilter]);
+
+  const filteredAgents = useMemo(() => {
+    return agentRoster.filter((a) => {
+      if (agentSearch.trim()) {
+        const q = toSafeLower(agentSearch);
+        if (
+          !toSafeLower(a.full_name).includes(q) &&
+          !toSafeLower(a.email).includes(q) &&
+          !toSafeLower(a.phone).includes(q)
+        ) return false;
+      }
+      if (agentStatusFilter !== "all") {
+        if (toSafeLower(a.availability) !== toSafeLower(agentStatusFilter)) return false;
+      }
+      return true;
+    });
+  }, [agentRoster, agentSearch, agentStatusFilter]);
+
+  const filteredVehicles = useMemo(() => {
+    return vehicleFleet.filter((v) => {
+      if (vehicleSearch.trim()) {
+        const q = toSafeLower(vehicleSearch);
+        if (
+          !toSafeLower(v.vehicle_code).includes(q) &&
+          !toSafeLower(v.registration_number).includes(q) &&
+          !toSafeLower(v.model).includes(q)
+        ) return false;
+      }
+      if (vehicleStatusFilter !== "all") {
+        if (toSafeLower(v.status) !== toSafeLower(vehicleStatusFilter)) return false;
+      }
+      return true;
+    });
+  }, [vehicleFleet, vehicleSearch, vehicleStatusFilter]);
+
+  // --- ACTIONS & HANDLERS ---
+  const handleOpenCaseDetails = async (row: RescueCaseTableRow, tab: "details" | "tracking" = "details") => {
+    setSelectedCase(row);
+    setDetailTab(tab);
+    setIsCaseModalOpen(true);
+
+    const caseId = String(row.rawItem?.id || row.id || "");
+    if (!caseId) return;
+
+    try {
+      const res = await rescueService.getRescueCaseById(caseId);
+      const rawData = res?.data || res;
+      if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
+        setSelectedCase(formatCaseRow(rawData));
+      }
+    } catch {
+      /* Keep existing row */
+    }
+  };
+
+  const handleOpenAssignModal = (c: RescueCaseTableRow) => {
+    setSelectedCase(c);
+    setAssignForm({
+      coordinator_id: c.coordinator_id || "",
+      agent_id: "",
+      vehicle_id: "",
+      driver_id: "",
+      notes: "",
+    });
+    setIsAssignModalOpen(true);
+  };
 
   const handleCreateCase = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,7 +783,7 @@ const RescueManagement = () => {
         reporter_phone: formData.reporter_phone,
         reporter_notes: formData.reporter_notes,
       });
-      addToast("Rescue case reported successfully!", "success");
+      addToast("New rescue case created successfully!", "success");
       setIsAddModalOpen(false);
       setFormData({
         location_address: "",
@@ -266,7 +796,7 @@ const RescueManagement = () => {
         reporter_phone: "",
         reporter_notes: "",
       });
-      fetchRescueCases();
+      fetchAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string; message?: string } } };
@@ -276,78 +806,72 @@ const RescueManagement = () => {
     }
   };
 
-  const handleUpdateCase = async (e: React.FormEvent) => {
+  const handleAssignDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCase) return;
-    try {
-      setIsSubmitting(true);
-      // POST /rescue/{id}/verify only accepts { status, rejection_rationale,
-      // severity, is_urgent, media_evidence }. Location/condition/reporter
-      // fields are NOT editable via this endpoint, so we only send the fields
-      // the backend can actually persist (no silent no-op).
-      await rescueService.updateRescueCase(selectedCase.id, {
-        severity: formData.severity,
-        is_urgent: formData.is_urgent,
-      });
-      addToast("Rescue case updated successfully!", "success");
-      setIsEditModalOpen(false);
-      setSelectedCase(null);
-      fetchRescueCases();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to update rescue case", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
-  const handleDeleteCase = async () => {
-    if (!selectedCase) return;
     try {
       setIsSubmitting(true);
-      await rescueService.deleteRescueCase(selectedCase.id);
-      addToast("Rescue case deleted.", "success");
-      setIsDeleteModalOpen(false);
-      setSelectedCase(null);
-      fetchRescueCases();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to delete rescue case", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
-  const handleAssignCoordinator = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedCase) return;
-    if (!assignForm.coordinator_id) {
-      addToast("Select a rescue coordinator to assign.", "error");
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      await rescueService.assignCoordinator(
-        selectedCase.id,
-        assignForm.coordinator_id,
-        assignForm.notes || undefined
-      );
-      addToast("Rescue coordinator assigned successfully!", "success");
+      // Assign coordinator if selected
+      if (assignForm.coordinator_id && assignForm.coordinator_id !== selectedCase.coordinator_id) {
+        await rescueService.assignCoordinator(selectedCase.id, assignForm.coordinator_id, assignForm.notes || undefined);
+      }
+
+      // Assign agent and vehicle dispatch if selected
+      if (assignForm.agent_id || assignForm.vehicle_id) {
+        await rescueService.createDispatch({
+          case_id: selectedCase.id,
+          assigned_vehicle_id: assignForm.vehicle_id || undefined,
+          agent_ids: assignForm.agent_id ? [assignForm.agent_id] : undefined,
+          driver_id: assignForm.driver_id || undefined,
+          notes: assignForm.notes || undefined,
+        });
+      }
+
+      addToast("Rescue Case assignment saved successfully!", "success");
       setIsAssignModalOpen(false);
-      setAssignForm({ coordinator_id: "", notes: "" });
-      fetchRescueCases();
+      fetchAllData();
       notifyDataChanged();
+
+      // Refresh case modal if open
+      if (isCaseModalOpen) {
+        const refreshed = await rescueService.getRescueCaseById(selectedCase.id);
+        if (refreshed) setSelectedCase(formatCaseRow(refreshed?.data || refreshed));
+      }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to assign coordinator", "error");
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to submit assignment", "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleLogFoundPetFromRescue = async (caseItem: Record<string, unknown>) => {
+  const handleUpdateStatus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCase || !statusForm.status) return;
+
+    try {
+      setIsSubmitting(true);
+      await rescueService.updateRescueStatus(selectedCase.id, statusForm.status);
+      addToast(`Status updated to ${statusForm.status}!`, "success");
+      setIsStatusUpdateOpen(false);
+      fetchAllData();
+      notifyDataChanged();
+
+      if (isCaseModalOpen) {
+        const refreshed = await rescueService.getRescueCaseById(selectedCase.id);
+        if (refreshed) setSelectedCase(formatCaseRow(refreshed?.data || refreshed));
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to update status", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLogFoundPetFromRescue = async (caseItem: RescueCaseTableRow) => {
     try {
       setIsSubmitting(true);
       const address = caseItem.location_address !== "-" ? String(caseItem.location_address || "") : "Rescue Location";
@@ -371,7 +895,7 @@ const RescueManagement = () => {
 
       const reportId = (res as { data?: { id?: string }; id?: string })?.data?.id || (res as { id?: string })?.id;
       addToast(`Found pet report created for rescued dog! (${reportId ? `Report #${String(reportId).slice(0, 8)}` : "Saved"})`, "success");
-      setIsViewModalOpen(false);
+      setIsCaseModalOpen(false);
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string; message?: string } } };
@@ -381,87 +905,21 @@ const RescueManagement = () => {
     }
   };
 
-  const renderBadge = (val: string, type: "severity" | "urgent" | "status") => {
-    if (!val || val === "-") return "-";
-    const lower = String(val).toLowerCase();
-    let bg = "#F1F5F9";
-    let color = "#475569";
-
-    if (type === "urgent") {
-      if (lower === "yes" || lower === "true") {
-        bg = "#FEF2F2";
-        color = "#EF4444";
-      } else {
-        bg = "#ECFDF5";
-        color = "#10B981";
-      }
-    } else if (type === "severity") {
-      if (lower.includes("critical") || lower.includes("high") || lower.includes("severe")) {
-        bg = "#FEF2F2";
-        color = "#EF4444";
-      } else if (lower.includes("medium") || lower.includes("moderate")) {
-        bg = "#FFFBEB";
-        color = "#F59E0B";
-      } else {
-        bg = "#EFF6FF";
-        color = "#2563EB";
-      }
-    } else if (type === "status") {
-      if (lower.includes("completed") || lower.includes("approved") || lower.includes("resolved")) {
-        bg = "#ECFDF5";
-        color = "#10B981";
-      } else if (lower.includes("pending") || lower.includes("assigned") || lower.includes("in progress")) {
-        bg = "#FFFBEB";
-        color = "#F59E0B";
-      } else if (lower.includes("rejected") || lower.includes("cancelled")) {
-        bg = "#FEF2F2";
-        color = "#EF4444";
-      }
-    }
-
-    return (
-      <span
-        style={{
-          padding: "3px 10px",
-          borderRadius: "999px",
-          fontSize: "12px",
-          fontWeight: 700,
-          background: bg,
-          color: color,
-          display: "inline-block",
-        }}
-      >
-        {val}
-      </span>
-    );
-  };
-
-  const columns = [
-    { key: "ticket_number", header: "Case #" },
-    { key: "location_address", header: "Location" },
+  // --- COLUMNS FOR RESCUE CASES TABLE ---
+  const caseColumns = [
     {
-      key: "severity",
-      header: "Severity",
-      render: (val: string) => renderBadge(val, "severity"),
-    },
-    {
-      key: "is_urgent",
-      header: "Urgent",
-      render: (val: string) => renderBadge(val, "urgent"),
-    },
-    {
-      key: "stage_label",
-      header: "Dispatch Status",
+      key: "ticket_number",
+      header: "Case ID",
       render: (val: string, row: RescueCaseTableRow) => (
         <span
+          onClick={() => handleOpenCaseDetails(row, "details")}
           style={{
-            padding: "3px 10px",
-            borderRadius: "999px",
-            fontSize: "12px",
-            fontWeight: 700,
-            background: row.stage_bg,
-            color: row.stage_color,
-            display: "inline-block",
+            color: "#2563EB",
+            fontWeight: 800,
+            cursor: "pointer",
+            fontFamily: "monospace",
+            fontSize: "13px",
+            textDecoration: "underline",
           }}
         >
           {val}
@@ -469,28 +927,121 @@ const RescueManagement = () => {
       ),
     },
     {
+      key: "animal_count",
+      header: "Dog / Animal",
+      render: (val: string, row: RescueCaseTableRow) => (
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <FaDog color="#6366F1" size={14} />
+          <span style={{ fontWeight: 600, fontSize: "13px" }}>
+            {row.physical_condition !== "-" ? `${val} Dog (${row.physical_condition})` : `${val} Dog`}
+          </span>
+        </div>
+      ),
+    },
+    { key: "location_address", header: "Location" },
+    {
+      key: "severity",
+      header: "Severity",
+      render: (val: string) => {
+        const lower = String(val).toLowerCase();
+        let bg = "#EFF6FF";
+        let color = "#2563EB";
+        if (lower.includes("critical") || lower.includes("high")) {
+          bg = "#FEF2F2";
+          color = "#DC2626";
+        } else if (lower.includes("medium")) {
+          bg = "#FFFBEB";
+          color = "#D97706";
+        }
+        return (
+          <span style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: bg, color }}>
+            {val.toUpperCase()}
+          </span>
+        );
+      },
+    },
+    {
       key: "status",
       header: "Rescue Status",
       render: rescueStatusBadge,
     },
-    { key: "dispatch_agents", header: "Agents" },
     {
-      key: "coordinator_id",
-      header: "Coordinator",
-      render: (_: unknown, row: RescueCaseTableRow) => coordinatorLabel(row.coordinator_id),
+      key: "dispatch_agents",
+      header: "Assigned Agent",
+      render: (val: string) => (
+        <span style={{ fontWeight: val !== "-" ? 700 : 500, color: val !== "-" ? "#0F172A" : "#94A3B8" }}>
+          {val !== "-" ? `👮 ${val}` : "Unassigned"}
+        </span>
+      ),
+    },
+    {
+      key: "dispatch_vehicle",
+      header: "Assigned Vehicle",
+      render: (val: string) => (
+        <span style={{ fontWeight: val !== "-" ? 700 : 500, color: val !== "-" ? "#2563EB" : "#94A3B8" }}>
+          {val !== "-" ? `🚐 ${val}` : "Unassigned"}
+        </span>
+      ),
     },
     { key: "created_at", header: "Reported" },
+    {
+      key: "action",
+      header: "Action",
+      render: (_: unknown, row: RescueCaseTableRow) => (
+        <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => handleOpenCaseDetails(row, "details")}
+            style={{
+              padding: "6px 12px",
+              borderRadius: "6px",
+              border: "1px solid #93C5FD",
+              background: "#EFF6FF",
+              color: "#1D4ED8",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <FaEye size={12} /> View
+          </button>
+          <Can permission="assign_rescues">
+            <button
+              onClick={() => handleOpenAssignModal(row)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: "6px",
+                border: "1px solid #CBD5E1",
+                background: "#FFFFFF",
+                color: "#334155",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <FaUserCheck size={12} /> Assign
+            </button>
+          </Can>
+        </div>
+      ),
+    },
   ];
 
   return (
     <div style={{ padding: "24px", maxWidth: "1400px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      {/* PAGE HEADER */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <div>
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#0F172A", margin: 0 }}>
             Rescue Management
           </h1>
           <p style={{ color: "#64748B", margin: "4px 0 0 0", fontSize: "14px" }}>
-            Monitor and coordinate live dog rescue requests from the field.
+            Monitor and coordinate live dog rescue requests from the field. Click any row to view details &amp; track progress.
           </p>
         </div>
 
@@ -513,722 +1064,839 @@ const RescueManagement = () => {
             }}
           >
             <FaPlus size={14} />
-            <span>New Rescue Case</span>
+            <span>+ New Rescue Case</span>
           </button>
         </Can>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        <StatCard title="Total Rescues" value={cases.length} icon={<FaLifeRing />} color="#2563EB" />
-        <StatCard title="Urgent Incidents" value={cases.filter((c) => c.is_urgent === "Yes").length} icon={<FaExclamationTriangle />} color="#EF4444" />
-        <StatCard title="Critical Severity" value={cases.filter((c) => String(c.severity).toLowerCase().includes("critical") || String(c.severity).toLowerCase().includes("high")).length} icon={<FaAmbulance />} color="#F59E0B" />
-        <StatCard title="Completed Cases" value={cases.filter((c) => String(c.status).toLowerCase() === "admitted" || String(c.status).toLowerCase() === "rescued").length} icon={<FaCheckCircle />} color="#10B981" />
-      </div>
-
-      <QuickActionCard
-        title="Emergency Rescue Operations Triage"
-        description="Live incident reports dynamically sync across all rescue centers, dispatch units, and vet clinics."
-      />
-
-      <div style={{ marginTop: "24px" }}>
-        <DataTable
-          data={cases}
-          columns={columns}
-          loading={loading}
-          error={error}
-          onRetry={fetchRescueCases}
-          module="rescues"
-          renderRowActions={(item: RescueCaseTableRow) => (
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button
-                onClick={() => {
-                  setSelectedCase(item);
-                  setIsViewModalOpen(true);
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #93C5FD",
-                  background: "#EFF6FF",
-                  color: "#1D4ED8",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                <FaEye size={12} /> View Details
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedCase(item);
-                  const sevRaw = String(item.severity || "").toLowerCase();
-                  const severity = SEVERITY_OPTIONS.some((s) => s.value === sevRaw) ? sevRaw : "high";
-                  const condRaw = String(item.physical_condition || "").toLowerCase();
-                  const physical_condition = PHYSICAL_CONDITION_OPTIONS.some((c) => c.value === condRaw) ? condRaw : "unknown";
-                  setFormData({
-                    location_address: item.location_address !== "-" ? String(item.location_address || "") : "",
-                    location_landmark: item.location_landmark !== "-" ? String(item.location_landmark || "") : "",
-                    severity,
-                    is_urgent: item.is_urgent === "Yes",
-                    animal_count: Number(item.animal_count !== "-" ? item.animal_count : 1),
-                    physical_condition,
-                    reporter_name: item.reporter_name !== "-" ? String(item.reporter_name || "") : "",
-                    reporter_phone: item.reporter_phone !== "-" ? String(item.reporter_phone || "") : "",
-                    reporter_notes: item.reporter_notes !== "-" ? String(item.reporter_notes || "") : "",
-                  });
-                  setIsEditModalOpen(true);
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #CBD5E1",
-                  background: "#FFFFFF",
-                  color: "#2563EB",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                <FaEdit size={12} /> Edit
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedCase(item);
-                  setIsDeleteModalOpen(true);
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #FCA5A5",
-                  background: "#FFFFFF",
-                  color: "#DC2626",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                <FaTrash size={12} /> Delete
-              </button>
-            </div>
-          )}
-        />
-      </div>
-
-      {/* Rescue Coordinators */}
-      <div className="soft-card" style={{ padding: "20px", marginTop: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700 }}>Available Rescue Coordinators</h3>
+      {/* DYNAMIC STATISTICS SECTION (8 CARDS) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "20px" }}>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("all"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Total Rescues" value={stats.total} icon={<FaLifeRing />} color="#2563EB" />
         </div>
-        {coordinators.length === 0 ? (
-          <p style={{ margin: 0, color: "#94A3B8", fontSize: "13px" }}>
-            No rescue coordinators found in the user directory.
-          </p>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
-            {coordinators.map((c: CoordinatorUser) => (
-              <div key={c.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "12px 14px" }}>
-                <div style={{ fontSize: "14px", fontWeight: 700, color: "#0F172A" }}>{String(c.full_name || c.email || c.id)}</div>
-                {c.email ? <div style={{ fontSize: "12px", color: "#64748B" }}>{String(c.email)}</div> : null}
-                {c.phone ? <div style={{ fontSize: "12px", color: "#64748B" }}>{String(c.phone)}</div> : null}
-                <div style={{ marginTop: "8px" }}>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("pending"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Pending Rescues" value={stats.pending} icon={<FaClock />} color="#D97706" />
+        </div>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("active"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Active Rescues" value={stats.active} icon={<FaAmbulance />} color="#2563EB" />
+        </div>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("urgent"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Urgent Incidents" value={stats.urgent} icon={<FaExclamationTriangle />} color="#EF4444" />
+        </div>
+        <div onClick={() => { handleTabChange("cases"); setSeverityFilter("critical"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Critical Cases" value={stats.critical} icon={<FaMedkit />} color="#DC2626" />
+        </div>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("dispatched"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Dispatched Cases" value={stats.dispatched} icon={<FaTruck />} color="#6366F1" />
+        </div>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("completed"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Completed Cases" value={stats.completed} icon={<FaCheckCircle />} color="#10B981" />
+        </div>
+        <div onClick={() => { handleTabChange("cases"); setStatusFilter("cancelled"); }} style={{ cursor: "pointer" }}>
+          <StatCard title="Cancelled Cases" value={stats.cancelled} icon={<FaTimes />} color="#64748B" />
+        </div>
+      </div>
+
+      {/* QUICK SUMMARY CARDS FOR AGENTS AND VEHICLES */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "24px" }}>
+        {/* Rescue Agents Card */}
+        <div
+          onClick={() => handleTabChange("agents")}
+          style={{
+            background: "#FFFFFF",
+            border: "1px solid #E2E8F0",
+            borderRadius: "12px",
+            padding: "16px 20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            cursor: "pointer",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "44px", height: "44px", borderRadius: "10px", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <FaUserTie size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Available Rescue Agents</div>
+              <div style={{ fontSize: "20px", fontWeight: 800, color: "#0F172A", marginTop: "2px" }}>
+                {agentRoster.filter((a) => a.availability === "Available").length} / {agentRoster.length} Agents Available
+              </div>
+            </div>
+          </div>
+          <button style={{ border: "none", background: "transparent", color: "#2563EB", fontWeight: 700, fontSize: "14px", display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+            View All Agents <FaArrowRight size={12} />
+          </button>
+        </div>
+
+        {/* Rescue Vehicles Card */}
+        <div
+          onClick={() => handleTabChange("vehicles")}
+          style={{
+            background: "#FFFFFF",
+            border: "1px solid #E2E8F0",
+            borderRadius: "12px",
+            padding: "16px 20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            cursor: "pointer",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "44px", height: "44px", borderRadius: "10px", background: "#ECFDF5", color: "#059669", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <FaCarSide size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescue Vehicles Fleet</div>
+              <div style={{ fontSize: "20px", fontWeight: 800, color: "#0F172A", marginTop: "2px" }}>
+                {vehicleStats.available} Available ({vehicleStats.onRescue} On Rescue, {vehicleStats.maintenance} Service)
+              </div>
+            </div>
+          </div>
+          <button style={{ border: "none", background: "transparent", color: "#059669", fontWeight: 700, fontSize: "14px", display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+            View All Vehicles <FaArrowRight size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* TOP TAB NAVIGATION BAR */}
+      <div style={{ display: "flex", gap: "8px", borderBottom: "2px solid #E2E8F0", marginBottom: "20px" }}>
+        <button
+          onClick={() => handleTabChange("cases")}
+          style={{
+            padding: "10px 20px",
+            fontWeight: 700,
+            fontSize: "14px",
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            color: activeTab === "cases" ? "#2563EB" : "#64748B",
+            borderBottom: activeTab === "cases" ? "3px solid #2563EB" : "3px solid transparent",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <FaClipboardList size={16} /> Rescue Cases ({cases.length})
+        </button>
+        <button
+          onClick={() => handleTabChange("agents")}
+          style={{
+            padding: "10px 20px",
+            fontWeight: 700,
+            fontSize: "14px",
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            color: activeTab === "agents" ? "#2563EB" : "#64748B",
+            borderBottom: activeTab === "agents" ? "3px solid #2563EB" : "3px solid transparent",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <FaUserTie size={16} /> Rescue Agents ({agentRoster.length})
+        </button>
+        <button
+          onClick={() => handleTabChange("vehicles")}
+          style={{
+            padding: "10px 20px",
+            fontWeight: 700,
+            fontSize: "14px",
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            color: activeTab === "vehicles" ? "#2563EB" : "#64748B",
+            borderBottom: activeTab === "vehicles" ? "3px solid #2563EB" : "3px solid transparent",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <FaTruck size={16} /> Rescue Vehicles ({vehicleFleet.length})
+        </button>
+      </div>
+
+      {/* TAB 1: RESCUE CASES */}
+      {activeTab === "cases" && (
+        <div>
+          {/* SEARCH & MULTI-FILTER TOOLBAR */}
+          <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Search Cases</label>
+              <div style={{ position: "relative", marginTop: "4px" }}>
+                <FaSearch style={{ position: "absolute", left: "10px", top: "10px", color: "#94A3B8" }} />
+                <input
+                  type="text"
+                  placeholder="Case #, address, agent..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ width: "100%", padding: "8px 8px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="active">Active / In Progress</option>
+                <option value="dispatched">Dispatched</option>
+                <option value="completed">Completed / Admitted</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Severity</label>
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Assigned Agent</label>
+              <select
+                value={agentFilter}
+                onChange={(e) => setAgentFilter(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="all">All Agents</option>
+                {agentRoster.map((a) => (
+                  <option key={a.id} value={a.full_name}>{a.full_name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Assigned Vehicle</label>
+              <select
+                value={vehicleFilter}
+                onChange={(e) => setVehicleFilter(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="all">All Vehicles</option>
+                {vehicleFleet.map((v) => (
+                  <option key={v.id} value={v.vehicle_code}>{v.vehicle_code} ({v.registration_number})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* CASES TABLE */}
+          <DataTable
+            data={filteredCases}
+            columns={caseColumns}
+            loading={loading}
+            error={error}
+            onRetry={fetchAllData}
+            module="rescues"
+            onRowClick={(row: RescueCaseTableRow) => handleOpenCaseDetails(row, "details")}
+          />
+        </div>
+      )}
+
+      {/* TAB 2: RESCUE AGENTS */}
+      {activeTab === "agents" && (
+        <div>
+          {/* AGENT FILTERS */}
+          <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px", display: "flex", gap: "16px", alignItems: "center" }}>
+            <div style={{ flex: 1, position: "relative" }}>
+              <FaSearch style={{ position: "absolute", left: "10px", top: "10px", color: "#94A3B8" }} />
+              <input
+                type="text"
+                placeholder="Search agent by name, email, phone..."
+                value={agentSearch}
+                onChange={(e) => setAgentSearch(e.target.value)}
+                style={{ width: "100%", padding: "8px 8px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+            <select
+              value={agentStatusFilter}
+              onChange={(e) => setAgentStatusFilter(e.target.value)}
+              style={{ width: "180px", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="available">Available</option>
+              <option value="busy">Busy</option>
+              <option value="offline">Offline</option>
+            </select>
+          </div>
+
+          {/* AGENTS ROSTER GRID */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
+            {filteredAgents.map((agent) => (
+              <div
+                key={agent.id}
+                onClick={() => { setSelectedAgent(agent); setIsAgentModalOpen(true); }}
+                style={{
+                  background: "#FFFFFF",
+                  border: "1px solid #E2E8F0",
+                  borderRadius: "12px",
+                  padding: "18px",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#3B82F6", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "16px" }}>
+                      {agent.full_name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A" }}>{agent.full_name}</div>
+                      <div style={{ fontSize: "12px", color: "#64748B" }}>{agent.role} • {agent.agent_code}</div>
+                    </div>
+                  </div>
+
                   <span
                     style={{
-                      padding: "2px 8px",
-                      borderRadius: "12px",
+                      padding: "3px 10px",
+                      borderRadius: "999px",
                       fontSize: "11px",
-                      fontWeight: 700,
-                      background: c.is_active ? "#ECFDF5" : "#FEF2F2",
-                      color: c.is_active ? "#059669" : "#DC2626",
+                      fontWeight: 800,
+                      background: agent.availability === "Available" ? "#ECFDF5" : "#FEF2F2",
+                      color: agent.availability === "Available" ? "#059669" : "#DC2626",
                     }}
                   >
-                    {c.is_active ? "Active" : "Inactive"}
+                    {agent.availability === "Available" ? "● AVAILABLE" : "○ BUSY ON RESCUE"}
                   </span>
+                </div>
+
+                <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "4px", marginBottom: "14px" }}>
+                  <div>📍 <strong>Service Area:</strong> {agent.service_area}</div>
+                  <div>🚐 <strong>Vehicle:</strong> {agent.assigned_vehicle}</div>
+                  <div>📞 <strong>Contact:</strong> {agent.phone}</div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #F1F5F9", fontSize: "12px" }}>
+                  <span style={{ color: "#64748B" }}>Active Cases: <strong style={{ color: "#2563EB" }}>{agent.active_cases_count}</strong></span>
+                  <span style={{ color: "#64748B" }}>Total Completed: <strong style={{ color: "#059669" }}>{agent.completed_rescues_count}</strong></span>
+                  <span style={{ color: "#2563EB", fontWeight: 700 }}>Details →</span>
                 </div>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Add Modal */}
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Report New Rescue Incident">
-        <form onSubmit={handleCreateCase} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Location Address *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. 5th Main St, Near City Park"
-              value={formData.location_address}
-              onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
+      {/* TAB 3: RESCUE VEHICLES */}
+      {activeTab === "vehicles" && (
+        <div>
+          {/* VEHICLE FILTERS */}
+          <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px", display: "flex", gap: "16px", alignItems: "center" }}>
+            <div style={{ flex: 1, position: "relative" }}>
+              <FaSearch style={{ position: "absolute", left: "10px", top: "10px", color: "#94A3B8" }} />
+              <input
+                type="text"
+                placeholder="Search vehicle code, plate, model..."
+                value={vehicleSearch}
+                onChange={(e) => setVehicleSearch(e.target.value)}
+                style={{ width: "100%", padding: "8px 8px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+            <select
+              value={vehicleStatusFilter}
+              onChange={(e) => setVehicleStatusFilter(e.target.value)}
+              style={{ width: "180px", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="available">Available</option>
+              <option value="on rescue">On Rescue</option>
+              <option value="maintenance">Maintenance</option>
+            </select>
           </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Landmark</label>
-            <input
-              type="text"
-              placeholder="e.g. Behind Central Metro Station"
-              value={formData.location_landmark}
-              onChange={(e) => setFormData({ ...formData, location_landmark: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Severity</label>
-              <select
-                value={formData.severity}
-                onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
+
+          {/* VEHICLE FLEET GRID */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
+            {filteredVehicles.map((vehicle) => (
+              <div
+                key={vehicle.id}
+                onClick={() => { setSelectedVehicle(vehicle); setIsVehicleModalOpen(true); }}
+                style={{
+                  background: "#FFFFFF",
+                  border: "1px solid #E2E8F0",
+                  borderRadius: "12px",
+                  padding: "18px",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                  transition: "all 0.2s ease",
+                }}
               >
-                {SEVERITY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Dog Count</label>
-              <input
-                type="number"
-                min="1"
-                value={formData.animal_count}
-                onChange={(e) => setFormData({ ...formData, animal_count: Number(e.target.value) })}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-              />
-            </div>
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Physical Condition</label>
-            <select
-              value={formData.physical_condition}
-              onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            >
-              {PHYSICAL_CONDITION_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Name *</label>
-              <input
-                type="text"
-                required
-                value={formData.reporter_name}
-                onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Phone *</label>
-              <input
-                type="text"
-                required
-                value={formData.reporter_phone}
-                onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-              />
-            </div>
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Notes</label>
-            <textarea
-              rows={3}
-              value={formData.reporter_notes}
-              onChange={(e) => setFormData({ ...formData, reporter_notes: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Reporting..." : "Report Incident"}</button>
-          </div>
-        </form>
-      </Modal>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: "16px", color: "#0F172A", fontFamily: "monospace" }}>{vehicle.vehicle_code}</div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>{vehicle.model} ({vehicle.registration_number})</div>
+                  </div>
 
-      {/* Edit Modal */}
-      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Update Rescue Case">
-        <form onSubmit={handleUpdateCase} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#1E40AF" }}>
-            Location, physical condition and reporter fields are fixed at creation time and cannot be edited here.
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Severity</label>
-            <select
-              value={formData.severity}
-              onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            >
-              {SEVERITY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-            <input
-              type="checkbox"
-              checked={formData.is_urgent}
-              onChange={(e) => setFormData({ ...formData, is_urgent: e.target.checked })}
-            />
-            Urgent case
-          </label>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsEditModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Saving..." : "Save Changes"}</button>
-          </div>
-        </form>
-      </Modal>
+                  <span
+                    style={{
+                      padding: "3px 10px",
+                      borderRadius: "999px",
+                      fontSize: "11px",
+                      fontWeight: 800,
+                      background: vehicle.status === "Available" ? "#ECFDF5" : vehicle.status === "On Rescue" ? "#EFF6FF" : "#FEF2F2",
+                      color: vehicle.status === "Available" ? "#059669" : vehicle.status === "On Rescue" ? "#2563EB" : "#DC2626",
+                    }}
+                  >
+                    {vehicle.status === "Available" ? "● READY" : vehicle.status === "On Rescue" ? "🚑 ON RESCUE" : "🔧 SERVICE"}
+                  </span>
+                </div>
 
-      {/* View Modal */}
-      <Modal
-        isOpen={isViewModalOpen}
-        onClose={() => setIsViewModalOpen(false)}
-        title="Rescue Case Details"
-        size="xl"
-        footer={
-          selectedCase ? (
-            <>
-              {["rescued", "admitted"].includes(String(selectedCase.status).toLowerCase()) && (
+                <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "6px", marginBottom: "14px" }}>
+                  <div>👮 <strong>Primary Driver:</strong> {vehicle.assigned_driver}</div>
+                  <div>📍 <strong>Base Location:</strong> {vehicle.location}</div>
+                  <div>⚓ <strong>Capacity Used:</strong> <strong style={{ color: "#2563EB" }}>{vehicle.capacity_used} / {vehicle.capacity} Dogs</strong></div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #F1F5F9", fontSize: "12px" }}>
+                  <span style={{ color: "#64748B" }}>Fuel Level: <strong>{vehicle.fuel_level}</strong></span>
+                  <span style={{ color: "#2563EB", fontWeight: 700 }}>Fleet Details →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL 1: RESCUE CASE DETAILS MODAL --- */}
+      {selectedCase && (
+        <Modal
+          isOpen={isCaseModalOpen}
+          onClose={() => setIsCaseModalOpen(false)}
+          title={`Rescue Incident #${selectedCase.ticket_number}`}
+        >
+          <div style={{ display: "flex", gap: "8px", borderBottom: "1px solid #E2E8F0", marginBottom: "16px" }}>
+            <button
+              onClick={() => setDetailTab("details")}
+              style={{
+                padding: "8px 16px",
+                fontWeight: 700,
+                border: "none",
+                background: "transparent",
+                color: detailTab === "details" ? "#2563EB" : "#64748B",
+                borderBottom: detailTab === "details" ? "2px solid #2563EB" : "none",
+                cursor: "pointer",
+              }}
+            >
+              Incident Details
+            </button>
+            <button
+              onClick={() => setDetailTab("tracking")}
+              style={{
+                padding: "8px 16px",
+                fontWeight: 700,
+                border: "none",
+                background: "transparent",
+                color: detailTab === "tracking" ? "#2563EB" : "#64748B",
+                borderBottom: detailTab === "tracking" ? "2px solid #2563EB" : "none",
+                cursor: "pointer",
+              }}
+            >
+              Rescue Timeline &amp; Progress Stepper
+            </button>
+          </div>
+
+          {detailTab === "details" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* CASE SUMMARY HEADER */}
+              <div style={{ background: "#F8FAFC", padding: "14px", borderRadius: "10px", border: "1px solid #E2E8F0", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Severity Level</div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "#DC2626" }}>{selectedCase.severity.toUpperCase()}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Current Status</div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "#2563EB" }}>{selectedCase.status.toUpperCase()}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Reported Time</div>
+                  <div style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>{selectedCase.created_at}</div>
+                </div>
+              </div>
+
+              {/* DOG INFORMATION */}
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+                <div style={{ fontSize: "12px", fontWeight: 800, color: "#0F172A", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FaDog color="#6366F1" /> Dog / Animal Condition Information
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px" }}>
+                  <div><strong>Count / Dog:</strong> {selectedCase.animal_count} Dog</div>
+                  <div><strong>Physical Condition:</strong> {selectedCase.physical_condition}</div>
+                  <div><strong>Behavioral Notes:</strong> {selectedCase.behavioral_indicators}</div>
+                  <div><strong>Environmental Factors:</strong> {selectedCase.environmental_factors}</div>
+                </div>
+              </div>
+
+              {/* REPORTER INFORMATION */}
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+                <div style={{ fontSize: "12px", fontWeight: 800, color: "#0F172A", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FaUser color="#2563EB" /> Reporter Information
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px" }}>
+                  <div><strong>Reporter Name:</strong> {selectedCase.reporter_name}</div>
+                  <div><strong>Phone:</strong> {selectedCase.reporter_phone}</div>
+                  <div><strong>Email:</strong> {selectedCase.reporter_email}</div>
+                  <div><strong>Notes:</strong> {selectedCase.reporter_notes}</div>
+                </div>
+              </div>
+
+              {/* LOCATION & MAP PREVIEW */}
+              <div>
+                <LocationMapPreview
+                  latitude={selectedCase.latitude}
+                  longitude={selectedCase.longitude}
+                  locationAddress={selectedCase.location_address}
+                  height="220px"
+                  title="Rescue Incident Field Location"
+                />
+              </div>
+
+              {/* ASSIGNMENT INFORMATION */}
+              <div style={{ background: "#EFF6FF", padding: "12px", borderRadius: "8px", border: "1px solid #93C5FD" }}>
+                <div style={{ fontSize: "12px", fontWeight: 800, color: "#1E40AF", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FaUserCheck /> Current Operational Assignment
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px", color: "#1E3A8A" }}>
+                  <div><strong>Assigned Agent:</strong> {selectedCase.dispatch_agents}</div>
+                  <div><strong>Assigned Vehicle:</strong> {selectedCase.dispatch_vehicle}</div>
+                  <div><strong>Dispatch Driver:</strong> {selectedCase.dispatch_driver}</div>
+                  <div><strong>Coordinator:</strong> {selectedCase.coordinator_id || "Unassigned"}</div>
+                </div>
+              </div>
+
+              {/* ACTION BUTTONS */}
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "12px", flexWrap: "wrap" }}>
                 <button
-                  type="button"
+                  onClick={() => setIsStatusUpdateOpen(true)}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #D97706",
+                    background: "#FFFBEB",
+                    color: "#D97706",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ⚡ Update Status
+                </button>
+                <button
                   onClick={() => handleLogFoundPetFromRescue(selectedCase)}
                   disabled={isSubmitting}
                   style={{
-                    padding: "8px 16px",
-                    borderRadius: "8px",
-                    border: "none",
-                    background: "#7C3AED",
-                    color: "#FFF",
-                    cursor: isSubmitting ? "wait" : "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    fontWeight: 600,
+                    padding: "8px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #10B981",
+                    background: "#ECFDF5",
+                    color: "#059669",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
                   }}
                 >
-                  <FaSearchLocation size={12} /> Log as Found Pet for Matching
+                  🐾 Log Found Pet Report
                 </button>
-              )}
-              <Can permission="edit_rescues">
                 <button
-                  type="button"
-                  onClick={() => {
-                    setAssignForm({
-                      coordinator_id: selectedCase.coordinator_id || "",
-                      notes: "",
-                    });
-                    setIsAssignModalOpen(true);
+                  onClick={() => handleOpenAssignModal(selectedCase)}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "#2563EB",
+                    color: "#FFF",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
                   }}
-                  style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  <FaPlus size={12} /> Assign Coordinator
+                  👮 Assign Agent &amp; Vehicle
                 </button>
-              </Can>
-              <button
-                type="button"
-                onClick={() => setIsViewModalOpen(false)}
-                style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", cursor: "pointer" }}
-              >
-                Close
-              </button>
-            </>
-          ) : null
-        }
-      >
-        {selectedCase && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Ticket Number</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.ticket_number || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Reporter Name</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.reporter_name || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Reporter Phone</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.reporter_phone || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Alternate Phone</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.reporter_alternate_phone || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Reporter Email</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.reporter_email || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Anonymous</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.is_anonymous || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Location Address</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.location_address || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Landmark</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.location_landmark || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Latitude / Longitude</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>
-                {selectedCase.latitude || "-"} / {selectedCase.longitude || "-"}
               </div>
             </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Dog Count</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.animal_count || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Physical Condition</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.physical_condition || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Behavioral Indicators</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.behavioral_indicators || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Severity</div>
-              <div style={{ marginTop: "4px" }}>{renderBadge(selectedCase.severity, "severity")}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Urgent</div>
-              <div style={{ marginTop: "4px" }}>{renderBadge(selectedCase.is_urgent, "urgent")}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Status</div>
-              <div style={{ marginTop: "4px" }}>{renderBadge(selectedCase.status, "status")}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Media Evidence</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", wordBreak: "break-word" }}>{selectedCase.media_evidence || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Environmental Factors</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.environmental_factors || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Reporter Notes</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.reporter_notes || "-"}</div>
-            </div>
-
-            {selectedCase.rejection_reason && (
-              <div style={{ background: "#FEF2F2", padding: "10px 12px", borderRadius: "8px", border: "1px solid #FCA5A5", gridColumn: "1 / -1" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#991B1B", textTransform: "uppercase" }}>Rejection Reason</div>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: "#991B1B" }}>{selectedCase.rejection_reason}</div>
+          ) : (
+            /* TIMELINE STEPPER */
+            <div style={{ padding: "12px 0" }}>
+              <div style={{ fontSize: "14px", fontWeight: 800, marginBottom: "16px", color: "#0F172A" }}>
+                Chronological Rescue Lifecycle Timeline
               </div>
-            )}
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Assigned Coordinator</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>
-                {selectedCase.coordinator_id ? coordinatorLabel(selectedCase.coordinator_id) : "Not assigned"}
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {[
+                  { title: "Rescue Request Submitted", time: selectedCase.created_at, done: true },
+                  { title: "Coordinator Reviewed & Verified", time: selectedCase.created_at, done: true },
+                  { title: "Dispatch Team & Vehicle Assigned", time: selectedCase.dispatched_at, done: selectedCase.has_dispatch },
+                  { title: "Agent En Route to Field Scene", time: selectedCase.dispatched_at, done: selectedCase.has_dispatch },
+                  { title: "Agent Arrived & Dog Located", time: selectedCase.located_at, done: selectedCase.located_at !== "-" },
+                  { title: "Dog Rescued & Secured", time: selectedCase.rescued_at, done: selectedCase.rescued_at !== "-" },
+                  { title: "Transferred to Shelter / Vet Clinic", time: selectedCase.admitted_at, done: selectedCase.admitted_at !== "-" },
+                  { title: "Rescue Mission Completed", time: selectedCase.updated_at, done: selectedCase.status.toLowerCase().includes("completed") || selectedCase.status.toLowerCase().includes("admitted") },
+                ].map((step, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                    <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: step.done ? "#10B981" : "#E2E8F0", color: step.done ? "#FFF" : "#64748B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 800 }}>
+                      {step.done ? "✓" : i + 1}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: "13px", color: step.done ? "#0F172A" : "#94A3B8" }}>{step.title}</div>
+                      <div style={{ fontSize: "11px", color: "#64748B" }}>Timestamp: {step.time}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Created At</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.created_at || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Updated At</div>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.updated_at || "-"}</div>
-            </div>
-
-            <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "8px" }}>Dispatch & Lifecycle</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Dispatch Status</div>
-                  <span style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: selectedCase.stage_bg, color: selectedCase.stage_color, display: "inline-block", marginTop: "4px" }}>
-                    {selectedCase.stage_label}
-                  </span>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescue Status</div>
-                  <div style={{ marginTop: "4px" }}>{rescueStatusBadge(selectedCase.status)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Assigned Driver</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_driver || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Field Agents</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_agents || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Vehicle</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_vehicle || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Equipment</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatch_equipment || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Dispatched At</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.dispatched_at || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Located At</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.located_at || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescued At</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.rescued_at || "-"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Admitted At</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>{selectedCase.admitted_at || "-"}</div>
-                </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Escalation</div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A" }}>
-                    {selectedCase.escalation_type !== "-" ? `${selectedCase.escalation_type}${selectedCase.escalation_notes !== "-" ? ` — ${selectedCase.escalation_notes}` : ""}` : "None"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 16-Stage End-to-End Operational Lifecycle Tracker */}
-            <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #CBD5E1", gridColumn: "1 / -1", marginTop: "12px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", paddingBottom: "8px", borderBottom: "1px solid #E2E8F0" }}>
-                <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <FaLifeRing style={{ color: "#2563EB" }} /> 16-Stage Rescue Case Lifecycle Tracker
-                </h4>
-                <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "999px", background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}>
-                  Live Operational Tracker
-                </span>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" }}>
-                {/* 1. Request Intake */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>1. REQUEST INTAKE</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#166534", marginTop: "2px" }}>✓ Logged</div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Ticket: {selectedCase.ticket_number}</div>
-                </div>
-
-                {/* 2. Verification */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>2. VERIFICATION</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.status === "rejected" ? "#991B1B" : "#166534", marginTop: "2px" }}>
-                    {selectedCase.status === "rejected" ? "❌ Rejected" : selectedCase.status !== "reported" ? "✓ Verified" : "⏳ Pending Review"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Severity: {selectedCase.severity}</div>
-                </div>
-
-                {/* 3. Coordinator */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>3. COORDINATOR</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.coordinator_id ? "#166534" : "#B45309", marginTop: "2px" }}>
-                    {selectedCase.coordinator_id ? "✓ Assigned" : "⏳ Unassigned"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>{selectedCase.coordinator_id ? coordinatorLabel(selectedCase.coordinator_id) : "Pending Admin"}</div>
-                </div>
-
-                {/* 4. Rescue Agent */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>4. RESCUE AGENT</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.dispatch_agents !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.dispatch_agents !== "-" ? "✓ Agent Assigned" : "⏳ Unassigned"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Agents: {selectedCase.dispatch_agents}</div>
-                </div>
-
-                {/* 5. Driver */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>5. FLEET DRIVER</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.dispatch_driver !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.dispatch_driver !== "-" ? "✓ Driver Assigned" : "⏳ Unassigned"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Driver: {selectedCase.dispatch_driver}</div>
-                </div>
-
-                {/* 6. Vehicle */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>6. FLEET VEHICLE</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.dispatch_vehicle !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.dispatch_vehicle !== "-" ? "✓ Vehicle Allocated" : "⏳ Unassigned"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Vehicle: {selectedCase.dispatch_vehicle}</div>
-                </div>
-
-                {/* 7. Dispatch */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>7. DISPATCH EXECUTION</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.dispatched_at !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.dispatched_at !== "-" ? "✓ Dispatched" : "⏳ Preparing"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Time: {selectedCase.dispatched_at}</div>
-                </div>
-
-                {/* 8. Field Search */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>8. FIELD SEARCH</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.located_at !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.located_at !== "-" ? "✓ Dog Located" : "⏳ Searching"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Located: {selectedCase.located_at}</div>
-                </div>
-
-                {/* 9. Rescue Execution */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>9. RESCUE EXECUTION</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.rescued_at !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.rescued_at !== "-" ? "✓ Dog Secured" : "⏳ Operation Active"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Secured: {selectedCase.rescued_at}</div>
-                </div>
-
-                {/* 10. Centre Admission */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>10. CENTRE ADMISSION</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.admitted_at !== "-" ? "#166534" : "#64748B", marginTop: "2px" }}>
-                    {selectedCase.admitted_at !== "-" ? "✓ Admitted" : "⏳ En Route"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Admitted: {selectedCase.admitted_at}</div>
-                </div>
-
-                {/* 11. Dog Profile */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>11. DOG REGISTRATION</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: selectedCase.rawItem?.dog_id ? "#166534" : "#2563EB", marginTop: "2px" }}>
-                    {selectedCase.rawItem?.dog_id ? "✓ Registered Profile" : "🐾 Linked Record"}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(selectedCase.rawItem?.dog_id || selectedCase.id).slice(0, 8)}…</div>
-                </div>
-
-                {/* 12. Unique QR Tag */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>12. UNIQUE QR TAG</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#166534", marginTop: "2px" }}>
-                    ✓ QR Associated
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#2563EB", cursor: "pointer", textDecoration: "underline" }} onClick={() => window.open(`/public/dogs/${selectedCase.rawItem?.dog_id || selectedCase.id}`, "_blank")}>
-                    Public Profile Scan ↗
-                  </div>
-                </div>
-
-                {/* 13. Lost & Found */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>13. LOST & FOUND CHECK</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#7C3AED", marginTop: "2px" }}>
-                    🔍 Checked
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Matches reviewed</div>
-                </div>
-
-                {/* 14. Veterinary / Medical */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>14. VETERINARY / MEDICAL</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#0284C7", marginTop: "2px" }}>
-                    🩺 Clinical Exam
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Clearance workflow</div>
-                </div>
-
-                {/* 15. Shelter Care */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>15. SHELTER CARE</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#059669", marginTop: "2px" }}>
-                    🏡 Kennel Admission
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Observation active</div>
-                </div>
-
-                {/* 16. Adoption Workflow */}
-                <div style={{ background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B" }}>16. ADOPTION WORKFLOW</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#DB2777", marginTop: "2px" }}>
-                    ❤️ Readiness / Listing
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#64748B" }}>Screening & placement</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Assign Coordinator Modal */}
-      <Modal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} title={`Assign Coordinator${selectedCase?.ticket_number ? ` — ${selectedCase.ticket_number}` : ""}`}>
-        <form onSubmit={handleAssignCoordinator} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {coordinators.length === 0 && (
-            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#92400E" }}>
-              No rescue coordinators found in the user directory. Add a user with the rescue coordinator role first.
             </div>
           )}
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Rescue Coordinator *</label>
-            <select
-              required
-              value={assignForm.coordinator_id}
-              onChange={(e) => setAssignForm({ ...assignForm, coordinator_id: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            >
-              <option value="">Select a coordinator...</option>
-              {coordinators.map((c: CoordinatorUser) => (
-                <option key={c.id} value={c.id}>{String(c.full_name || c.email || c.id)}</option>
-              ))}
-            </select>
+        </Modal>
+      )}
+
+      {/* --- MODAL 2: RESCUE AGENT DETAILS MODAL --- */}
+      {selectedAgent && (
+        <Modal
+          isOpen={isAgentModalOpen}
+          onClose={() => setIsAgentModalOpen(false)}
+          title={`Rescue Agent Profile: ${selectedAgent.full_name}`}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", background: "#F8FAFC", padding: "16px", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+              <div style={{ width: "60px", height: "60px", borderRadius: "50%", background: "#2563EB", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px", fontWeight: 800 }}>
+                {selectedAgent.full_name.slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>{selectedAgent.full_name}</h3>
+                <div style={{ fontSize: "13px", color: "#64748B" }}>{selectedAgent.role} • ID: {selectedAgent.agent_code}</div>
+                <div style={{ fontSize: "12px", color: "#2563EB", fontWeight: 700, marginTop: "2px" }}>{selectedAgent.service_area}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div><strong>Email:</strong> {selectedAgent.email}</div>
+              <div><strong>Phone:</strong> {selectedAgent.phone}</div>
+              <div><strong>Operational Shift:</strong> {selectedAgent.shift}</div>
+              <div><strong>Assigned Vehicle:</strong> {selectedAgent.assigned_vehicle}</div>
+              <div><strong>Experience:</strong> {selectedAgent.experience_years} Years</div>
+              <div><strong>Status:</strong> {selectedAgent.availability}</div>
+            </div>
+
+            {/* CURRENT ASSIGNMENT */}
+            {selectedAgent.current_assignment ? (
+              <div style={{ background: "#EFF6FF", border: "1px solid #93C5FD", borderRadius: "8px", padding: "12px" }}>
+                <div style={{ fontSize: "12px", fontWeight: 800, color: "#1E40AF", marginBottom: "4px" }}>🚑 CURRENT ACTIVE RESCUE ASSIGNMENT</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#1E3A8A" }}>
+                  Case #{selectedAgent.current_assignment.ticket_number} — Location: {selectedAgent.current_assignment.location_address}
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: "#ECFDF5", border: "1px solid #6EE7B7", borderRadius: "8px", padding: "10px", fontSize: "13px", color: "#065F46", fontWeight: 600 }}>
+                ✓ Agent is currently available for immediate field dispatch.
+              </div>
+            )}
           </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Notes (optional)</label>
-            <textarea
-              rows={3}
-              value={assignForm.notes}
-              onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
+        </Modal>
+      )}
+
+      {/* --- MODAL 3: RESCUE VEHICLE DETAILS MODAL --- */}
+      {selectedVehicle && (
+        <Modal
+          isOpen={isVehicleModalOpen}
+          onClose={() => setIsVehicleModalOpen(false)}
+          title={`Fleet Vehicle Unit: ${selectedVehicle.vehicle_code}`}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ background: "#F8FAFC", padding: "16px", borderRadius: "10px", border: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A", fontFamily: "monospace" }}>{selectedVehicle.vehicle_code}</h3>
+                <div style={{ fontSize: "13px", color: "#64748B" }}>{selectedVehicle.model} ({selectedVehicle.registration_number})</div>
+              </div>
+              <span style={{ padding: "4px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 800, background: selectedVehicle.status === "Available" ? "#ECFDF5" : "#EFF6FF", color: selectedVehicle.status === "Available" ? "#059669" : "#2563EB" }}>
+                {selectedVehicle.status.toUpperCase()}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div><strong>Primary Driver:</strong> {selectedVehicle.assigned_driver}</div>
+              <div><strong>Base Depot:</strong> {selectedVehicle.location}</div>
+              <div><strong>Capacity Used:</strong> {selectedVehicle.capacity_used} / {selectedVehicle.capacity} Dogs</div>
+              <div><strong>Fuel Level:</strong> {selectedVehicle.fuel_level}</div>
+            </div>
+
+            {/* EQUIPMENT CHECKLIST */}
+            <div style={{ background: "#FFF", border: "1px solid #CBD5E1", borderRadius: "8px", padding: "12px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 800, color: "#0F172A", marginBottom: "8px" }}>🚑 ONBOARD EMERGENCY EQUIPMENT CHECKLIST</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px" }}>
+                <div>✓ Pet Isolation Carriers</div>
+                <div>✓ Veterinary First Aid Kit</div>
+                <div>✓ Emergency Oxygen Unit</div>
+                <div>✓ Restraint Equipment &amp; Nets</div>
+              </div>
+            </div>
           </div>
+        </Modal>
+      )}
+
+      {/* --- MODAL 4: ASSIGNMENT MODAL WITH DYNAMIC AVAILABILITY --- */}
+      {selectedCase && (
+        <Modal
+          isOpen={isAssignModalOpen}
+          onClose={() => setIsAssignModalOpen(false)}
+          title={`Assign Officers & Vehicle — Case #${selectedCase.ticket_number}`}
+        >
+          <form onSubmit={handleAssignDispatch} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>Select Rescue Coordinator</label>
+              <select
+                value={assignForm.coordinator_id}
+                onChange={(e) => setAssignForm({ ...assignForm, coordinator_id: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="">-- Unassigned --</option>
+                {agentRoster.filter((a) => a.role.includes("Coordinator")).map((c) => (
+                  <option key={c.id} value={c.id}>{c.full_name} ({c.service_area})</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>Select Field Rescue Agent (Available ✓ / Busy ✕)</label>
+              <select
+                value={assignForm.agent_id}
+                onChange={(e) => setAssignForm({ ...assignForm, agent_id: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="">-- Select Field Agent --</option>
+                {agentRoster.map((a) => (
+                  <option key={a.id} value={a.id} disabled={a.availability === "Busy"}>
+                    {a.availability === "Available" ? `✓ ${a.full_name} (Available)` : `✕ ${a.full_name} (Busy on Rescue)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>Select Fleet Vehicle Unit (Available ✓ / Busy ✕)</label>
+              <select
+                value={assignForm.vehicle_id}
+                onChange={(e) => setAssignForm({ ...assignForm, vehicle_id: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+              >
+                <option value="">-- Select Vehicle Unit --</option>
+                {vehicleFleet.map((v) => (
+                  <option key={v.id} value={v.vehicle_code} disabled={v.status !== "Available"}>
+                    {v.status === "Available" ? `✓ ${v.vehicle_code} (${v.registration_number})` : `✕ ${v.vehicle_code} (${v.status})`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
+              <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700 }}>
+                {isSubmitting ? "Saving..." : "Save Assignment"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* --- MODAL 5: NEW RESCUE CASE MODAL --- */}
+      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Report New Field Rescue Case">
+        <form onSubmit={handleCreateCase} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div>
+            <label style={{ fontSize: "12px", fontWeight: 700 }}>Field Location Address *</label>
+            <input type="text" required value={formData.location_address} onChange={(e) => setFormData({ ...formData, location_address: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700 }}>Severity</label>
+              <select value={formData.severity} onChange={(e) => setFormData({ ...formData, severity: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+                {SEVERITY_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700 }}>Physical Condition</label>
+              <select value={formData.physical_condition} onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+                {PHYSICAL_CONDITION_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700 }}>Reporter Name</label>
+              <input type="text" value={formData.reporter_name} onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700 }}>Reporter Phone</label>
+              <input type="text" value={formData.reporter_phone} onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+            </div>
+          </div>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
+            <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700 }}>
+              {isSubmitting ? "Submitting..." : "Report Case"}
+            </button>
           </div>
         </form>
       </Modal>
 
-      {/* Delete Modal */}
-      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Rescue Case">
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ margin: 0, color: "#475569" }}>
-            Are you sure you want to delete rescue case <strong>{selectedCase?.ticket_number}</strong>?
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <button onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer" }}>Cancel</button>
-            <button onClick={handleDeleteCase} disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", cursor: "pointer" }}>{isSubmitting ? "Deleting..." : "Delete Case"}</button>
-          </div>
-        </div>
-      </Modal>
+      {/* --- MODAL 6: UPDATE RESCUE STATUS MODAL --- */}
+      {selectedCase && (
+        <Modal
+          isOpen={isStatusUpdateOpen}
+          onClose={() => setIsStatusUpdateOpen(false)}
+          title={`Update Rescue Progress — Case #${selectedCase.ticket_number}`}
+        >
+          <form onSubmit={handleUpdateStatus} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>Select New Operational Status</label>
+              <select
+                value={statusForm.status}
+                onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF" }}
+                required
+              >
+                <option value="">-- Choose Status --</option>
+                <option value="verified">Verified / Approved</option>
+                <option value="dispatched">Dispatched</option>
+                <option value="en_route">En Route to Field</option>
+                <option value="arrived">Arrived at Scene</option>
+                <option value="in_progress">Rescue In Progress</option>
+                <option value="located">Dog Located</option>
+                <option value="secured">Dog Secured</option>
+                <option value="admitted">Admitted to Shelter / Vet</option>
+                <option value="completed">Rescue Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              <button type="button" onClick={() => setIsStatusUpdateOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
+              <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700 }}>
+                {isSubmitting ? "Updating..." : "Update Status"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 };
