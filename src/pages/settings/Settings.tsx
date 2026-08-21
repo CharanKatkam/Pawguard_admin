@@ -15,11 +15,6 @@ interface Toast {
 const Settings = () => {
   const currentRole = getCurrentUserRole();
 
-  // Check role-based access - only Super Admin can access settings
-  if (currentRole !== "super_admin") {
-    return <Navigate to="/403" replace />;
-  }
-
   const [siteName, setSiteName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [smtpServer, setSmtpServer] = useState("");
@@ -184,6 +179,11 @@ const Settings = () => {
     setHasChanges(false);
     addToast("Settings reset to last saved values.", "info");
   };
+
+  // Check role-based access - only Super Admin can access settings
+  if (currentRole !== "super_admin") {
+    return <Navigate to="/403" replace />;
+  }
 
   if (loading) {
     return (

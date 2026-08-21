@@ -25,10 +25,6 @@ const VehicleManagement = () => {
     fuel_level: "",
   });
 
-  useEffect(() => {
-    fetchVehicles();
-  }, []);
-
   const fetchVehicles = async () => {
     try {
       setLoading(true);
@@ -63,6 +59,10 @@ const VehicleManagement = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchVehicles();
+  }, []);
 
   const handleCreateVehicle = async (e: React.FormEvent) => {
     e.preventDefault();

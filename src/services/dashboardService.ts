@@ -8,7 +8,7 @@ export const dashboardService = {
   },
 
   // Backwards compatibility alias for Super Admin Dashboard
-  getDashboardStats: async (_role?: string) => {
+  getDashboardStats: async () => {
     const response = await api.get("/admin/dashboard/summary");
     return response.data;
   },

@@ -147,7 +147,7 @@ const RescueCoordinatorDashboard = () => {
 
   // Filter current active dataset
   const getDisplayData = () => {
-    let list: Record<string, unknown>[] = [];
+    let list: Record<string, unknown>[];
     if (activeCard === "assigned") {
       list = assignedCases;
     } else if (activeCard === "pending") {

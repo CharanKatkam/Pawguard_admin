@@ -298,7 +298,7 @@ const RescueDispatch = () => {
   );
 
   const getDisplayData = () => {
-    let list: EnrichedDispatch[] = [];
+    let list: EnrichedDispatch[];
     if (activeCard === "awaiting") {
       list = awaitingCases.map((c) => ({
         id: String(c.id),

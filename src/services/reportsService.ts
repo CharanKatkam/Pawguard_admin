@@ -81,7 +81,7 @@ export const reportsService = {
       }
       await reportsService.downloadReport(filename);
     } catch (err) {
-      throw new Error(toErrorMessage(err, "Report export failed."));
+      throw new Error(toErrorMessage(err, "Report export failed."), { cause: err });
     }
   },
 

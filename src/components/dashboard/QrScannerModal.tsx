@@ -152,7 +152,7 @@ const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose }) => {
         setLoading(false);
       }
     },
-    [addToast, stopCamera]
+    [addToast, stopCamera, setError]
   );
 
   // Initialize camera when camera tab is selected

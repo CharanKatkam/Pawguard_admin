@@ -337,7 +337,7 @@ const RescueAgentDashboard = () => {
 
   // Filter Active Cases for Table
   const getDisplayData = () => {
-    let list: Record<string, unknown>[] = [];
+    let list: Record<string, unknown>[];
     if (activeCard === "pending") {
       list = assignedCases.filter((c) => {
         const s = String(c.status || "").toLowerCase();

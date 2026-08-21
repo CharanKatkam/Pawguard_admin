@@ -102,6 +102,8 @@ const DogLifecycleTimelineModal: React.FC<DogLifecycleTimelineModalProps> = ({
     dog?.id || dog?.dog_id || dog?.original_dog_id || dog?.registration_number || ""
   );
 
+  const matchedAdopter = (item: any) => item?.applicant_name || item?.adopter_name || "Adopter";
+
   const fetchLifecycleEvents = useCallback(async () => {
     if (!dogIdStr) return;
     setLoading(true);
@@ -337,8 +339,6 @@ const DogLifecycleTimelineModal: React.FC<DogLifecycleTimelineModalProps> = ({
       void fetchLifecycleEvents();
     }
   }, [isOpen, fetchLifecycleEvents]);
-
-  const matchedAdopter = (item: any) => item.applicant_name || item.adopter_name || "Adopter";
 
   // Filter events by stage
   const filteredEvents = events.filter((ev) => {

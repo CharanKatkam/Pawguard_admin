@@ -1307,7 +1307,7 @@ const VeterinarianDashboard = () => {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-              {Boolean(selectedDogMaster.is_fit_for_adoption || selectedDogMaster.is_adoptable || str(selectedDogMaster.medical_status).toLowerCase().includes("clear")) ? (
+              {selectedDogMaster.is_fit_for_adoption || selectedDogMaster.is_adoptable || str(selectedDogMaster.medical_status).toLowerCase().includes("clear") ? (
                 <span
                   style={{ padding: "9px 16px", borderRadius: "8px", background: "#ECFDF5", color: "#047857", fontWeight: 800, fontSize: "13px", border: "1px solid #A7F3D0", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >

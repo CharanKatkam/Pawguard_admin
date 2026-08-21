@@ -45,7 +45,7 @@ export const financeService = {
     return donationsService.updateDonationStatus(txId, status as any);
   },
 
-  deleteTransaction: async (_txId: string) => {
+  deleteTransaction: async () => {
     return { success: true };
   },
 

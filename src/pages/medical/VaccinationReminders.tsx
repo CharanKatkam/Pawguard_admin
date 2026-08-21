@@ -287,7 +287,7 @@ const VaccinationReminders = () => {
 
   const handleTogglePrescription = async (row: Row) => {
     const rxId = str(pick(row, "id"));
-    const nextActive = !Boolean(pick(row, "is_active"));
+    const nextActive = !pick(row, "is_active");
     try {
       setTogglingRxId(rxId);
       await reminderService.updatePrescriptionStatus(rxId, nextActive);
@@ -619,7 +619,7 @@ const VaccinationReminders = () => {
                         disabled={togglingRxId === str(pick(row, "id"))}
                         style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "8px", border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#475569", fontWeight: 600, fontSize: "12px", cursor: "pointer", marginRight: "6px" }}
                       >
-                        {Boolean(pick(row, "is_active")) ? "Mark Inactive" : "Mark Active"}
+                        {pick(row, "is_active") ? "Mark Inactive" : "Mark Active"}
                       </button>
                     </Can>
                   </>

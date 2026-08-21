@@ -118,6 +118,28 @@ const Shelters = () => {
     return () => clearTimeout(t);
   }, [search]);
 
+  const openCageModal = async () => {
+    setCageSel({ facilityId: "", sectionId: "", kennelId: "", dogId: "" });
+    setCageSections([]);
+    setCageKennels([]);
+    setIsCageModalOpen(true);
+    setCageLoading(true);
+    try {
+      const dogsRes = await petService.getPets();
+      const dogs = unwrapList(dogsRes);
+      setCageDogs(
+        dogs.map((d: any) => ({
+          id: d.id || d.dog_id || "",
+          label: `${d.name || "Dog"} (${d.registration_number || d.id})`,
+        }))
+      );
+    } catch {
+      setCageDogs([]);
+    } finally {
+      setCageLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (searchParams.get("action") === "add") {
       setIsRegisterModalOpen(true);
@@ -218,28 +240,6 @@ const Shelters = () => {
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const openCageModal = async () => {
-    setCageSel({ facilityId: "", sectionId: "", kennelId: "", dogId: "" });
-    setCageSections([]);
-    setCageKennels([]);
-    setIsCageModalOpen(true);
-    setCageLoading(true);
-    try {
-      const dogsRes = await petService.getPets();
-      const dogs = unwrapList(dogsRes);
-      setCageDogs(
-        dogs.map((d: any) => ({
-          id: d.id || d.dog_id || "",
-          label: `${d.name || "Dog"} (${d.registration_number || d.id})`,
-        }))
-      );
-    } catch {
-      setCageDogs([]);
-    } finally {
-      setCageLoading(false);
     }
   };
 
