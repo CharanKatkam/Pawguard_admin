@@ -2,9 +2,9 @@ import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
 import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser } from "../utils/authStorage";
 
-// Base API configuration: use VITE_API_BASE_URL or fallback to relative /api/v1 (Vite dev proxy)
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
+// Base API configuration: use relative /api/v1 (Vite dev proxy in local dev, Vercel rewrite proxy in production)
+const rawApiUrl = (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
+const API_BASE_URL = rawApiUrl.startsWith("http") ? "/api/v1" : rawApiUrl;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
