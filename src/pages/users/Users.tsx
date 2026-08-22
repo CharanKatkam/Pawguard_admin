@@ -28,7 +28,7 @@ import userService, { type UserPayload, extractPermissionCodes } from "../../ser
 import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole, isInternalRole } from "../../utils/roleUtils";
+import { normalizeRole, isInternalRole, getCurrentUserRole } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 import { describePermission } from "../../utils/permissionsCatalog";
 
@@ -158,9 +158,14 @@ const Users = () => {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
-  // Filter state for summary cards: "all" or "admin" (Admin Portal Access)
-  const [activeFilter, setActiveFilter] = useState<"all" | "admin">("all");
+  // Check current user role for privilege escalation guards
+  const currentUserRole = getCurrentUserRole();
+  const isSuperAdmin = currentUserRole === "super_admin";
+
+  // Filter state for summary cards: "staff" (default internal accounts) or "public" (non-staff registrations)
+  const [activeFilter, setActiveFilter] = useState<"staff" | "public">("staff");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
   // Modals state
@@ -203,13 +208,11 @@ const Users = () => {
    * without stale state or hardcoded fallbacks.
    */
   const handleOpenUserProfile = async (userRow: UserTableRow) => {
-    // 1. Immediately reset profile state to null to avoid stale React state
     setSelectedUserProfile(null);
     setIsProfileModalOpen(true);
     setProfileLoading(true);
 
     try {
-      // 2. Fetch fresh detailed user profile from backend API (single source of truth)
       const userRes = await userService.getUserById(userRow.id);
       const userPayload = ((userRes as any)?.data || userRes) as Record<string, unknown>;
 
@@ -234,7 +237,7 @@ const Users = () => {
         name: String(userPayload.full_name || userPayload.name || userRow.name || "Not provided"),
         full_name: (userPayload.full_name as string) || (userPayload.name as string) || userRow.full_name || null,
         email: String(userPayload.email || userRow.email || ""),
-        phone: userPayload.phone !== undefined ? (userPayload.phone as string | null) : userRow.phone,
+        phone: userPayload.phone !== undefined && userPayload.phone !== null ? String(userPayload.phone) : userRow.phone,
         roles: rolesArr,
         role: rolesArr.length > 0 ? rolesArr.join(", ") : String(userPayload.role || userRow.role || "general_public"),
         isActive: userPayload.is_active !== undefined ? Boolean(userPayload.is_active) : userRow.isActive,
@@ -253,7 +256,6 @@ const Users = () => {
 
       setSelectedUserProfile(fullObj);
     } catch {
-      // Fallback to table row data, strictly handling null phone as null / "Not provided"
       setSelectedUserProfile({
         ...userRow,
         phone: userRow.phone ?? null,
@@ -287,6 +289,10 @@ const Users = () => {
     e.preventDefault();
     if (!resetToken || !newPassword) {
       addToast("Please enter both reset token and new password.", "error");
+      return;
+    }
+    if (newPassword.length < 10) {
+      addToast("New password must be at least 10 characters long.", "error");
       return;
     }
     try {
@@ -375,7 +381,7 @@ const Users = () => {
     try {
       setError(null);
 
-      const response = await userService.getUsers();
+      const response = await userService.getUsers({ page_size: 100 });
       const rawBody = response as unknown;
       const rawData = (rawBody as { data?: unknown })?.data;
       const rawItems = (rawData as { items?: unknown })?.items;
@@ -397,12 +403,12 @@ const Users = () => {
           : [];
         return {
           id: user.id || "-",
-          name: user.full_name || user.name || "-",
+          name: user.full_name || user.name || "Not provided",
           full_name: user.full_name || user.name || null,
-          email: user.email || "-",
-          phone: user.phone !== undefined ? user.phone : null,
+          email: user.email || "Not provided",
+          phone: user.phone !== undefined && user.phone !== null && String(user.phone).trim() ? String(user.phone) : null,
           roles,
-          role: roles.length > 0 ? roles.join(", ") : user.role || "-",
+          role: roles.length > 0 ? roles.join(", ") : user.role || "general_public",
           isActive: user.is_active !== undefined ? user.is_active : (user.status === "Active"),
           is_active: user.is_active !== undefined ? user.is_active : (user.status === "Active"),
           isVerified: user.is_verified !== undefined ? user.is_verified : false,
@@ -445,15 +451,24 @@ const Users = () => {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.email || !formData.name) {
-      addToast("Please fill in required fields (Name & Email)", "error");
+      addToast("Please fill in required fields (Full Name & Email)", "error");
       return;
     }
+    if (!isSuperAdmin && formData.role === "super_admin") {
+      addToast("Access Denied: Only a Super Administrator can assign Super Admin privileges.", "error");
+      return;
+    }
+    if (formData.password && formData.password.length < 10) {
+      addToast("Password must be at least 10 characters long.", "error");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const password = formData.password || generatePassword();
       await userService.createUser({
-        full_name: formData.name,
-        email: formData.email,
+        full_name: formData.name.trim(),
+        email: formData.email.trim(),
         role: formData.role,
         password,
       });
@@ -472,10 +487,16 @@ const Users = () => {
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser) return;
+
+    if (!isSuperAdmin && (formData.role.includes("super_admin") || selectedUser.roles.includes("super_admin"))) {
+      addToast("Access Denied: Only a Super Administrator can modify Super Admin accounts or roles.", "error");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await userService.updateUser(selectedUser.id, {
-        full_name: formData.name,
+        full_name: formData.name.trim(),
         role_names: parseRoleNames(formData.role),
       });
       addToast(`User ${formData.name} updated successfully!`, "success");
@@ -492,6 +513,10 @@ const Users = () => {
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
+    if (!isSuperAdmin && selectedUser.roles.includes("super_admin")) {
+      addToast("Access Denied: Super Admin accounts cannot be deleted by non-Super Admins.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
       await userService.deleteUser(selectedUser.id);
@@ -517,86 +542,133 @@ const Users = () => {
     []
   );
 
+  // Partition users into legitimate internal staff vs public website users
+  const staffUsers = useMemo(
+    () => users.filter((u) => hasAdminPortalAccess(u.roles)),
+    [users]
+  );
+
+  const publicUsers = useMemo(
+    () => users.filter((u) => !hasAdminPortalAccess(u.roles)),
+    [users]
+  );
+
+  // Statistics cards dynamically calculated from backend data
   const stats = useMemo(
     () => [
       {
-        title: "Total Registered Users",
-        value: loading ? "..." : `${users.length} Users`,
-        trend: roleFilter !== "all" ? "Filtered View" : "Organization Accounts",
+        title: "Total Staff Accounts",
+        value: loading ? "..." : `${staffUsers.length} Staff`,
+        trend: "Internal Admin / System Accounts",
         color: "#2563EB",
-        icon: <FaUsers />,
-        onClick: () => {
-          setActiveFilter("all");
-          setRoleFilter("all");
-          setSearchTerm("");
-          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        },
-        selected: activeFilter === "all" && roleFilter === "all" && !searchTerm,
-      },
-      {
-        title: "Admin Staff Roles",
-        value: loading ? "..." : `${users.filter((u) => hasAdminPortalAccess(u.roles)).length} Staff`,
-        trend: "Authorized Internal Roles",
-        color: "#10B981",
         icon: <FaUserShield />,
         onClick: () => {
-          setActiveFilter("admin");
+          setActiveFilter("staff");
+          setRoleFilter("all");
+          setStatusFilter("all");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "staff" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
+      },
+      {
+        title: "Active Staff",
+        value: loading ? "..." : `${staffUsers.filter((u) => u.isActive).length} Active`,
+        trend: "Operational Access Enabled",
+        color: "#059669",
+        icon: <FaCheckCircle />,
+        onClick: () => {
+          setActiveFilter("staff");
+          setStatusFilter("active");
           setRoleFilter("all");
           setSearchTerm("");
           document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
         },
-        selected: activeFilter === "admin",
+        selected: activeFilter === "staff" && statusFilter === "active",
       },
       {
-        title: "Active Accounts",
-        value: loading ? "..." : `${users.filter((u) => u.isActive).length} Active`,
-        trend: "Platform Ready",
-        color: "#059669",
-        icon: <FaCheckCircle />,
-      },
-      {
-        title: "Inactive Accounts",
-        value: loading ? "..." : `${users.filter((u) => !u.isActive).length} Inactive`,
+        title: "Inactive Staff",
+        value: loading ? "..." : `${staffUsers.filter((u) => !u.isActive).length} Inactive`,
         trend: "Access Suspended",
         color: "#EF4444",
         icon: <FaTimesCircle />,
+        onClick: () => {
+          setActiveFilter("staff");
+          setStatusFilter("inactive");
+          setRoleFilter("all");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "staff" && statusFilter === "inactive",
+      },
+      {
+        title: "Super Admins",
+        value: loading ? "..." : `${staffUsers.filter((u) => u.roles.some((r) => normalizeRole(r) === "super_admin")).length} Admins`,
+        trend: "Full System Privileges",
+        color: "#7C3AED",
+        icon: <FaUserShield />,
+        onClick: () => {
+          setActiveFilter("staff");
+          setRoleFilter("super_admin");
+          setStatusFilter("all");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "staff" && roleFilter === "super_admin",
+      },
+      {
+        title: "Public Website Users",
+        value: loading ? "..." : `${publicUsers.length} Users`,
+        trend: "Public Service Accounts (Non-Staff)",
+        color: "#64748B",
+        icon: <FaUsers />,
+        onClick: () => {
+          setActiveFilter("public");
+          setRoleFilter("all");
+          setStatusFilter("all");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "public",
       },
     ],
-    [users, loading, activeFilter, roleFilter, searchTerm]
+    [staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm]
   );
 
+  // Table rows filtered according to active filter tab, role filter, status filter, and search
   const filteredUsers = useMemo(() => {
-    return users.filter((u) => {
-      if (activeFilter === "admin" && !hasAdminPortalAccess(u.roles)) {
-        return false;
-      }
+    const baseList = activeFilter === "public" ? publicUsers : staffUsers;
+
+    return baseList.filter((u) => {
       if (!matchesRoleFilter(u.roles, roleFilter)) {
         return false;
       }
+      if (statusFilter !== "all") {
+        if (statusFilter === "active" && !u.isActive) return false;
+        if (statusFilter === "inactive" && u.isActive) return false;
+      }
       if (searchTerm) {
-        const term = searchTerm.toLowerCase();
-        const nameMatch = u.name.toLowerCase().includes(term);
-        const emailMatch = u.email.toLowerCase().includes(term);
-        const idMatch = u.id.toLowerCase().includes(term);
+        const term = searchTerm.toLowerCase().trim();
+        const nameMatch = (u.name || "").toLowerCase().includes(term);
+        const emailMatch = (u.email || "").toLowerCase().includes(term);
+        const idMatch = (u.id || "").toLowerCase().includes(term);
         const phoneMatch = Boolean(u.phone && String(u.phone).toLowerCase().includes(term));
         const roleMatch = u.roles.some((r) => r.toLowerCase().includes(term));
         return nameMatch || emailMatch || idMatch || phoneMatch || roleMatch;
       }
       return true;
     });
-  }, [users, activeFilter, roleFilter, searchTerm, matchesRoleFilter]);
+  }, [staffUsers, publicUsers, activeFilter, roleFilter, statusFilter, searchTerm, matchesRoleFilter]);
 
   const getTableTitle = () => {
+    if (activeFilter === "public") return "Public Registered Users (Read-Only Reference)";
     if (roleFilter !== "all") {
       const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
-      if (option) return `${option.label} Users`;
+      if (option) return `${option.label} Staff Accounts`;
     }
-    switch (activeFilter) {
-      case "admin":
-        return "Admin Portal Access Users";
-      default:
-        return "All Registered Users";
-    }
+    if (statusFilter === "active") return "Active Internal Staff Accounts";
+    if (statusFilter === "inactive") return "Inactive Internal Staff Accounts";
+    return "Internal Admin & Staff Accounts";
   };
 
   const columns = [
@@ -615,7 +687,7 @@ const Users = () => {
     },
     {
       key: "isActive",
-      title: "Status",
+      title: "Account Status",
       render: (val: boolean) => (
         <span
           style={{
@@ -634,36 +706,20 @@ const Users = () => {
       ),
     },
     {
-      key: "isVerified",
-      title: "Verified",
-      render: (val: boolean) => (
-        val ? (
-          <FaCheckCircle style={{ color: "#10B981", fontSize: "16px" }} />
-        ) : (
-          <FaTimesCircle style={{ color: "#EF4444", fontSize: "16px" }} />
-        )
-      ),
-    },
-    {
-      key: "mfaEnabled",
-      title: "MFA",
-      render: (val: boolean) => (
-        val ? (
-          <FaCheckCircle style={{ color: "#10B981", fontSize: "16px" }} />
-        ) : (
-          <FaTimesCircle style={{ color: "#EF4444", fontSize: "16px" }} />
-        )
-      ),
-    },
-    {
       key: "createdAt",
       title: "Created At",
-      render: (val: string) => formatDate(val),
+      render: (val: string) => (val ? formatDate(val) : "Not available"),
+    },
+    {
+      key: "lastLogin",
+      title: "Last Login",
+      render: () => <span style={{ fontSize: "12px", color: "#94A3B8" }}>Not available</span>,
     },
   ];
 
   return (
     <div>
+      {/* Header Banner */}
       <div
         style={{
           marginBottom: "24px",
@@ -677,7 +733,7 @@ const Users = () => {
           User Management &amp; Personnel
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Manage user accounts, assign role permissions, onboard rescue staff, veterinarians, coordinators and volunteers.
+          Manage PawGuard internal user accounts, staff roles, permissions, and Admin Portal access.
         </p>
       </div>
 
@@ -698,6 +754,7 @@ const Users = () => {
         </div>
       )}
 
+      {/* Quick Action Cards */}
       <div
         style={{
           display: "grid",
@@ -733,10 +790,11 @@ const Users = () => {
         </Can>
       </div>
 
+      {/* Dynamic Statistics Cards */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+          gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))",
           gap: "16px",
           marginBottom: "24px",
         }}
@@ -746,40 +804,98 @@ const Users = () => {
         ))}
       </div>
 
+      {/* Main Table Card */}
       <div className="soft-card" style={{ padding: "20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "16px" }}>
-          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            {getTableTitle()}
-          </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Filter by Role:</label>
-            <select
-              value={roleFilter}
-              onChange={(e) => {
-                setRoleFilter(e.target.value);
-                setSearchTerm("");
-              }}
-              style={{
-                padding: "8px 12px",
-                borderRadius: "8px",
-                border: "1px solid #CBD5E1",
-                background: "#FFFFFF",
-                fontSize: "13px",
-                fontWeight: 500,
-                color: "#0F172A",
-                cursor: "pointer",
-                minWidth: "200px",
-              }}
-            >
-              {ROLE_FILTER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+              {getTableTitle()}
+            </h3>
+            <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+              Showing {filteredUsers.length} account(s)
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            {/* Status Filter */}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Status:</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#0F172A",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="active">Active Only</option>
+                <option value="inactive">Inactive Only</option>
+              </select>
+            </div>
+
+            {/* Role Filter */}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Role:</label>
+              <select
+                value={roleFilter}
+                onChange={(e) => {
+                  setRoleFilter(e.target.value);
+                  setSearchTerm("");
+                }}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#FFFFFF",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#0F172A",
+                  cursor: "pointer",
+                  minWidth: "180px",
+                }}
+              >
+                {ROLE_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Clear Filters Button */}
+            {(roleFilter !== "all" || statusFilter !== "all" || searchTerm || activeFilter !== "staff") && (
+              <button
+                onClick={() => {
+                  setActiveFilter("staff");
+                  setRoleFilter("all");
+                  setStatusFilter("all");
+                  setSearchTerm("");
+                }}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Reset Filters
+              </button>
+            )}
+
             {loading && (
               <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
-                Loading users...
+                Loading...
               </span>
             )}
           </div>
@@ -802,17 +918,26 @@ const Users = () => {
             }}
             onEdit={(row) => {
               const target = row as UserTableRow;
+              if (!isSuperAdmin && target.roles.includes("super_admin")) {
+                addToast("Access Denied: Only a Super Administrator can edit Super Admin accounts.", "error");
+                return;
+              }
               setSelectedUser(target);
               setFormData({
                 name: target.full_name || target.name || "",
                 email: target.email || "",
-                role: Array.isArray(target.roles) ? target.roles.join(", ") : target.role || "",
+                role: target.roles?.[0] || target.role || "rescue_agent",
                 password: "",
               });
               setIsEditModalOpen(true);
             }}
             onDelete={(row) => {
-              setSelectedUser(row as UserTableRow);
+              const target = row as UserTableRow;
+              if (!isSuperAdmin && target.roles.includes("super_admin")) {
+                addToast("Access Denied: Only a Super Administrator can delete Super Admin accounts.", "error");
+                return;
+              }
+              setSelectedUser(target);
               setIsDeleteModalOpen(true);
             }}
           />
@@ -972,9 +1097,9 @@ const Users = () => {
                   </div>
                 </div>
                 <div>
-                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Updated Date</label>
-                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#334155", marginTop: "2px" }}>
-                    {(selectedUserProfile.updated_at || selectedUserProfile.updatedAt) ? formatDateTime(String(selectedUserProfile.updated_at || selectedUserProfile.updatedAt)) : "Not available"}
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Last Login</label>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#94A3B8", marginTop: "2px" }}>
+                    Not available
                   </div>
                 </div>
                 <div style={{ gridColumn: "1 / -1" }}>
@@ -1047,11 +1172,15 @@ const Users = () => {
                 <button
                   type="button"
                   onClick={() => {
+                    if (!isSuperAdmin && selectedUserProfile.roles.includes("super_admin")) {
+                      addToast("Access Denied: Only a Super Administrator can edit Super Admin accounts.", "error");
+                      return;
+                    }
                     setSelectedUser(selectedUserProfile);
                     setFormData({
                       name: selectedUserProfile.full_name || selectedUserProfile.name || "",
                       email: selectedUserProfile.email || "",
-                      role: Array.isArray(selectedUserProfile.roles) ? selectedUserProfile.roles.join(", ") : selectedUserProfile.role || "",
+                      role: selectedUserProfile.roles?.[0] || selectedUserProfile.role || "rescue_agent",
                       password: "",
                     });
                     setIsProfileModalOpen(false);
@@ -1128,9 +1257,9 @@ const Users = () => {
                   const roleBtns: React.ReactNode[] = [];
 
                   if (/veterinarian/.test(roleStr)) {
-                    roleBtns.push(navBtn("Open Vet Dashboard", "/veterinarian-dashboard", <FaStethoscope size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
+                    roleBtns.push(navBtn("Open Vet Dashboard", "/dashboard/veterinarian", <FaStethoscope size={13} />, "#ECFDF5", "#047857", "#A7F3D0"));
                   } else if (/shelter/.test(roleStr)) {
-                    roleBtns.push(navBtn("Open Shelter Manager Dashboard", "/shelter-manager-dashboard", <FaHome size={13} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
+                    roleBtns.push(navBtn("Open Shelter Manager Dashboard", "/dashboard/shelter-manager", <FaHome size={13} />, "#EFF6FF", "#1D4ED8", "#BFDBFE"));
                   } else if (/rescue_agent|rescue_coordinator|rescue_centre/.test(roleStr)) {
                     roleBtns.push(navBtn("View Rescue Dispatches", "/rescue-dispatch", <FaTruck size={13} />, "#F5F3FF", "#6D28D9", "#DDD6FE"));
                   } else if (/adoption/.test(roleStr)) {
@@ -1142,7 +1271,7 @@ const Users = () => {
                   } else if (/inventory/.test(roleStr)) {
                     roleBtns.push(navBtn("View Inventory Suite", "/inventory", <FaBoxes size={13} />, "#F0FDF4", "#15803D", "#BBF7D0"));
                   } else if (/finance/.test(roleStr)) {
-                    roleBtns.push(navBtn("View Finance Dashboard", "/finance-dashboard", <FaCoins size={13} />, "#F0FDF4", "#15803D", "#BBF7D0"));
+                    roleBtns.push(navBtn("View Finance Dashboard", "/dashboard/finance", <FaCoins size={13} />, "#F0FDF4", "#15803D", "#BBF7D0"));
                   }
 
                   return roleBtns;
@@ -1167,7 +1296,7 @@ const Users = () => {
                     />
                   </div>
                   <div>
-                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>New Password *</label>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>New Password (min 10 characters) *</label>
                     <PasswordInput
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
@@ -1236,7 +1365,7 @@ const Users = () => {
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", background: "#FFFFFF" }}
             >
-              <option value="super_admin">Super Admin (Full System Privileges)</option>
+              {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
               <option value="rescue_centre_admin">Rescue Centre Admin</option>
               <option value="rescue_coordinator">Rescue Coordinator</option>
               <option value="rescue_agent">Rescue Agent</option>
@@ -1252,7 +1381,7 @@ const Users = () => {
 
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-              Initial Password (Optional — Auto-generated if left empty)
+              Initial Password (Optional — min 10 chars, auto-generated if left empty)
             </label>
             <PasswordInput
               value={formData.password}
@@ -1294,15 +1423,24 @@ const Users = () => {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Assigned Role(s) (comma-separated)</label>
-            <input
-              type="text"
-              required
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Assigned System Role *</label>
+            <select
               value={formData.role}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
-            />
-            <span style={{ fontSize: "11px", color: "#64748B" }}>e.g. super_admin, veterinarian</span>
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", background: "#FFFFFF" }}
+            >
+              {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
+              <option value="rescue_centre_admin">Rescue Centre Admin</option>
+              <option value="rescue_coordinator">Rescue Coordinator</option>
+              <option value="rescue_agent">Rescue Agent</option>
+              <option value="veterinarian">Veterinarian</option>
+              <option value="shelter_manager">Shelter Manager</option>
+              <option value="adoption_coordinator">Adoption Coordinator</option>
+              <option value="foster_coordinator">Foster Coordinator</option>
+              <option value="volunteer_coordinator">Volunteer Coordinator</option>
+              <option value="inventory_manager">Inventory Manager</option>
+              <option value="finance_user">Finance Officer</option>
+            </select>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>

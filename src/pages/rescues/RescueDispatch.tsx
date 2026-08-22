@@ -171,17 +171,11 @@ const RescueDispatch = () => {
     })
   );
 
-  // Available Staff Candidates (Active Rescue Agents & Not Currently Assigned)
-  const allStaffUsers = users.filter((u) => u.is_active !== false);
-
-  const agentCandidates = allStaffUsers.filter((u) => {
+  // Available Staff Candidates (Active Rescue Agents ONLY & Not Currently Assigned)
+  const agentCandidates = users.filter((u) => {
+    if (u.is_active === false) return false;
     const r = normalizeRole(u);
-    const matchesRole =
-      r === "rescue_agent" ||
-      r === "rescue_coordinator" ||
-      r === "super_admin" ||
-      String(u.role || "").toLowerCase().includes("agent");
-    return (matchesRole || allStaffUsers.length <= 5) && !activeAgentIds.has(String(u.id));
+    return r === "rescue_agent" && !activeAgentIds.has(String(u.id));
   });
 
   const availableVehicles = vehicles.filter((v) => {

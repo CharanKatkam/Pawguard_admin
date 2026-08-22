@@ -20,12 +20,15 @@ import {
   FaClock,
   FaSpinner,
   FaEye,
+  FaQrcode,
 } from "react-icons/fa";
 import lostFoundService, {
   type Species,
   type ReportKind,
   type ReporterProfile,
 } from "../../services/lostFoundService";
+import dogService from "../../services/dogService";
+import petService from "../../services/petService";
 import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
 
 const PAGE_SIZE = 8;
@@ -229,6 +232,112 @@ interface RegistryMatch {
 
 export type NavigationTab = "overview" | "lost" | "found" | "matches" | "reunion_stories";
 
+interface LocationMapPreviewProps {
+  latitude: number | null | undefined;
+  longitude: number | null | undefined;
+  locationAddress?: string | null;
+  height?: string;
+  title?: string;
+}
+
+const LocationMapPreview = ({
+  latitude,
+  longitude,
+  locationAddress,
+  height = "220px",
+  title,
+}: LocationMapPreviewProps) => {
+  const hasCoords =
+    typeof latitude === "number" &&
+    typeof longitude === "number" &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180;
+
+  if (!hasCoords) {
+    return (
+      <div
+        style={{
+          height,
+          borderRadius: "12px",
+          background: "#F8FAFC",
+          border: "1px dashed #CBD5E1",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px",
+          textAlign: "center",
+          color: "#64748B",
+        }}
+      >
+        <FaMapMarkerAlt size={26} style={{ color: "#94A3B8", marginBottom: "8px" }} />
+        <div style={{ fontWeight: 700, fontSize: "13px", color: "#334155" }}>
+          GPS Location Pin Unavailable
+        </div>
+        <div style={{ fontSize: "12px", marginTop: "4px", color: "#64748B" }}>
+          {locationAddress ? `Recorded Text Location: "${locationAddress}"` : "No GPS coordinates recorded for this report."}
+        </div>
+      </div>
+    );
+  }
+
+  const bboxDelta = 0.008;
+  const minLon = longitude! - bboxDelta;
+  const minLat = latitude! - bboxDelta;
+  const maxLon = longitude! + bboxDelta;
+  const maxLat = latitude! + bboxDelta;
+  const osmUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${latitude}%2C${longitude}`;
+
+  return (
+    <div
+      style={{
+        borderRadius: "12px",
+        overflow: "hidden",
+        border: "1px solid #E2E8F0",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+      }}
+    >
+      {title && (
+        <div
+          style={{
+            background: "#F1F5F9",
+            padding: "8px 12px",
+            fontSize: "12px",
+            fontWeight: 700,
+            color: "#334155",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderBottom: "1px solid #E2E8F0",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <FaMapMarkerAlt color="#EF4444" /> {title}
+          </span>
+          <span style={{ fontFamily: "monospace", fontSize: "11px", color: "#64748B" }}>
+            {latitude!.toFixed(5)}, {longitude!.toFixed(5)}
+          </span>
+        </div>
+      )}
+      <iframe
+        title={title || "GPS Location Pin Map"}
+        width="100%"
+        height={height}
+        frameBorder="0"
+        scrolling="no"
+        marginHeight={0}
+        marginWidth={0}
+        src={osmUrl}
+        style={{ display: "block", width: "100%", height, border: "none" }}
+      />
+    </div>
+  );
+};
+
 const LostAndFound = () => {
   const { addToast } = useToast();
   const { can, role } = usePermissions();
@@ -256,6 +365,7 @@ const LostAndFound = () => {
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [selectedReport, setSelectedReport] = useState<RegistryReport | null>(null);
@@ -263,6 +373,55 @@ const LostAndFound = () => {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
+
+  const [tagLoading, setTagLoading] = useState(false);
+  const [tagData, setTagData] = useState<any | null>(null);
+  const [tagError, setTagError] = useState<string | null>(null);
+
+  const fetchSafetyTagForReport = useCallback(async (report: RegistryReport) => {
+    setTagData(null);
+    setTagError(null);
+
+    const petId = report.companion_pet_id || (report as any).pet_id || (report as any).dog_id;
+
+    if (!petId) {
+      setTagLoading(false);
+      return;
+    }
+
+    setTagLoading(true);
+    try {
+      let tagRes: any = null;
+      try {
+        tagRes = await dogService.getSafetyTagMetadata(String(petId));
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          try {
+            tagRes = await petService.getSafetyTagMetadata(String(petId));
+          } catch {
+            tagRes = null;
+          }
+        } else {
+          throw err;
+        }
+      }
+
+      const tagObj = tagRes?.data || tagRes;
+      if (tagObj && typeof tagObj === "object" && (tagObj.id || tagObj.token_prefix)) {
+        setTagData(tagObj);
+      } else {
+        setTagData(null);
+      }
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        setTagData(null);
+      } else {
+        setTagError(extractError(err, "Failed to load Safety Tag information"));
+      }
+    } finally {
+      setTagLoading(false);
+    }
+  }, []);
 
   const [isMatchesOpen, setIsMatchesOpen] = useState(false);
   const [matches, setMatches] = useState<RegistryMatch[]>([]);
@@ -294,6 +453,41 @@ const LostAndFound = () => {
     breed_observed: "",
     color_observed: "",
   });
+
+  const handleCaptureGps = () => {
+    if (!navigator.geolocation) {
+      addToast("Geolocation is not supported by your browser.", "error");
+      return;
+    }
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setFormData((prev) => ({
+          ...prev,
+          latitude: lat.toFixed(5),
+          longitude: lng.toFixed(5),
+        }));
+        setIsLocating(false);
+        addToast(`GPS location captured: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "success");
+      },
+      (err) => {
+        setIsLocating(false);
+        let msg = "Failed to capture GPS location.";
+        if (err.code === err.PERMISSION_DENIED) {
+          msg = "Location permission denied. Please grant location access in browser settings.";
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          msg = "GPS signal unavailable. Please try again or enter location manually.";
+        } else if (err.code === err.TIMEOUT) {
+          msg = "GPS request timed out. Please try again or enter location manually.";
+        }
+        addToast(msg, "error");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   const resetForm = () => {
     setFormData((f) => ({
@@ -503,13 +697,23 @@ const LostAndFound = () => {
     setSelectedReport(row);
     const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
     const fallbackKind: ReportKind = activeTab === "found" ? "found" : "lost";
-    setSelectedReportKind(
-      rowKind === "found" || rowKind === "lost" ? rowKind : fallbackKind
-    );
+    const kind: ReportKind = rowKind === "found" || rowKind === "lost" ? rowKind : fallbackKind;
+    setSelectedReportKind(kind);
+
+    setTagData(null);
+    setTagError(null);
+    if (kind === "lost") {
+      void fetchSafetyTagForReport(row);
+    } else {
+      setTagLoading(false);
+    }
   };
 
   const closeDetails = () => {
     setSelectedReport(null);
+    setTagData(null);
+    setTagError(null);
+    setTagLoading(false);
   };
 
   const handleCreateReport = async (e: FormEvent) => {
@@ -939,15 +1143,17 @@ const LostAndFound = () => {
               ];
         return base.concat([
           {
-            label: "Location",
-            value: report.location_address
-              ? `${report.location_address}${
-                  report.latitude != null
-                    ? ` (${formatCoord(report.latitude)}, ${formatCoord(report.longitude)})`
-                    : ""
-                }`
-              : "-",
+            label: kind === "lost" ? "Last Seen Location" : "Found Location",
+            value: report.location_address || "-",
             icon: <FaMapMarkerAlt size={13} />,
+          },
+          {
+            label: "Latitude",
+            value: formatCoord(report.latitude),
+          },
+          {
+            label: "Longitude",
+            value: formatCoord(report.longitude),
           },
           {
             label: "Collar",
@@ -1652,6 +1858,107 @@ const LostAndFound = () => {
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Safety Tag / QR Section for Lost Reports */}
+          {selectedReportKind === "lost" && (
+            <div
+              style={{
+                marginTop: "16px",
+                padding: "14px",
+                borderRadius: "10px",
+                background: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  color: "#334155",
+                  marginBottom: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <FaQrcode color="#6366F1" size={16} /> Dog Safety Tag &amp; QR Identifier
+                </span>
+                {tagData && (
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      background: tagData.is_active ? "#ECFDF5" : "#FEF2F2",
+                      color: tagData.is_active ? "#059669" : "#DC2626",
+                    }}
+                  >
+                    {tagData.is_active ? "● ACTIVE SAFETY TAG" : "○ INACTIVE / REVOKED"}
+                  </span>
+                )}
+              </div>
+
+              {tagLoading ? (
+                <div style={{ padding: "12px 0", color: "#2563EB", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <FaSpinner size={14} style={{ animation: "spin 1s linear infinite" }} /> Fetching registered dog Safety Tag...
+                </div>
+              ) : tagError ? (
+                <div style={{ color: "#991B1B", background: "#FEF2F2", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>
+                  ⚠️ {tagError}
+                </div>
+              ) : tagData ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px", marginTop: "6px" }}>
+                  <div style={{ background: "#FFF", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Tag ID / Token Prefix</div>
+                    <div style={{ fontSize: "13px", fontWeight: 800, color: "#4338CA", fontFamily: "monospace", marginTop: "2px" }}>
+                      {tagData.token_prefix || tagData.tag_number || shortId(tagData.id)}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#FFF", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Tag Internal ID</div>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "#0F172A", fontFamily: "monospace", marginTop: "2px" }}>
+                      {shortId(tagData.id)}
+                    </div>
+                  </div>
+
+                  {typeof tagData.scan_count === "number" && (
+                    <div style={{ background: "#FFF", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Total Public Scans</div>
+                      <div style={{ fontSize: "13px", fontWeight: 800, color: "#059669", marginTop: "2px" }}>
+                        {tagData.scan_count} Scans
+                      </div>
+                    </div>
+                  )}
+
+                  {tagData.created_at && (
+                    <div style={{ background: "#FFF", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1" }}>
+                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Provisioned Date</div>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginTop: "2px" }}>
+                        {formatDate(tagData.created_at)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: "10px", borderRadius: "8px", background: "#FFF", border: "1px dashed #CBD5E1", fontSize: "13px", color: "#64748B", fontWeight: 600 }}>
+                  🏷️ No Safety Tag Assigned
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ marginTop: "16px" }}>
+            <LocationMapPreview
+              latitude={selectedReport.latitude}
+              longitude={selectedReport.longitude}
+              locationAddress={selectedReport.location_address}
+              height="220px"
+              title={selectedReportKind === "lost" ? "Last Seen GPS Location Pin" : "Found GPS Location Pin"}
+            />
           </div>
         </Modal>
       )}
@@ -2359,39 +2666,93 @@ const LostAndFound = () => {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={labelStyle}>Location Address *</label>
-              <input
-                type="text"
-                value={formData.location_address}
-                onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
-                style={commonInputStyle}
-                placeholder="Street / area where the pet was last seen or found"
-              />
+          {/* Location Address & GPS Capture */}
+          <div style={{ background: "#F8FAFC", padding: "14px", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <label style={{ ...labelStyle, margin: 0, fontWeight: 700 }}>
+                {formData.report_type === "lost" ? "Last Seen Location *" : "Found Location *"}
+              </label>
+              <button
+                type="button"
+                onClick={handleCaptureGps}
+                disabled={isLocating}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #2563EB",
+                  background: "#EFF6FF",
+                  color: "#2563EB",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: isLocating ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {isLocating ? (
+                  <FaSpinner style={{ animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <FaSearchLocation />
+                )}
+                {isLocating ? "Capturing GPS..." : "Use Current Location"}
+              </button>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "10px" }}>
               <div>
-                <label style={labelStyle}>Latitude</label>
+                <label style={{ ...labelStyle, fontSize: "11px", color: "#64748B" }}>Street Address / Area</label>
                 <input
-                  type="number"
-                  step="any"
-                  value={formData.latitude}
-                  onChange={(e) => setFormData({ ...formData, latitude: e.target.value })}
+                  type="text"
+                  required
+                  value={formData.location_address}
+                  onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
                   style={commonInputStyle}
+                  placeholder={
+                    formData.report_type === "lost"
+                      ? "e.g., Jubilee Hills Sector 2, Near Park"
+                      : "e.g., Banjara Hills Road No. 12, Near Shelter"
+                  }
                 />
               </div>
-              <div>
-                <label style={labelStyle}>Longitude</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={formData.longitude}
-                  onChange={(e) => setFormData({ ...formData, longitude: e.target.value })}
-                  style={commonInputStyle}
-                />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div>
+                  <label style={{ ...labelStyle, fontSize: "11px", color: "#64748B" }}>Latitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="e.g. 17.43260"
+                    value={formData.latitude}
+                    onChange={(e) => setFormData({ ...formData, latitude: e.target.value })}
+                    style={commonInputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={{ ...labelStyle, fontSize: "11px", color: "#64748B" }}>Longitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="e.g. 78.40710"
+                    value={formData.longitude}
+                    onChange={(e) => setFormData({ ...formData, longitude: e.target.value })}
+                    style={commonInputStyle}
+                  />
+                </div>
               </div>
             </div>
+
+            {/* Live Map Preview in Form */}
+            {toNumOrNull(formData.latitude) !== null && toNumOrNull(formData.longitude) !== null && (
+              <div style={{ marginTop: "10px" }}>
+                <LocationMapPreview
+                  latitude={toNumOrNull(formData.latitude)}
+                  longitude={toNumOrNull(formData.longitude)}
+                  locationAddress={formData.location_address}
+                  height="160px"
+                  title={formData.report_type === "lost" ? "Captured Last-Seen GPS Pin" : "Captured Found GPS Pin"}
+                />
+              </div>
+            )}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>

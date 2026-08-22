@@ -38,6 +38,7 @@ const VolunteerDashboard = () => {
   const [serviceSummary, setServiceSummary] = useState<any>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [myStatusInfo, setMyStatusInfo] = useState<any>(null);
 
   // Modals
   const [isCheckOutModalOpen, setIsCheckOutModalOpen] = useState(false);
@@ -52,10 +53,11 @@ const VolunteerDashboard = () => {
 
       const profileId = (currentUser as any)?.volunteer_profile_id || (currentUser as any)?.id || "";
 
-      const [shiftRes, notifRes, summaryRes] = await Promise.allSettled([
+      const [shiftRes, notifRes, summaryRes, statusRes] = await Promise.allSettled([
         volunteerService.getShifts(),
         notificationService.getNotifications(1, 20),
         profileId ? volunteerService.getServiceSummary(profileId) : Promise.resolve(null),
+        volunteerService.getMyStatus().catch(() => null),
       ]);
 
       const rawShifts = shiftRes.status === "fulfilled"
@@ -67,10 +69,12 @@ const VolunteerDashboard = () => {
         : [];
 
       const summaryObj = summaryRes.status === "fulfilled" ? (summaryRes.value as any)?.data || summaryRes.value || {} : {};
+      const statusObj = statusRes.status === "fulfilled" ? statusRes.value?.data || statusRes.value : null;
 
       setAvailableShifts(rawShifts);
       setNotifications(rawNotifs);
       setServiceSummary(summaryObj);
+      if (statusObj) setMyStatusInfo(statusObj);
 
       // Fetch attendance for available shifts
       if (rawShifts.length > 0) {
@@ -103,8 +107,30 @@ const VolunteerDashboard = () => {
 
   useDataSync(fetchVolunteerPortalData);
 
+  const currentVolunteerStatus = String(
+    myStatusInfo?.status || (currentUser as any)?.volunteer_status || (currentUser as any)?.status || "active"
+  ).toLowerCase().trim();
+
   // Handle Accept / Join Shift
   const handleJoinShift = async (shiftId: string) => {
+    if (!["active", "onboarded", "approved"].includes(currentVolunteerStatus)) {
+      addToast(
+        `Cannot join shift: Your volunteer profile status is currently '${currentVolunteerStatus}'. Only active volunteers may claim shifts.`,
+        "error"
+      );
+      return;
+    }
+
+    const targetShift = availableShifts.find((s) => s.id === shiftId);
+    if (targetShift) {
+      const enrolled = targetShift.enrolled_count ?? targetShift.attendance_count ?? 0;
+      const capacity = targetShift.capacity ?? 5;
+      if (enrolled >= capacity) {
+        addToast("Cannot join shift: Capacity is full.", "error");
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
       await volunteerService.joinShift(shiftId);
@@ -137,6 +163,10 @@ const VolunteerDashboard = () => {
   const handleCheckOutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAttendance?.id) return;
+    if (!selectedAttendance?.check_in_at) {
+      addToast("Check-in is required before checking out of a shift.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
       await volunteerService.checkOutAttendance(selectedAttendance.id, checkOutNotes);
@@ -154,6 +184,14 @@ const VolunteerDashboard = () => {
 
   // Handle Certificate Issue
   const handleDownloadCertificate = async () => {
+    const totalHrs = Number(serviceSummary?.total_hours || serviceSummary?.hours_served || 0);
+    const completedShifts = Number(serviceSummary?.completed_shifts || myAttendance.filter((a) => a.check_out_at).length || 0);
+
+    if (totalHrs === 0 && completedShifts === 0) {
+      addToast("Official Service Certificate becomes available after completing your first verified volunteer shift.", "info");
+      return;
+    }
+
     const profileId = (currentUser as any)?.volunteer_profile_id || (currentUser as any)?.id || "";
     if (!profileId) {
       addToast("No active volunteer profile linked.", "error");
@@ -244,7 +282,19 @@ const VolunteerDashboard = () => {
     {
       key: "capacity",
       header: "Open Capacity",
-      render: (v: number) => <strong style={{ color: "#2563EB" }}>{v ?? 5} Volunteers</strong>,
+      render: (v: number, r: any) => {
+        const enrolled = r.enrolled_count ?? r.attendance_count ?? 0;
+        const cap = v ?? 5;
+        const isFull = enrolled >= cap;
+        return (
+          <div>
+            <strong style={{ color: isFull ? "#DC2626" : "#2563EB" }}>
+              {enrolled}/{cap} Enrolled
+            </strong>
+            {isFull && <span style={{ fontSize: "11px", color: "#DC2626", fontWeight: 700, marginLeft: "6px" }}>(FULL)</span>}
+          </div>
+        );
+      },
     },
   ];
 
@@ -262,11 +312,18 @@ const VolunteerDashboard = () => {
     {
       key: "check_in_at",
       header: "Check-In Status",
-      render: (v: string) => (
-        <span style={{ fontWeight: 600, color: v ? "#047857" : "#D97706" }}>
-          {v ? `✓ Checked In (${formatDateTime(v)})` : "⏳ Pending Check-In"}
-        </span>
-      ),
+      render: (v: string, r: any) => {
+        const shiftEnd = r.shift?.end_at || r.end_at;
+        const isPast = shiftEnd ? new Date(shiftEnd).getTime() < Date.now() : false;
+        if (!v && isPast) {
+          return <span style={{ fontWeight: 700, color: "#DC2626" }}>⚠️ No-Show (Missed Shift)</span>;
+        }
+        return (
+          <span style={{ fontWeight: 600, color: v ? "#047857" : "#D97706" }}>
+            {v ? `✓ Checked In (${formatDateTime(v)})` : "⏳ Pending Check-In"}
+          </span>
+        );
+      },
     },
     {
       key: "check_out_at",
@@ -326,6 +383,28 @@ const VolunteerDashboard = () => {
           </button>
         </div>
       </div>
+
+      {/* Volunteer Status Alert Banner */}
+      {!["active", "onboarded", "approved"].includes(currentVolunteerStatus) && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: currentVolunteerStatus === "applied" || currentVolunteerStatus === "pending" ? "#FEF3C7" : "#FEF2F2",
+            border: `1px solid ${currentVolunteerStatus === "applied" || currentVolunteerStatus === "pending" ? "#F59E0B" : "#FCA5A5"}`,
+            color: currentVolunteerStatus === "applied" || currentVolunteerStatus === "pending" ? "#92400E" : "#991B1B",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          {currentVolunteerStatus === "applied" || currentVolunteerStatus === "pending"
+            ? "⏳ Volunteer Application Under Review: Your application has been submitted and is currently being reviewed by a Volunteer Coordinator. Once approved, you can browse and claim open shifts."
+            : currentVolunteerStatus === "rejected"
+            ? "❌ Application Status Update: Your volunteer application was not approved. Past service history and certificates remain accessible below."
+            : `⚠️ Volunteer Profile Inactive (${currentVolunteerStatus}): Shift claiming is restricted for inactive accounts. Please contact your Volunteer Coordinator.`}
+        </div>
+      )}
 
       {error && (
         <div style={{ marginBottom: "20px", padding: "14px 18px", borderRadius: "10px", backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "14px", fontWeight: 600 }}>
@@ -459,28 +538,64 @@ const VolunteerDashboard = () => {
               data={filteredShifts}
               loading={loading}
               emptyMessage="No available shifts matching criteria."
-              renderRowActions={(row: any) => (
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => void handleJoinShift(row.id)}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "6px",
-                    border: "none",
-                    background: "#2563EB",
-                    color: "#FFF",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                  }}
-                >
-                  <FaUserCheck /> Accept &amp; Join Shift
-                </button>
-              )}
+              renderRowActions={(row: any) => {
+                const enrolled = row.enrolled_count ?? row.attendance_count ?? 0;
+                const cap = row.capacity ?? 5;
+                const isFull = enrolled >= cap;
+                const isEligible = ["active", "onboarded", "approved"].includes(currentVolunteerStatus);
+
+                if (!isEligible) {
+                  return (
+                    <span style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, background: "#F1F5F9", padding: "4px 10px", borderRadius: "6px" }}>
+                      Approval Required
+                    </span>
+                  );
+                }
+
+                if (isFull) {
+                  return (
+                    <button
+                      type="button"
+                      disabled
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: "6px",
+                        border: "none",
+                        background: "#94A3B8",
+                        color: "#FFF",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "not-allowed",
+                      }}
+                    >
+                      Shift Full
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleJoinShift(row.id)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: "6px",
+                      border: "none",
+                      background: "#2563EB",
+                      color: "#FFF",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <FaUserCheck /> Accept &amp; Join Shift
+                  </button>
+                );
+              }}
             />
           </div>
         )}
@@ -499,65 +614,79 @@ const VolunteerDashboard = () => {
               data={myAttendance}
               loading={loading}
               emptyMessage="You have not joined any shifts yet. Browse 'Available Shifts' to accept an opportunity."
-              renderRowActions={(row: any) => (
-                <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
-                  {!row.check_in_at && (
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => void handleCheckIn(row.id)}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "6px",
-                        border: "none",
-                        background: "#10B981",
-                        color: "#FFF",
-                        fontSize: "12px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <FaSignInAlt /> Check In
-                    </button>
-                  )}
+              renderRowActions={(row: any) => {
+                const shiftEnd = row.shift?.end_at || row.end_at;
+                const isPast = shiftEnd ? new Date(shiftEnd).getTime() < Date.now() : false;
+                const isNoShow = isPast && !row.check_in_at;
 
-                  {row.check_in_at && !row.check_out_at && (
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => {
-                        setSelectedAttendance(row);
-                        setCheckOutNotes("Shift tasks completed");
-                        setIsCheckOutModalOpen(true);
-                      }}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "6px",
-                        border: "none",
-                        background: "#2563EB",
-                        color: "#FFF",
-                        fontSize: "12px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <FaSignOutAlt /> Check Out &amp; Complete
-                    </button>
-                  )}
-
-                  {row.check_out_at && (
-                    <span style={{ fontSize: "11px", fontWeight: 800, color: "#047857", background: "#D1FAE5", padding: "4px 10px", borderRadius: "999px" }}>
-                      ✓ COMPLETED ({row.hours_served || 0} hrs)
+                if (isNoShow) {
+                  return (
+                    <span style={{ fontSize: "11px", fontWeight: 800, color: "#DC2626", background: "#FEF2F2", padding: "4px 10px", borderRadius: "999px", border: "1px solid #FCA5A5" }}>
+                      ⚠️ NO-SHOW (MISSED)
                     </span>
-                  )}
-                </div>
-              )}
+                  );
+                }
+
+                return (
+                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                    {!row.check_in_at && (
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => void handleCheckIn(row.id)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          border: "none",
+                          background: "#10B981",
+                          color: "#FFF",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <FaSignInAlt /> Check In
+                      </button>
+                    )}
+
+                    {row.check_in_at && !row.check_out_at && (
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          setSelectedAttendance(row);
+                          setCheckOutNotes("Shift tasks completed");
+                          setIsCheckOutModalOpen(true);
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          border: "none",
+                          background: "#2563EB",
+                          color: "#FFF",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <FaSignOutAlt /> Check Out &amp; Complete
+                      </button>
+                    )}
+
+                    {row.check_out_at && (
+                      <span style={{ fontSize: "11px", fontWeight: 800, color: "#047857", background: "#D1FAE5", padding: "4px 10px", borderRadius: "999px" }}>
+                        ✓ COMPLETED ({row.hours_served || 0} hrs)
+                      </span>
+                    )}
+                  </div>
+                );
+              }}
             />
           </div>
         )}

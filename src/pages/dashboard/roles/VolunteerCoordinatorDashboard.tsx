@@ -263,17 +263,21 @@ const VolunteerCoordinatorDashboard = () => {
   // Handle Application Review Rejection
   const handleRejectApplication = async (applicant: any) => {
     if (!applicant?.id) return;
+    const reasonText = customMessage.trim() || DEFAULT_REJECTION_MSG;
     try {
       setIsSubmitting(true);
-      await volunteerService.updateVolunteerProfile(applicant.id, {
-        status: "inactive",
-      });
-
-      const messageBody = customMessage.trim() || DEFAULT_REJECTION_MSG;
+      try {
+        await volunteerService.rejectApplication(applicant.id, reasonText);
+      } catch {
+        await volunteerService.updateVolunteerProfile(applicant.id, {
+          status: "rejected",
+          notes: `Rejected: ${reasonText}`,
+        });
+      }
 
       await notificationService.sendBroadcastNotification({
         title: "Volunteer Application Status Update",
-        message: messageBody,
+        message: reasonText,
         type: "volunteer_update",
         targetRoles: ["volunteer"],
         actionUrl: "/volunteer-dashboard",
@@ -316,7 +320,7 @@ const VolunteerCoordinatorDashboard = () => {
       });
 
       if (shiftForm.assigned_volunteer_id) {
-        const shiftId = createdShift?.id || createdShift?.data?.id;
+        const shiftId = volunteerService.extractShiftId(createdShift);
         if (shiftId) {
           await volunteerService.joinShift(shiftId, shiftForm.assigned_volunteer_id).catch(() => {});
         }
@@ -506,9 +510,9 @@ const VolunteerCoordinatorDashboard = () => {
         capacity: 5,
       });
 
-      const shiftId = createdShift?.id || createdShift?.data?.id;
+      const shiftId = volunteerService.extractShiftId ? volunteerService.extractShiftId(createdShift) : (createdShift?.id || createdShift?.data?.id || (createdShift?.data as any)?.data?.id);
       if (!shiftId) {
-        throw new Error("Failed to retrieve shift ID from server response.");
+        throw new Error("Failed to retrieve valid shift ID from server response.");
       }
 
       try {

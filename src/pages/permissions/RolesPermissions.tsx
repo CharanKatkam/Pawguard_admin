@@ -18,7 +18,7 @@ import {
   FaSearch,
 } from "react-icons/fa";
 import userService from "../../services/userService";
-import { normalizeRole, ALLOWED_INTERNAL_ROLES, getRoleTitle } from "../../utils/roleUtils";
+import { normalizeRole, ALLOWED_INTERNAL_ROLES, getRoleTitle, getCurrentUserRole, isInternalRole } from "../../utils/roleUtils";
 import {
   setRolePermissionOverrides,
   setRolePermissionOverride,
@@ -31,7 +31,7 @@ import {
   matrixPermissionKeys,
   buildPermissionMatrix,
   extractPermissionCodes,
-  DEFAULT_ROLE_PERMISSIONS,
+  PERMISSION_MODULES,
 } from "../../utils/permissionsCatalog";
 import type { PermissionAction, PermissionModule } from "../../utils/permissionsCatalog";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -114,18 +114,6 @@ const mapUser = (u: Record<string, unknown>): RoleAssignment => {
   };
 };
 
-const fallbackRoles = (): RoleRecord[] =>
-  Object.entries(DEFAULT_ROLE_PERMISSIONS).map(([name, perms]) => ({
-    id: name,
-    name,
-    description: getRoleTitle(name) || "",
-    category: "System Governance",
-    permissions: perms,
-    userCount: 0,
-    isSystem: true,
-    is_active: true,
-    status: "Active",
-  }));
 
 const statusBadge = (status: string) => {
   const active = status === "Active";
@@ -164,6 +152,10 @@ const typeBadge = (isSystem: boolean) => (
 
 const RolesPermissions = () => {
   const { addToast } = useToast();
+
+  // Check current user role for privilege escalation guards
+  const currentUserRole = getCurrentUserRole();
+  const isSuperAdmin = currentUserRole === "super_admin";
 
   const [roles, setRoles] = useState<RoleRecord[]>([]);
   const [users, setUsers] = useState<RoleAssignment[]>([]);
@@ -222,6 +214,10 @@ const RolesPermissions = () => {
 
   const handleGrantUserPerm = async (code: string) => {
     if (!userPermTarget || !code.trim()) return;
+    if (!isSuperAdmin) {
+      addToast("Access Denied: Only a Super Administrator can grant direct permission overrides.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
       await userService.grantUserPermission(userPermTarget.id, code.trim());
@@ -240,6 +236,10 @@ const RolesPermissions = () => {
 
   const handleRevokeUserPerm = async (code: string) => {
     if (!userPermTarget || !code) return;
+    if (!isSuperAdmin) {
+      addToast("Access Denied: Only a Super Administrator can revoke direct permission overrides.", "error");
+      return;
+    }
     try {
       setIsSubmitting(true);
       await userService.revokeUserPermission(userPermTarget.id, code);
@@ -266,37 +266,32 @@ const RolesPermissions = () => {
         userService.getPermissions(),
       ]);
 
-      let nextRoles: RoleRecord[];
-      if (rolesRes.status === "fulfilled") {
+      if (rolesRes.status === "rejected") {
+        setError(getErrorMsg(rolesRes.reason, "Failed to load roles from backend API."));
+        setRoles([]);
+      } else {
         const value = rolesRes.value;
         const list = asUnknownArray(value);
-        nextRoles =
-          list.length > 0
-            ? list.map((r) => mapRole((r as Record<string, unknown>) ?? {}))
-            : fallbackRoles();
-      } else {
-        nextRoles = fallbackRoles();
+        const nextRoles = list.map((r) => mapRole((r as Record<string, unknown>) ?? {}));
+        setRoles(nextRoles);
+        setRolePermissionOverrides(
+          buildRolePermissionOverrides(
+            nextRoles.map((r) => ({ name: r.name, permissions: r.permissions }))
+          )
+        );
       }
-
-      setRoles(nextRoles);
-      setRolePermissionOverrides(
-        buildRolePermissionOverrides(
-          nextRoles.map((r) => ({ name: r.name, permissions: r.permissions }))
-        )
-      );
 
       if (permsRes.status === "fulfilled") {
         const value = permsRes.value;
-        // Build the matrix from the Permissions API so every module/action in
-        // the UI matches the backend's registered permission codes.
         const matrix = buildPermissionMatrix(value);
         setMatrixModules(matrix.modules);
         setMatrixActions(matrix.actions);
         const codes = extractPermissionCodes(value);
         setMatrixTotal(codes.length > 0 ? codes.length : matrixPermissionKeys().length);
       } else {
-        setMatrixModules([]);
-        setMatrixActions([]);
+        const matrix = buildPermissionMatrix(null);
+        setMatrixModules(matrix.modules);
+        setMatrixActions(matrix.actions);
         setMatrixTotal(matrixPermissionKeys().length);
       }
     } catch (err: unknown) {
@@ -310,11 +305,16 @@ const RolesPermissions = () => {
     try {
       setUsersLoading(true);
       setUserError(null);
-      const res = await userService.getUsers();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
+      const res = await userService.getUsers({ page_size: 100 });
+      const rawBody = res as unknown;
+      const rawData = (rawBody as { data?: unknown })?.data;
+      const rawItems = (rawData as { items?: unknown })?.items;
+      const list = Array.isArray(rawBody)
+        ? (rawBody as Record<string, unknown>[])
+        : Array.isArray(rawData)
+        ? (rawData as Record<string, unknown>[])
+        : Array.isArray(rawItems)
+        ? (rawItems as Record<string, unknown>[])
         : [];
       setUsers(list.map(mapUser));
     } catch (err: unknown) {
@@ -333,6 +333,10 @@ const RolesPermissions = () => {
   }, [fetchRolesAndPermissions, fetchUsers]);
 
   const openCreateRole = () => {
+    if (!isSuperAdmin) {
+      addToast("Access Denied: Only a Super Administrator can create custom roles.", "error");
+      return;
+    }
     setRoleModalMode("create");
     setEditingRole(null);
     setRoleForm({ name: "", description: "Custom organizational role", category: "Custom Operations" });
@@ -342,6 +346,10 @@ const RolesPermissions = () => {
   };
 
   const openEditRole = async (role: RoleRecord) => {
+    if (!isSuperAdmin && role.name === "super_admin") {
+      addToast("Access Denied: Only a Super Administrator can edit Super Admin permissions.", "error");
+      return;
+    }
     setRoleModalMode("edit");
     setEditingRole(role);
     setRoleForm({ name: role.name, description: role.description || "", category: role.category || "" });
@@ -349,8 +357,6 @@ const RolesPermissions = () => {
     setCopyFromRole("");
     setRoleModalOpen(true);
 
-    // Fetch the role's authoritative permission_codes so the matrix never
-    // opens empty when permissions are already assigned.
     setRoleDetailLoading(true);
     try {
       const detail = await userService.getRoleById(role.id);
@@ -376,6 +382,11 @@ const RolesPermissions = () => {
   };
 
   const handleSaveRole = async () => {
+    if (!isSuperAdmin) {
+      addToast("Access Denied: Only a Super Administrator can manage role policies.", "error");
+      return;
+    }
+
     if (roleModalMode === "create") {
       const name = roleForm.name.trim();
       if (!name) {
@@ -425,8 +436,6 @@ const RolesPermissions = () => {
       );
       addToast(`Role "${name}" policy updated (${matrixPerms.length} permissions).`, "success");
       setRoleModalOpen(false);
-      // Reload the latest role registry, then pin this role's saved permission
-      // codes (even when cleared) so revoking access takes effect immediately.
       await fetchRolesAndPermissions();
       setRolePermissionOverride(name, matrixPerms);
       notifyPermissionsChanged();
@@ -441,6 +450,11 @@ const RolesPermissions = () => {
   const handleDeleteRole = async () => {
     const role = deleteTarget;
     if (!role) return;
+    if (!isSuperAdmin) {
+      addToast("Access Denied: Only a Super Administrator can delete roles.", "error");
+      setDeleteTarget(null);
+      return;
+    }
     if (role.isSystem) {
       addToast("System-defined roles cannot be deleted.", "error");
       setDeleteTarget(null);
@@ -469,12 +483,20 @@ const RolesPermissions = () => {
   };
 
   const openAssignModal = (user: RoleAssignment) => {
+    if (!isSuperAdmin && String(user.role).toLowerCase().includes("super_admin")) {
+      addToast("Access Denied: Only a Super Administrator can reassign Super Admin accounts.", "error");
+      return;
+    }
     setAssignTarget(user);
     setAssignRole(user.role || "");
   };
 
   const handleAssignRole = async () => {
     if (!assignTarget || !assignRole) return;
+    if (!isSuperAdmin && assignRole === "super_admin") {
+      addToast("Access Denied: Only a Super Administrator can grant Super Admin privileges.", "error");
+      return;
+    }
     if (String(assignTarget.role).toLowerCase().includes("super_admin") && assignRole !== "super_admin") {
       addToast("A Super Admin cannot be demoted to a lower role.", "error");
       return;
@@ -496,6 +518,10 @@ const RolesPermissions = () => {
 
   const handleInlineRoleChange = async (user: RoleAssignment, newRole: string) => {
     if (newRole === user.role) return;
+    if (!isSuperAdmin && newRole === "super_admin") {
+      addToast("Access Denied: Only a Super Administrator can grant Super Admin privileges.", "error");
+      return;
+    }
     if (String(user.role).toLowerCase().includes("super_admin") && newRole !== "super_admin") {
       addToast("A Super Admin cannot be demoted to a lower role.", "error");
       return;
@@ -564,22 +590,28 @@ const RolesPermissions = () => {
     );
   }, [roles, roleSearch]);
 
+  // Partition users into legitimate internal staff vs public website users
+  const staffUsers = useMemo(
+    () => users.filter((u) => isInternalRole(u.role)),
+    [users]
+  );
+
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
+    if (!q) return staffUsers;
+    return staffUsers.filter(
       (u) =>
         u.name.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
         u.role.toLowerCase().includes(q)
     );
-  }, [users, userSearch]);
+  }, [staffUsers, userSearch]);
 
-  const activeUsers = users.filter((u) => u.is_active).length;
+  const activeStaffUsers = staffUsers.filter((u) => u.is_active).length;
 
   const stats = [
     {
-      title: "Role Definitions",
+      title: "System & Custom Roles",
       value: loading ? "..." : `${roles.length} Roles`,
       trend: `${roles.filter((r) => r.isSystem).length} System · ${roles.filter((r) => !r.isSystem).length} Custom`,
       color: "#2563EB",
@@ -590,9 +622,9 @@ const RolesPermissions = () => {
       },
     },
     {
-      title: "Permission Matrix",
+      title: "Permission Matrix Grants",
       value: loading ? "..." : `${matrixTotal} Grants`,
-      trend: `${PERMISSION_COUNT_PER_MODULE} per module`,
+      trend: `${matrixModules.length || PERMISSION_MODULES.length} Active System Modules`,
       color: "#EF4444",
       icon: <FaLock />,
       onClick: () => {
@@ -601,9 +633,9 @@ const RolesPermissions = () => {
       },
     },
     {
-      title: "Personnel Coverage",
-      value: usersLoading ? "..." : `${activeUsers} Active`,
-      trend: `${users.length} Registered Accounts`,
+      title: "Staff Personnel Coverage",
+      value: usersLoading ? "..." : `${activeStaffUsers} Active`,
+      trend: `${staffUsers.length} Internal Staff Accounts`,
       color: "#10B981",
       icon: <FaUsers />,
       onClick: () => {
@@ -1481,8 +1513,6 @@ const RolesPermissions = () => {
     </div>
   );
 };
-
-const PERMISSION_COUNT_PER_MODULE = 7;
 
 const labelStyle: React.CSSProperties = {
   display: "block",

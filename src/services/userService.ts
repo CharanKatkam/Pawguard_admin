@@ -227,7 +227,7 @@ export const userService = {
   // POST /api/v1/admin/users/{id}/permissions
   grantUserPermission: async (userId: string, permissionCode: string) => {
     const response = await api.post(`/admin/users/${userId}/permissions`, {
-      permission_code: permissionCode,
+      permission_codes: [permissionCode],
     });
     await publishActionEvent({
       module: "user",

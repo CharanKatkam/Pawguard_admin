@@ -17,7 +17,7 @@ export interface VolunteerApplicationPayload {
 }
 
 export interface VolunteerProfileUpdatePayload {
-  status?: "applied" | "onboarded" | "active" | "inactive";
+  status?: "applied" | "pending" | "approved" | "onboarded" | "active" | "inactive" | "rejected";
   emergency_contact_name?: string | null;
   emergency_contact_phone?: string | null;
   skills?: string | null;
@@ -47,6 +47,18 @@ export interface ShiftCreatePayload {
   capacity?: number;
   [key: string]: unknown;
 }
+
+export const extractShiftId = (res: any): string => {
+  if (!res) return "";
+  if (typeof res === "string") return res;
+  if (typeof res.id === "string" && res.id) return res.id;
+  if (res.data) {
+    if (typeof res.data === "string" && res.data) return res.data;
+    if (typeof res.data.id === "string" && res.data.id) return res.data.id;
+    if (res.data.data && typeof res.data.data.id === "string" && res.data.data.id) return res.data.data.id;
+  }
+  return "";
+};
 
 export const volunteerService = {
   // GET /volunteers - List volunteer profiles
@@ -110,8 +122,12 @@ export const volunteerService = {
   },
 
   // POST /volunteers/shifts/{shift_id}/join - Join or assign volunteer to shift
-  joinShift: async (shiftId: string, volunteerId?: string) => {
-    const payload = volunteerId ? { volunteer_id: volunteerId, volunteer_profile_id: volunteerId } : {};
+  joinShift: async (shiftInput: any, volunteerId?: string) => {
+    const shiftId = extractShiftId(shiftInput);
+    if (!shiftId) {
+      throw new Error("Invalid shift ID provided for shift join/assignment.");
+    }
+    const payload = volunteerId ? { volunteer_id: volunteerId, volunteer_profile_id: volunteerId } : undefined;
     const response = await api.post(`/volunteers/shifts/${shiftId}/join`, payload);
     return response.data;
   },
@@ -184,6 +200,23 @@ export const volunteerService = {
   getVolunteerStats: async () => {
     const response = await api.get("/admin/dashboard/volunteer-stats");
     return response.data;
+  },
+
+  // GET /volunteers/me/status - Current user volunteer status
+  getMyStatus: async () => {
+    const response = await api.get("/volunteers/me/status");
+    return response.data;
+  },
+
+  // GET /volunteers/me/application - Current user volunteer application
+  getMyApplication: async () => {
+    const response = await api.get("/volunteers/me/application");
+    return response.data;
+  },
+
+  // Helper to safely extract UUID shift ID from any backend response structure
+  extractShiftId: (res: any): string => {
+    return extractShiftId(res);
   },
 };
 

@@ -92,6 +92,7 @@ const VolunteerManagement = () => {
     notes: "",
     medical_conditions: "None",
     animal_handling_experience: "2 years volunteer experience at local shelter",
+    legal_consent: false,
   });
 
   // Shift Form
@@ -192,6 +193,20 @@ const VolunteerManagement = () => {
     e.preventDefault();
     if (!applyForm.emergency_contact_name || !applyForm.emergency_contact_phone) {
       addToast("Emergency contact name and phone are required.", "error");
+      return;
+    }
+    if (!applyForm.legal_consent) {
+      addToast("You must review and accept the Volunteer Legal Agreement and Liability Release before applying.", "error");
+      return;
+    }
+
+    const duplicate = applications.find((app) => {
+      const em = String(app.user?.email || app.email || "").toLowerCase();
+      const st = String(app.status || "").toLowerCase();
+      return applyForm.email && em === applyForm.email.toLowerCase() && ["applied", "pending"].includes(st);
+    });
+    if (duplicate) {
+      addToast(`A pending volunteer application already exists for ${applyForm.email}.`, "error");
       return;
     }
 
@@ -1343,6 +1358,25 @@ const VolunteerManagement = () => {
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Notes / Message</label>
             <textarea rows={2} placeholder="Any notes or message" value={applyForm.notes} onChange={(e) => setApplyForm({ ...applyForm, notes: e.target.value })} style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", resize: "vertical" }} />
+          </div>
+
+          <div style={{ background: "#F8FAFC", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", fontSize: "13px", color: "#334155", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                required
+                checked={applyForm.legal_consent}
+                onChange={(e) => setApplyForm({ ...applyForm, legal_consent: e.target.checked })}
+                style={{ marginTop: "3px" }}
+              />
+              <span>
+                <strong>Volunteer Legal Agreement &amp; Liability Release *</strong>
+                <br />
+                <span style={{ fontSize: "11px", color: "#64748B" }}>
+                  I confirm that I am applying in good faith, meet physical requirement standards for animal care, agree to PawGuard Code of Conduct, and accept liability waiver conditions.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>

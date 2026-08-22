@@ -306,7 +306,7 @@ function App() {
                   permission="view_vehicles"
                   allowedRoles={[
                     "super_admin",
-                    "rescue_coordinator",
+                    "rescue_centre_admin",
                   ]}
                 />
               }
