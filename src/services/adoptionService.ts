@@ -1,8 +1,47 @@
 import api from "../api/axios";
-import { triggerAdoptionWorkflow } from "../utils/eventSystem";
-import { formatDateTime } from "../utils/dateUtils";
+import { triggerAdoptionWorkflow, publishActionEvent } from "../utils/eventSystem";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface AdoptionApplicationCreatePayload {
+  dog_id: string;
+  residential_status: string;
+  has_landlord_approval: boolean;
+  has_yard_fence: boolean;
+  household_members_count: number;
+  existing_pets_medical_details?: string | null;
+  pet_care_experience?: string | null;
+}
+
+export interface AdoptionApplicationUpdatePayload {
+  status?: "submitted" | "vetting" | "screening" | "interview" | "home_check" | "approved" | "completed" | "rejected" | string | null;
+  vetting_officer_notes?: string | null;
+  home_inspection_scheduled_at?: string | null;
+  home_inspection_notes?: string | null;
+  adoption_agreement_url?: string | null;
+}
+
+export interface AdoptionScoreCreatePayload {
+  home_environment_score: number;
+  pet_care_knowledge_score: number;
+  financial_readiness_score: number;
+  lifestyle_compatibility_score: number;
+  recommendation: string;
+  notes?: string | null;
+}
+
+export interface AdoptionFollowUpCreatePayload {
+  due_day: number;
+}
+
+export interface FollowUpProofCreatePayload {
+  media_keys: string[];
+  notes?: string | null;
+}
+
+export interface AdoptionFeeUpdatePayload {
+  fee_amount: number | string;
+}
 
 /**
  * Map a friendly status label into the backend AdoptionStatus enum
@@ -111,15 +150,27 @@ export const unwrapAdoptions = (body: unknown): Record<string, unknown>[] => {
 };
 
 export const adoptionService = {
-  // GET /dashboards/adoption - executive adoption metric endpoint
+  // GET /dashboards/adoption
   getAdoptionDashboard: async () => {
     const response = await api.get("/dashboards/adoption");
+    return response.data;
+  },
+
+  // GET /admin/dashboard/adoption-stats
+  getAdoptionStats: async () => {
+    const response = await api.get("/admin/dashboard/adoption-stats");
     return response.data;
   },
 
   // GET /adoptions - list adoption applications (paginated)
   getAdoptions: async (params?: Record<string, unknown>) => {
     const response = await api.get("/adoptions", { params });
+    return { ...response.data, data: unwrapAdoptions(response.data) };
+  },
+
+  // GET /adoptions/my - List my applications
+  getMyAdoptions: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/adoptions/my", { params });
     return { ...response.data, data: unwrapAdoptions(response.data) };
   },
 
@@ -130,18 +181,15 @@ export const adoptionService = {
     return normalizeAdoptionRow(raw as Record<string, unknown>);
   },
 
-  // POST /adoptions - AdoptionApplicationCreate { dog_id (uuid), residential_status, ... }
-  createAdoption: async (data: Record<string, unknown>) => {
+  // POST /adoptions - AdoptionApplicationCreate
+  createAdoption: async (data: Record<string, unknown> | AdoptionApplicationCreatePayload) => {
     const payload: Record<string, unknown> = {};
 
     if (typeof data.dog_id === "string" && UUID_RE.test(data.dog_id)) {
       payload.dog_id = data.dog_id;
-    } else if (typeof data.petId === "string" && UUID_RE.test(data.petId)) {
-      payload.dog_id = data.petId;
     }
 
-    const residentialStatus =
-      data.residential_status || data.residentialStatus || "owned";
+    const residentialStatus = data.residential_status || "owned";
     payload.residential_status = String(residentialStatus);
 
     for (const key of [
@@ -151,22 +199,17 @@ export const adoptionService = {
       "existing_pets_medical_details",
       "pet_care_experience",
     ]) {
-      if (data[key] !== undefined) payload[key] = data[key];
+      if ((data as Record<string, unknown>)[key] !== undefined) {
+        payload[key] = (data as Record<string, unknown>)[key];
+      }
     }
 
     if (!payload.dog_id) {
-      throw new Error(
-        "A valid dog (dog_id) is required to submit an adoption application."
-      );
+      throw new Error("A valid dog (dog_id) is required to submit an adoption application.");
     }
 
     const response = await api.post("/adoptions", payload);
-    await triggerAdoptionWorkflow(
-      "Submitted",
-      (data.applicantName as string) || "Adopter",
-      (data.petName as string) || "Rescue Dog",
-      false
-    );
+    await triggerAdoptionWorkflow("Submitted", "Adopter", "Rescue Dog", false);
     return response.data;
   },
 
@@ -181,8 +224,7 @@ export const adoptionService = {
     const response = await api.patch(`/adoptions/${id}/status`, {
       status: backendStatus,
     });
-    
-    // Applicant notification
+
     const petLabel = petName || "your selected pet";
     let notifTitle = "Adoption Application Update";
     let notifBody = `Your adoption application status has been updated to: ${backendStatus}.`;
@@ -196,67 +238,94 @@ export const adoptionService = {
     } else if (backendStatus === "completed") {
       notifTitle = "Adoption Process Completed!";
       notifBody = `Congratulations! Your adoption of ${petLabel} has been finalized and completed.`;
-    } else if (backendStatus === "home_check") {
-      notifTitle = "Home Verification Requested";
-      notifBody = `Your adoption application for ${petLabel} has moved to the home inspection stage.`;
-    } else if (backendStatus === "screening" || backendStatus === "interview") {
-      notifTitle = "Application In Review";
-      notifBody = `Your adoption application for ${petLabel} is currently under ${backendStatus} review.`;
     }
 
     await notifyApplicant(adopterId, notifTitle, notifBody);
 
-    await triggerAdoptionWorkflow(
-      "Decision",
-      "Applicant",
-      `Dog #${id}`,
-      backendStatus === "approved" || backendStatus === "completed"
-    );
+    await publishActionEvent({
+      module: "adoption",
+      action: backendStatus === "approved" ? "approve" : "update",
+      title: `Adoption Status: ${backendStatus.toUpperCase()}`,
+      message: `Adoption application ${id} transitioned to ${backendStatus}.`,
+      targetRoles: ["super_admin", "adoption_coordinator"],
+    });
+
     return response.data;
   },
 
   // PUT /adoptions/{app_id} - update full application (notes, inspection date, status)
-  updateAdoptionDetails: async (id: string, payload: Record<string, unknown>) => {
+  updateAdoptionDetails: async (id: string, payload: Record<string, unknown> | AdoptionApplicationUpdatePayload) => {
     const response = await api.put(`/adoptions/${id}`, payload);
     return response.data;
   },
 
-  // PUT /adoptions/{app_id} - schedule home inspection / record vetting notes
-  scheduleHomeInspection: async (
-    id: string,
-    scheduledAt: string,
-    notes?: string,
-    adopterId?: string | null,
-    petName?: string
-  ) => {
-    const payload: Record<string, unknown> = {
-      status: "home_check",
-    };
-    if (scheduledAt) {
-      const iso = new Date(scheduledAt).toISOString();
-      payload.home_inspection_scheduled_at = iso;
-    }
-    if (notes) {
-      payload.home_inspection_notes = notes;
-      payload.vetting_officer_notes = notes;
-    }
-    const response = await api.put(`/adoptions/${id}`, payload);
-    
-    const formattedDate = scheduledAt
-      ? formatDateTime(scheduledAt)
-      : "the scheduled date";
-    await notifyApplicant(
-      adopterId,
-      "Home Inspection Visit Scheduled",
-      `A home verification visit has been scheduled for your adoption application for ${petName || "your selected pet"} on ${formattedDate}.`
-    );
+  // GET /adoptions/{app_id}/agreement - Download URL
+  getAdoptionAgreementUrl: async (id: string) => {
+    const response = await api.get(`/adoptions/${id}/agreement`);
+    return response.data;
+  },
 
-    await triggerAdoptionWorkflow(
-      "Home Inspection Scheduled",
-      "Applicant",
-      `Application #${id}`,
-      false
-    );
+  // POST /adoptions/{app_id}/scores - Add candidate score
+  addCandidateScore: async (id: string, payload: AdoptionScoreCreatePayload) => {
+    const response = await api.post(`/adoptions/${id}/scores`, payload);
+    return response.data;
+  },
+
+  // GET /adoptions/{app_id}/scores - Get candidate scores
+  getCandidateScores: async (id: string) => {
+    const response = await api.get(`/adoptions/${id}/scores`);
+    return response.data;
+  },
+
+  // POST /adoptions/{app_id}/follow-ups - Create follow-up requirement
+  createFollowUp: async (id: string, payload: AdoptionFollowUpCreatePayload) => {
+    const response = await api.post(`/adoptions/${id}/follow-ups`, payload);
+    return response.data;
+  },
+
+  // GET /adoptions/{app_id}/follow-ups - Get follow-up requirements
+  getFollowUps: async (id: string) => {
+    const response = await api.get(`/adoptions/${id}/follow-ups`);
+    return response.data;
+  },
+
+  // POST /adoptions/{app_id}/follow-ups/{follow_up_id}/proof - Submit proof
+  submitFollowUpProof: async (appId: string, followUpId: string, payload: FollowUpProofCreatePayload) => {
+    const response = await api.post(`/adoptions/${appId}/follow-ups/${followUpId}/proof`, payload);
+    return response.data;
+  },
+
+  // PUT /adoptions/{app_id}/fee - Update adoption fee
+  updateAdoptionFee: async (id: string, payload: AdoptionFeeUpdatePayload) => {
+    const response = await api.put(`/adoptions/${id}/fee`, payload);
+    return response.data;
+  },
+
+  // POST /companion-pets/from-adoption/{application_id} - Create Companion Pet from approved adoption
+  createCompanionPetFromAdoption: async (applicationId: string) => {
+    const response = await api.post(`/companion-pets/from-adoption/${applicationId}`);
+    await publishActionEvent({
+      module: "adoption",
+      action: "approve",
+      title: "Companion Pet Created from Adoption",
+      message: `Adoption application ${applicationId} completed and registered as companion pet!`,
+      targetRoles: ["super_admin", "adoption_coordinator"],
+    });
+    return response.data;
+  },
+
+  // POST /adoptions/bulk/status-update
+  bulkUpdateStatus: async (applicationIds: string[], status: string) => {
+    const response = await api.post("/adoptions/bulk/status-update", {
+      application_ids: applicationIds,
+      status: toAdoptionStatus(status),
+    });
+    return response.data;
+  },
+
+  // POST /adoptions/bulk/delete
+  bulkDeleteAdoptions: async (applicationIds: string[]) => {
+    const response = await api.post("/adoptions/bulk/delete", { application_ids: applicationIds });
     return response.data;
   },
 
@@ -268,4 +337,3 @@ export const adoptionService = {
 };
 
 export default adoptionService;
-

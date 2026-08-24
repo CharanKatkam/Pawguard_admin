@@ -1,19 +1,34 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import DataTable from "../../components/common/DataTable";
-import QuickActionCard from "../../components/dashboard/QuickActionCard";
+import DataTable, { type Column } from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaHome, FaBed, FaHospital, FaPlus, FaEdit, FaTrash, FaExchangeAlt } from "react-icons/fa";
+import {
+  FaHome,
+  FaBed,
+  FaPlus,
+  FaEdit,
+  FaTrash,
+  FaExchangeAlt,
+  FaSearch,
+  FaLayerGroup,
+  FaPaw,
+  FaCheckCircle,
+  FaExclamationTriangle,
+  FaEye,
+} from "react-icons/fa";
 import shelterService from "../../services/shelterService";
-import petService from "../../services/petService";
 import ShelterTransfers from "../../components/shelters/ShelterTransfers";
+import ShelterDetailsModal from "../../components/shelters/ShelterDetailsModal";
+import KennelDetailsModal from "../../components/shelters/KennelDetailsModal";
+import KennelAssignmentModal from "../../components/shelters/KennelAssignmentModal";
 import { notifyDataChanged } from "../../utils/dataSync";
 
 const FACILITY_TYPES = ["shelter", "clinic", "foster_home", "partner"];
 const FACILITY_STATUSES = ["active", "inactive", "maintenance"];
+const SECTION_TYPES = ["quarantine", "isolation", "surgical", "puppy", "general", "adoption"];
 
 const emptyRegisterForm = {
   name: "",
@@ -23,18 +38,53 @@ const emptyRegisterForm = {
   total_capacity: "",
 };
 
+const emptySectionForm = {
+  facility_id: "",
+  name: "",
+  section_type: "general",
+  capacity: "",
+};
+
+const emptyKennelForm = {
+  section_id: "",
+  identifier: "",
+  capacity: "1",
+};
+
 const unwrapList = (v: any) =>
   Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-const Shelters = () => {
-  const [activeTab, setActiveTab] = useState<"facilities" | "transfers">("facilities");
+export const Shelters = () => {
+  const [activeTab, setActiveTab] = useState<"facilities" | "kennels" | "transfers">("facilities");
   const [shelters, setShelters] = useState<any[]>([]);
   const [allShelters, setAllShelters] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Filters & Pagination for Facilities
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Filters for Kennels Tab
+  const [kennelSearch, setKennelSearch] = useState("");
+  const [kennelFacilityFilter, setKennelFacilityFilter] = useState("");
+  const [kennelSanitationFilter, setKennelSanitationFilter] = useState("");
+  const [kennelSectionTypeFilter, setKennelSectionTypeFilter] = useState("");
+  const [kennelOccupancyFilter, setKennelOccupancyFilter] = useState("");
+
+  // Kennels Data State
+  const [allSections, setAllSections] = useState<any[]>([]);
+  const [allKennels, setAllKennels] = useState<any[]>([]);
+  const [kennelsLoading, setKennelsLoading] = useState(false);
+
+  // Dashboard Aggregates State
+  const [dashboardStats, setDashboardStats] = useState<any | null>(null);
+
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
@@ -42,10 +92,18 @@ const Shelters = () => {
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(() => searchParams.get("action") === "add");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isCageModalOpen, setIsCageModalOpen] = useState(false);
-  const [selectedFacility, setSelectedFacility] = useState<any | null>(null);
+  const [isSectionModalOpen, setIsSectionModalOpen] = useState(false);
+  const [isKennelCreateModalOpen, setIsKennelCreateModalOpen] = useState(false);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+
+  // Details View Modals
+  const [viewShelterId, setViewShelterId] = useState<string | null>(null);
+  const [isShelterDetailsOpen, setIsShelterDetailsOpen] = useState(false);
+  const [selectedKennelForDetails, setSelectedKennelForDetails] = useState<any | null>(null);
+  const [isKennelDetailsOpen, setIsKennelDetailsOpen] = useState(false);
 
   // Form states
+  const [selectedFacility, setSelectedFacility] = useState<any | null>(null);
   const [registerForm, setRegisterForm] = useState({ ...emptyRegisterForm });
   const [editForm, setEditForm] = useState({
     name: "",
@@ -55,101 +113,141 @@ const Shelters = () => {
     total_capacity: "",
     status: "active",
   });
-
-  // Cage allocation cascade
-  const [cageSections, setCageSections] = useState<any[]>([]);
-  const [cageKennels, setCageKennels] = useState<any[]>([]);
-  const [cageDogs, setCageDogs] = useState<any[]>([]);
-  const [cageSel, setCageSel] = useState({ facilityId: "", sectionId: "", kennelId: "", dogId: "" });
-  const [cageLoading, setCageLoading] = useState(false);
+  const [sectionForm, setSectionForm] = useState({ ...emptySectionForm });
+  const [kennelForm, setKennelForm] = useState({ ...emptyKennelForm });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const formatFacility = (f: any) => ({
-    ...f,
-    name: f.name || "",
-    address: f.address || "",
-    phone: f.phone || "",
-    total_capacity: f.total_capacity ?? "",
-    status: f.status || "inactive",
-    facility_type: f.facility_type || "shelter",
-  });
+  // Search Debounce handler (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [search]);
 
+  // Fetch Facilities
   const fetchShelters = async () => {
     try {
       setLoading(true);
       setError(null);
       const response = await shelterService.getShelters({
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
+        status: statusFilter || undefined,
+        facility_type: typeFilter || undefined,
         page,
-        page_size: 5,
+        page_size: pageSize,
       });
+
       const facilityList = unwrapList(response);
       const total = response?.meta?.total ?? response?.data?.meta?.total ?? facilityList.length;
       setTotalCount(total);
-
-      setShelters(facilityList.map(formatFacility));
+      setShelters(facilityList);
     } catch (err: any) {
       setError(
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
-        "Failed to load shelter facilities. Access may be restricted."
+        "Failed to load shelter facilities from backend API."
       );
     } finally {
       setLoading(false);
     }
   };
 
+  // Fetch All Facilities for dropdowns & aggregates
   const fetchAllShelters = async () => {
     try {
-      const response = await shelterService.getShelters({ page: 1, page_size: 100 });
-      setAllShelters(unwrapList(response).map(formatFacility));
+      const response = await shelterService.getShelters({ page: 1, page_size: 20 });
+      const facs = unwrapList(response);
+      setAllShelters(facs);
     } catch {
       setAllShelters([]);
     }
   };
 
-  useEffect(() => {
-    fetchShelters();
-  }, [search, page]);
-
-  useEffect(() => {
-    const t = setTimeout(() => fetchAllShelters(), 300);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  const openCageModal = async () => {
-    setCageSel({ facilityId: "", sectionId: "", kennelId: "", dogId: "" });
-    setCageSections([]);
-    setCageKennels([]);
-    setIsCageModalOpen(true);
-    setCageLoading(true);
+  // Fetch Dashboard aggregate stats
+  const fetchDashboardStats = async () => {
     try {
-      const dogsRes = await petService.getPets();
-      const dogs = unwrapList(dogsRes);
-      setCageDogs(
-        dogs.map((d: any) => ({
-          id: d.id || d.dog_id || "",
-          label: `${d.name || "Dog"} (${d.registration_number || d.id})`,
-        }))
-      );
+      const stats = await shelterService.getShelterDashboard().catch(() => null);
+      if (stats) {
+        setDashboardStats(stats?.data || stats);
+      }
     } catch {
-      setCageDogs([]);
-    } finally {
-      setCageLoading(false);
+      // quiet fallback
     }
   };
+
+  // Fetch all Kennels across facilities for Kennels Tab
+  const fetchAllKennelsWorkspace = async () => {
+    setKennelsLoading(true);
+    try {
+      const facsRes = await shelterService.getShelters({ page: 1, page_size: 20 });
+      const facList = unwrapList(facsRes);
+
+      const fetchedSections: any[] = [];
+      let fetchedKennels: any[] = [];
+
+      for (const fac of facList) {
+        try {
+          const secRes = await shelterService.getFacilitySections(fac.id);
+          const secList = unwrapList(secRes);
+
+          for (const sec of secList) {
+            fetchedSections.push({ ...sec, facility_name: fac.name });
+            try {
+              const kRes = await shelterService.getSectionKennels(sec.id);
+              const kList = unwrapList(kRes).map((k: any) => ({
+                ...k,
+                facility_id: fac.id,
+                facility_name: fac.name,
+                section_name: sec.name,
+                section_type: sec.section_type,
+              }));
+              fetchedKennels = [...fetchedKennels, ...kList];
+            } catch {
+              // ignore single section error
+            }
+          }
+        } catch {
+          // ignore single facility error
+        }
+      }
+
+      setAllSections(fetchedSections);
+      setAllKennels(fetchedKennels);
+    } catch {
+      // quiet catch
+    } finally {
+      setKennelsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchShelters();
+  }, [debouncedSearch, statusFilter, typeFilter, page, pageSize]);
+
+  useEffect(() => {
+    fetchAllShelters();
+    fetchDashboardStats();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "kennels") {
+      fetchAllKennelsWorkspace();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (searchParams.get("action") === "add") {
       setIsRegisterModalOpen(true);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (searchParams.get("action") === "allocate") {
-      openCageModal();
+      setIsAssignModalOpen(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [searchParams]);
 
+  // Handler for Registering Facility
   const handleRegisterFacility = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!registerForm.name) {
@@ -169,6 +267,7 @@ const Shelters = () => {
       setIsRegisterModalOpen(false);
       setRegisterForm({ ...emptyRegisterForm });
       fetchShelters();
+      fetchAllShelters();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to register facility.";
@@ -178,24 +277,12 @@ const Shelters = () => {
     }
   };
 
-  const openEdit = (facility: any) => {
-    setSelectedFacility(facility);
-    setEditForm({
-      name: facility.name || "",
-      address: facility.address || "",
-      phone: facility.phone || "",
-      facility_type: FACILITY_TYPES.includes(facility.facility_type) ? facility.facility_type : "shelter",
-      total_capacity: facility.total_capacity !== undefined && facility.total_capacity !== "" ? String(facility.total_capacity) : "",
-      status: FACILITY_STATUSES.includes(facility.status) ? facility.status : "active",
-    });
-    setIsEditModalOpen(true);
-  };
-
+  // Handler for Editing Facility
   const handleEditFacility = async (e: React.FormEvent) => {
     e.preventDefault();
     const facilityId = selectedFacility?.id;
     if (!facilityId) {
-      addToast("Could not determine the facility to update.", "error");
+      addToast("Could not determine facility to update.", "error");
       return;
     }
     try {
@@ -210,7 +297,6 @@ const Shelters = () => {
       });
       addToast(`Facility "${editForm.name}" updated successfully!`, "success");
       setIsEditModalOpen(false);
-      setSelectedFacility(null);
       fetchShelters();
       notifyDataChanged();
     } catch (err: any) {
@@ -221,19 +307,16 @@ const Shelters = () => {
     }
   };
 
+  // Handler for Deleting Facility
   const handleDeleteFacility = async () => {
-    const facilityId = selectedFacility?.id;
-    if (!facilityId) {
-      addToast("Could not determine the facility to delete.", "error");
-      return;
-    }
+    if (!selectedFacility?.id) return;
     try {
       setIsSubmitting(true);
-      await shelterService.deleteFacility(facilityId);
-      addToast(`Facility "${selectedFacility?.name}" deleted.`, "success");
+      await shelterService.deleteFacility(selectedFacility.id);
+      addToast(`Facility "${selectedFacility.name}" deleted.`, "success");
       setIsDeleteModalOpen(false);
-      setSelectedFacility(null);
       fetchShelters();
+      fetchAllShelters();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to delete facility.";
@@ -243,370 +326,823 @@ const Shelters = () => {
     }
   };
 
-  const onFacilityChange = async (facilityId: string) => {
-    setCageSel((s) => ({ ...s, facilityId, sectionId: "", kennelId: "" }));
-    setCageKennels([]);
-    if (!facilityId) {
-      setCageSections([]);
-      return;
-    }
-    try {
-      const res = await shelterService.getFacilitySections(facilityId);
-      setCageSections(
-        unwrapList(res).map((sec: any) => ({ id: sec.id, label: `${sec.name} (${sec.section_type || "general"})` }))
-      );
-    } catch {
-      setCageSections([]);
-      addToast("Failed to load sections for this facility.", "error");
-    }
-  };
-
-  const onSectionChange = async (sectionId: string) => {
-    setCageSel((s) => ({ ...s, sectionId, kennelId: "" }));
-    if (!sectionId) {
-      setCageKennels([]);
-      return;
-    }
-    try {
-      const res = await shelterService.getSectionKennels(sectionId);
-      setCageKennels(
-        unwrapList(res).map((k: any) => ({ id: k.id, label: `${k.identifier || k.id}` }))
-      );
-    } catch {
-      setCageKennels([]);
-      addToast("Failed to load kennels for this section.", "error");
-    }
-  };
-
-  const handleAssignCage = async (e: React.FormEvent) => {
+  // Handler for Creating Section
+  const handleCreateSection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cageSel.kennelId || !cageSel.dogId) {
-      addToast("Please select both a kennel and a dog to assign.", "error");
+    if (!sectionForm.facility_id || !sectionForm.name) {
+      addToast("Facility and Section Name are required.", "error");
       return;
     }
     try {
       setIsSubmitting(true);
-      await shelterService.assignDogToKennel(cageSel.kennelId, cageSel.dogId);
-      addToast("Dog assigned to kennel successfully!", "success");
-      setIsCageModalOpen(false);
-      notifyDataChanged();
+      await shelterService.createFacilitySection(sectionForm.facility_id, {
+        name: sectionForm.name,
+        section_type: sectionForm.section_type as any,
+        capacity: sectionForm.capacity ? Number(sectionForm.capacity) : undefined,
+      });
+      addToast(`Section "${sectionForm.name}" created successfully!`, "success");
+      setIsSectionModalOpen(false);
+      setSectionForm({ ...emptySectionForm });
+      if (activeTab === "kennels") fetchAllKennelsWorkspace();
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Cage allocation failed.";
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to create section.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const totalCapacity = allShelters.reduce((acc, curr: any) => {
-    const cap = parseInt(curr.total_capacity, 10);
-    return acc + (isNaN(cap) ? 0 : cap);
-  }, 0);
-  const activeCount = allShelters.filter((s: any) => s.status === "active").length;
+  // Handler for Creating Kennel
+  const handleCreateKennel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!kennelForm.section_id || !kennelForm.identifier) {
+      addToast("Section and Kennel Identifier are required.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await shelterService.createSectionKennel(kennelForm.section_id, {
+        identifier: kennelForm.identifier,
+        capacity: kennelForm.capacity ? Number(kennelForm.capacity) : 1,
+      });
+      addToast(`Kennel Unit "${kennelForm.identifier}" created successfully!`, "success");
+      setIsKennelCreateModalOpen(false);
+      setKennelForm({ ...emptyKennelForm });
+      if (activeTab === "kennels") fetchAllKennelsWorkspace();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to create kennel unit.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  const stats = [
+  // Aggregate Calculation for Dashboard Stat Cards
+  const computedStats = useMemo(() => {
+    const totalShelters = allShelters.length || totalCount;
+    const activeShelters = allShelters.filter((s) => s.status === "active").length;
+    const totalCapacity = allShelters.reduce((acc, s) => acc + (Number(s.total_capacity) || 0), 0);
+
+    return {
+      totalShelters,
+      activeShelters,
+      totalCapacity: dashboardStats?.total_capacity ?? totalCapacity,
+      occupiedSpaces: dashboardStats?.occupied_spaces ?? 0,
+      availableSpaces: dashboardStats?.available_spaces ?? Math.max(0, totalCapacity - (dashboardStats?.occupied_spaces ?? 0)),
+      occupancyPct: dashboardStats?.occupancy_percentage ?? (totalCapacity > 0 ? Math.round(((dashboardStats?.occupied_spaces ?? 0) / totalCapacity) * 100) : 0),
+      animalsHoused: dashboardStats?.animals_housed ?? 0,
+      criticalCases: dashboardStats?.critical_cases ?? 0,
+    };
+  }, [allShelters, totalCount, dashboardStats]);
+
+  // Filtered Kennels list for Kennels tab
+  const filteredKennels = useMemo(() => {
+    return allKennels.filter((k) => {
+      const matchesSearch =
+        !kennelSearch ||
+        k.identifier.toLowerCase().includes(kennelSearch.toLowerCase()) ||
+        k.section_name?.toLowerCase().includes(kennelSearch.toLowerCase()) ||
+        k.facility_name?.toLowerCase().includes(kennelSearch.toLowerCase());
+      const matchesFacility = !kennelFacilityFilter || k.facility_id === kennelFacilityFilter;
+      const matchesSanitation = !kennelSanitationFilter || k.sanitation_state === kennelSanitationFilter;
+      const matchesSectionType = !kennelSectionTypeFilter || k.section_type === kennelSectionTypeFilter;
+      const matchesOccupancy =
+        !kennelOccupancyFilter ||
+        (kennelOccupancyFilter === "occupied" ? k.is_occupied : !k.is_occupied);
+
+      return matchesSearch && matchesFacility && matchesSanitation && matchesSectionType && matchesOccupancy;
+    });
+  }, [allKennels, kennelSearch, kennelFacilityFilter, kennelSanitationFilter, kennelSectionTypeFilter, kennelOccupancyFilter]);
+
+  const facilityColumns: Column<any>[] = [
     {
-      title: "Rescue Facilities",
-      value: loading ? "..." : totalCount,
-      trend: "Registered Hubs",
-      color: "#2563EB",
-      icon: <FaHome />,
-      onClick: () => {
-        setActiveTab("facilities");
-        document.getElementById("shelter-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "name",
+      header: "Facility Name",
+      render: (_v, row) => (
+        <div>
+          <strong style={{ fontSize: "14px", color: "#0F172A" }}>{row.name}</strong>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>
+            ID: <code>{row.id}</code>
+          </div>
+        </div>
+      ),
     },
     {
-      title: "Total Cage Capacity",
-      value: loading ? "..." : totalCapacity,
-      trend: "Across Facilities",
-      color: "#10B981",
-      icon: <FaBed />,
-      onClick: () => {
-        setActiveTab("transfers");
-        document.getElementById("kennel-management-section")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "facility_type",
+      header: "Type",
+      render: (_v, row) => (
+        <span style={{ textTransform: "capitalize", background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: 600 }}>
+          {row.facility_type || "shelter"}
+        </span>
+      ),
+    },
+    { key: "address", header: "Address / Location", render: (_v, row) => row.address || "Unspecified" },
+    { key: "phone", header: "Phone", render: (_v, row) => row.phone || "—" },
+    { key: "total_capacity", header: "Capacity", render: (_v, row) => <span style={{ fontWeight: 700 }}>{row.total_capacity ?? "Unspecified"}</span> },
+    {
+      key: "status",
+      header: "Status",
+      render: (_v, row) => (
+        <span
+          style={{
+            padding: "2px 8px",
+            borderRadius: "12px",
+            fontSize: "11px",
+            fontWeight: 700,
+            background: row.status === "active" ? "#DCFCE7" : "#FEE2E2",
+            color: row.status === "active" ? "#166534" : "#991B1B",
+          }}
+        >
+          {(row.status || "active").toUpperCase()}
+        </span>
+      ),
     },
     {
-      title: "Active Facilities",
-      value: loading ? "..." : activeCount,
-      trend: "Operational Hubs",
-      color: "#6366F1",
-      icon: <FaHospital />,
-      onClick: () => {
-        setActiveTab("facilities");
-        document.getElementById("shelter-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "actions",
+      header: "Actions",
+      render: (_v, row) => (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button
+            onClick={() => {
+              setViewShelterId(row.id);
+              setIsShelterDetailsOpen(true);
+            }}
+            title="View Shelter Details"
+            style={{
+              padding: "6px 10px",
+              background: "#2563EB",
+              color: "#FFF",
+              border: "none",
+              borderRadius: "4px",
+              fontSize: "12px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <FaEye /> Details
+          </button>
+          <Can permission={["edit_shelters", "manage_shelters"]}>
+            <button
+              onClick={() => {
+                setSelectedFacility(row);
+                setEditForm({
+                  name: row.name || "",
+                  address: row.address || "",
+                  phone: row.phone || "",
+                  facility_type: row.facility_type || "shelter",
+                  total_capacity: row.total_capacity !== undefined ? String(row.total_capacity) : "",
+                  status: row.status || "active",
+                });
+                setIsEditModalOpen(true);
+              }}
+              title="Edit Facility"
+              style={{
+                padding: "6px 10px",
+                background: "#F1F5F9",
+                color: "#334155",
+                border: "1px solid #CBD5E1",
+                borderRadius: "4px",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              <FaEdit /> Edit
+            </button>
+          </Can>
+          <Can permission={["delete_shelters", "manage_shelters"]}>
+            <button
+              onClick={() => {
+                setSelectedFacility(row);
+                setIsDeleteModalOpen(true);
+              }}
+              title="Delete Facility"
+              style={{
+                padding: "6px 10px",
+                background: "#FEE2E2",
+                color: "#991B1B",
+                border: "1px solid #FCA5A5",
+                borderRadius: "4px",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              <FaTrash /> Delete
+            </button>
+          </Can>
+        </div>
+      ),
     },
   ];
 
-  const columns = [
-    { key: "id", title: "Facility ID" },
-    { key: "name", title: "Shelter / Centre Name" },
-    { key: "address", title: "Address" },
-    { key: "phone", title: "Phone" },
-    { key: "total_capacity", title: "Cage Capacity" },
-    { key: "status", title: "Operational Status" },
+  const kennelWorkspaceColumns: Column<any>[] = [
+    {
+      key: "identifier",
+      header: "Kennel Identifier",
+      render: (_v, row) => (
+        <div>
+          <strong style={{ fontSize: "14px", color: "#0F172A" }}>{row.identifier}</strong>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>ID: <code>{row.id?.slice(0, 8)}</code></div>
+        </div>
+      ),
+    },
+    { key: "facility_name", header: "Shelter Facility", render: (_v, row) => row.facility_name || "—" },
+    { key: "section_name", header: "Section", render: (_v, row) => row.section_name || "General" },
+    {
+      key: "section_type",
+      header: "Section Type",
+      render: (_v, row) => (
+        <span style={{ textTransform: "capitalize", background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: 600 }}>
+          {row.section_type || "general"}
+        </span>
+      ),
+    },
+    { key: "capacity", header: "Capacity", render: (_v, row) => row.capacity ?? 1 },
+    {
+      key: "sanitation_state",
+      header: "Sanitation State",
+      render: (_v, row) => (
+        <span
+          style={{
+            padding: "2px 8px",
+            borderRadius: "12px",
+            fontSize: "11px",
+            fontWeight: 700,
+            background:
+              row.sanitation_state === "clean"
+                ? "#DCFCE7"
+                : row.sanitation_state === "needs_cleaning"
+                ? "#FEF3C7"
+                : "#FEE2E2",
+            color:
+              row.sanitation_state === "clean"
+                ? "#166534"
+                : row.sanitation_state === "needs_cleaning"
+                ? "#92400E"
+                : "#991B1B",
+          }}
+        >
+          {(row.sanitation_state || "clean").toUpperCase()}
+        </span>
+      ),
+    },
+    {
+      key: "is_occupied",
+      header: "Occupancy",
+      render: (_v, row) =>
+        row.is_occupied ? (
+          <span style={{ color: "#DC2626", fontWeight: 700 }}>Occupied</span>
+        ) : (
+          <span style={{ color: "#16A34A", fontWeight: 700 }}>Available</span>
+        ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (_v, row) => (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button
+            onClick={() => {
+              setSelectedKennelForDetails(row);
+              setIsKennelDetailsOpen(true);
+            }}
+            style={{
+              padding: "6px 10px",
+              background: "#2563EB",
+              color: "#FFF",
+              border: "none",
+              borderRadius: "4px",
+              fontSize: "12px",
+              cursor: "pointer",
+            }}
+          >
+            Inspect Details
+          </button>
+          {!row.is_occupied && (
+            <button
+              onClick={() => {
+                setIsAssignModalOpen(true);
+              }}
+              style={{
+                padding: "6px 10px",
+                background: "#EA580C",
+                color: "#FFF",
+                border: "none",
+                borderRadius: "4px",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Assign Animal
+            </button>
+          )}
+        </div>
+      ),
+    },
   ];
-
-  const rowActions = (row: any) => (
-    <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-      <Can permission="edit_shelters">
-        <button
-          onClick={() => openEdit(row)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: "1px solid #CBD5E1",
-            background: "#FFFFFF",
-            color: "#2563EB",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <FaEdit /> Edit
-        </button>
-      </Can>
-      <Can permission="delete_shelters">
-        <button
-          onClick={() => {
-            setSelectedFacility(row);
-            setIsDeleteModalOpen(true);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: "1px solid #FCA5A5",
-            background: "#FFFFFF",
-            color: "#DC2626",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <FaTrash /> Delete
-        </button>
-      </Can>
-    </div>
-  );
 
   return (
-    <div>
-      <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Rescue Centres & Shelter Facilities</h1>
-        <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Facility governance: cage allocation, shelter capacity and regional rescue centre management.
-        </p>
-      </div>
-
-      {error && (
-        <div
-          style={{
-            marginBottom: "20px",
-            padding: "14px 18px",
-            borderRadius: "10px",
-            backgroundColor: "#FEF2F2",
-            border: "1px solid #FCA5A5",
-            color: "#991B1B",
-            fontSize: "14px",
-            fontWeight: 600,
-          }}
-        >
-          ⚠️ {error}
+    <div className="shelters-page">
+      {/* Page Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <div>
+          <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+            Shelter & Kennel Management Workspace
+          </h1>
+          <p style={{ fontSize: "14px", color: "#64748B", marginTop: "4px" }}>
+            Operational shelter facilities, section layout, physical kennel unit allocation, and animal intake housing.
+          </p>
         </div>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-        <Can permission="create_shelters">
-          <QuickActionCard
-            icon={<FaPlus />}
-            title="Register New Facility"
-            subtitle="Onboard rescue centre"
-            color="#2563EB"
-            onClick={() => setIsRegisterModalOpen(true)}
-          />
-        </Can>
-        <Can permission="manage_shelters">
-          <QuickActionCard
-            icon={<FaBed />}
-            title="Manage Cage Allocation"
-            subtitle="Assign cages & kennels"
-            color="#10B981"
-            onClick={openCageModal}
-          />
-        </Can>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <Can permission={["create_shelters", "edit_shelters", "manage_shelters"]}>
+            <button
+              onClick={() => setIsRegisterModalOpen(true)}
+              style={{
+                padding: "8px 16px",
+                background: "#2563EB",
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaPlus /> Register Facility
+            </button>
+            <button
+              onClick={() => {
+                setSectionForm({ ...emptySectionForm, facility_id: allShelters[0]?.id || "" });
+                setIsSectionModalOpen(true);
+              }}
+              style={{
+                padding: "8px 16px",
+                background: "#0D9488",
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaLayerGroup /> Add Section
+            </button>
+            <button
+              onClick={() => {
+                setIsKennelCreateModalOpen(true);
+              }}
+              style={{
+                padding: "8px 16px",
+                background: "#7C3AED",
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaBed /> Add Kennel Unit
+            </button>
+            <button
+              onClick={() => setIsAssignModalOpen(true)}
+              style={{
+                padding: "8px 16px",
+                background: "#EA580C",
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaPaw /> Assign Animal
+            </button>
+          </Can>
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        {stats.map((s) => (
-          <StatCard key={s.title} {...s} />
-        ))}
+      {/* Real-world KPI Stat Cards with Filter Triggers */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "14px",
+          marginBottom: "20px",
+        }}
+      >
+        <StatCard
+          title="Total Shelters"
+          value={computedStats.totalShelters}
+          icon={<FaHome size={20} color="#2563EB" />}
+          onClick={() => {
+            setActiveTab("facilities");
+            setStatusFilter("");
+          }}
+        />
+        <StatCard
+          title="Active Facilities"
+          value={computedStats.activeShelters}
+          icon={<FaCheckCircle size={20} color="#16A34A" />}
+          onClick={() => {
+            setActiveTab("facilities");
+            setStatusFilter("active");
+          }}
+        />
+        <StatCard
+          title="Total Capacity"
+          value={computedStats.totalCapacity || "∞"}
+          icon={<FaBed size={20} color="#0D9488" />}
+          onClick={() => setActiveTab("facilities")}
+        />
+        <StatCard
+          title="Occupied Spaces"
+          value={computedStats.occupiedSpaces}
+          icon={<FaPaw size={20} color="#EA580C" />}
+          onClick={() => {
+            setActiveTab("kennels");
+            setKennelOccupancyFilter("occupied");
+          }}
+        />
+        <StatCard
+          title="Available Spaces"
+          value={computedStats.availableSpaces}
+          icon={<FaBed size={20} color="#16A34A" />}
+          onClick={() => {
+            setActiveTab("kennels");
+            setKennelOccupancyFilter("available");
+          }}
+        />
+        <StatCard
+          title="Occupancy Rate"
+          value={`${computedStats.occupancyPct}%`}
+          icon={<FaLayerGroup size={20} color={computedStats.occupancyPct > 85 ? "#DC2626" : "#2563EB"} />}
+          onClick={() => setActiveTab("facilities")}
+        />
+        <StatCard
+          title="Animals Housed"
+          value={computedStats.animalsHoused}
+          icon={<FaPaw size={20} color="#7C3AED" />}
+          onClick={() => setActiveTab("facilities")}
+        />
+        <StatCard
+          title="Critical / Medical"
+          value={computedStats.criticalCases}
+          icon={<FaExclamationTriangle size={20} color="#DC2626" />}
+          onClick={() => {
+            setActiveTab("kennels");
+            setKennelSectionTypeFilter("quarantine");
+          }}
+        />
       </div>
 
-      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+      {/* Main Tab Navigation */}
+      <div style={{ display: "flex", gap: "10px", borderBottom: "2px solid #E2E8F0", marginBottom: "20px" }}>
         <button
           onClick={() => setActiveTab("facilities")}
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "9px 18px",
-            borderRadius: "8px",
-            border: "1px solid #CBD5E1",
-            background: activeTab === "facilities" ? "#2563EB" : "#FFFFFF",
-            color: activeTab === "facilities" ? "#FFFFFF" : "#475569",
-            fontWeight: 600,
-            fontSize: "13px",
+            padding: "10px 20px",
+            fontSize: "14px",
+            fontWeight: 700,
+            border: "none",
+            borderBottom: activeTab === "facilities" ? "3px solid #2563EB" : "3px solid transparent",
+            background: "transparent",
+            color: activeTab === "facilities" ? "#2563EB" : "#64748B",
             cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          <FaHospital /> Rescue Facilities
+          <FaHome /> Shelter Facilities ({totalCount})
+        </button>
+        <button
+          onClick={() => setActiveTab("kennels")}
+          style={{
+            padding: "10px 20px",
+            fontSize: "14px",
+            fontWeight: 700,
+            border: "none",
+            borderBottom: activeTab === "kennels" ? "3px solid #2563EB" : "3px solid transparent",
+            background: "transparent",
+            color: activeTab === "kennels" ? "#2563EB" : "#64748B",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <FaBed /> Physical Kennels & Sections ({allKennels.length})
         </button>
         <button
           onClick={() => setActiveTab("transfers")}
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "9px 18px",
-            borderRadius: "8px",
-            border: "1px solid #CBD5E1",
-            background: activeTab === "transfers" ? "#2563EB" : "#FFFFFF",
-            color: activeTab === "transfers" ? "#FFFFFF" : "#475569",
-            fontWeight: 600,
-            fontSize: "13px",
+            padding: "10px 20px",
+            fontSize: "14px",
+            fontWeight: 700,
+            border: "none",
+            borderBottom: activeTab === "transfers" ? "3px solid #2563EB" : "3px solid transparent",
+            background: "transparent",
+            color: activeTab === "transfers" ? "#2563EB" : "#64748B",
             cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          <FaExchangeAlt /> Shelter Transfers &amp; Kennels
+          <FaExchangeAlt /> Placements & Transfers
         </button>
       </div>
 
+      {/* TAB 1: Facilities Directory */}
       {activeTab === "facilities" && (
-        <div id="shelter-table-card" className="soft-card" style={{ padding: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Active Rescue Facilities Directory
-            </h3>
-            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading facilities...</span>}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Controls Bar */}
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: "240px", position: "relative" }}>
+              <FaSearch style={{ position: "absolute", left: "12px", top: "11px", color: "#94A3B8" }} />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search shelters by name or address..."
+                style={{
+                  width: "100%",
+                  padding: "8px 12px 8px 36px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  fontSize: "13px",
+                }}
+              />
+            </div>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="maintenance">Maintenance</option>
+            </select>
+
+            <select
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                setPage(1);
+              }}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="">All Facility Types</option>
+              <option value="shelter">Shelter</option>
+              <option value="clinic">Clinic</option>
+              <option value="foster_home">Foster Home</option>
+              <option value="partner">Partner</option>
+            </select>
+
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
+            </select>
           </div>
+
+          {error && (
+            <div style={{ padding: "14px", background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: "6px", color: "#991B1B", fontSize: "13px" }}>
+              {error}
+            </div>
+          )}
+
+          {/* Facilities Table */}
           <DataTable
-            columns={columns}
+            columns={facilityColumns}
             data={shelters}
-            module="shelters"
             loading={loading}
-            error={error}
-            onRetry={fetchShelters}
-            emptyMessage="No shelter facilities registered yet."
-            renderRowActions={rowActions}
-            serverMode
-            totalCount={totalCount}
-            page={page}
-            onPageChange={setPage}
-            searchValue={search}
-            onSearchChange={(term) => {
-              setSearch(term);
-              setPage(1);
-            }}
+            emptyMessage="No shelter facilities found in the system."
+          />
+
+          {/* Pagination Footer */}
+          {totalCount > pageSize && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
+              <div style={{ fontSize: "13px", color: "#64748B" }}>
+                Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount} shelters
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  disabled={page === 1}
+                  onClick={() => setPage(page - 1)}
+                  style={{
+                    padding: "6px 12px",
+                    background: page === 1 ? "#F1F5F9" : "#2563EB",
+                    color: page === 1 ? "#94A3B8" : "#FFF",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: page === 1 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Previous
+                </button>
+                <span style={{ display: "flex", alignItems: "center", fontSize: "13px", fontWeight: 600 }}>
+                  Page {page} of {Math.ceil(totalCount / pageSize)}
+                </span>
+                <button
+                  disabled={page * pageSize >= totalCount}
+                  onClick={() => setPage(page + 1)}
+                  style={{
+                    padding: "6px 12px",
+                    background: page * pageSize >= totalCount ? "#F1F5F9" : "#2563EB",
+                    color: page * pageSize >= totalCount ? "#94A3B8" : "#FFF",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: page * pageSize >= totalCount ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: Physical Kennels Workspace */}
+      {activeTab === "kennels" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Kennel Filters */}
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: "220px", position: "relative" }}>
+              <FaSearch style={{ position: "absolute", left: "12px", top: "11px", color: "#94A3B8" }} />
+              <input
+                type="text"
+                value={kennelSearch}
+                onChange={(e) => setKennelSearch(e.target.value)}
+                placeholder="Search kennel identifier, section, or facility..."
+                style={{
+                  width: "100%",
+                  padding: "8px 12px 8px 36px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  fontSize: "13px",
+                }}
+              />
+            </div>
+
+            <select
+              value={kennelFacilityFilter}
+              onChange={(e) => setKennelFacilityFilter(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="">All Facilities</option>
+              {allShelters.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={kennelSanitationFilter}
+              onChange={(e) => setKennelSanitationFilter(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="">All Sanitation States</option>
+              <option value="clean">Clean</option>
+              <option value="needs_cleaning">Needs Cleaning</option>
+              <option value="disinfecting">Disinfecting</option>
+              <option value="out_of_service">Out of Service</option>
+            </select>
+
+            <select
+              value={kennelSectionTypeFilter}
+              onChange={(e) => setKennelSectionTypeFilter(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="">All Section Types</option>
+              {SECTION_TYPES.map((st) => (
+                <option key={st} value={st}>{st.toUpperCase()}</option>
+              ))}
+            </select>
+
+            <select
+              value={kennelOccupancyFilter}
+              onChange={(e) => setKennelOccupancyFilter(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            >
+              <option value="">All Occupancy States</option>
+              <option value="available">Available Units</option>
+              <option value="occupied">Occupied Units</option>
+            </select>
+          </div>
+
+          {/* Kennels Table */}
+          <DataTable
+            columns={kennelWorkspaceColumns}
+            data={filteredKennels}
+            loading={kennelsLoading}
+            emptyMessage="No kennel units found matching current search and filter criteria."
           />
         </div>
       )}
 
-      {activeTab === "transfers" && (
-        <div id="kennel-management-section">
-          <ShelterTransfers />
-        </div>
-      )}
+      {/* TAB 3: Placements & Transfers */}
+      {activeTab === "transfers" && <ShelterTransfers />}
 
-      {/* Register New Facility Modal */}
-      <Modal
-        isOpen={isRegisterModalOpen}
-        onClose={() => setIsRegisterModalOpen(false)}
-        title="Register New Rescue Facility"
-      >
-        <form onSubmit={handleRegisterFacility} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* MODAL 1: Register Shelter Facility */}
+      <Modal isOpen={isRegisterModalOpen} onClose={() => setIsRegisterModalOpen(false)} title="Register New Shelter Facility">
+        <form onSubmit={handleRegisterFacility} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Facility Name *</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Facility Name *</label>
             <input
               type="text"
-              required
-              placeholder="e.g. North Haven Rescue Centre"
               value={registerForm.name}
               onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              placeholder="e.g. Central PawGuard Haven"
+              required
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
             />
           </div>
-
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Address</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Facility Type</label>
+            <select
+              value={registerForm.facility_type}
+              onChange={(e) => setRegisterForm({ ...registerForm, facility_type: e.target.value })}
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+            >
+              {FACILITY_TYPES.map((t) => (
+                <option key={t} value={t}>{t.toUpperCase()}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Address / Location</label>
             <input
               type="text"
-              placeholder="e.g. Sector 4, North Campus"
               value={registerForm.address}
               onChange={(e) => setRegisterForm({ ...registerForm, address: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              placeholder="Street address, city"
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
             />
           </div>
-
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Phone</label>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Phone Contact</label>
               <input
                 type="text"
-                placeholder="e.g. +91 98xxxxxx"
                 value={registerForm.phone}
                 onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                placeholder="+1-555-0199"
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
               />
             </div>
-
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Facility Type</label>
-              <select
-                value={registerForm.facility_type}
-                onChange={(e) => setRegisterForm({ ...registerForm, facility_type: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              >
-                {FACILITY_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t.charAt(0).toUpperCase() + t.slice(1).replace("_", " ")}
-                  </option>
-                ))}
-              </select>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Total Capacity</label>
+              <input
+                type="number"
+                value={registerForm.total_capacity}
+                onChange={(e) => setRegisterForm({ ...registerForm, total_capacity: e.target.value })}
+                placeholder="e.g. 100"
+                min={1}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              />
             </div>
           </div>
 
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Total Cage Capacity</label>
-            <input
-              type="number"
-              min="0"
-              placeholder="e.g. 25"
-              value={registerForm.total_capacity}
-              onChange={(e) => setRegisterForm({ ...registerForm, total_capacity: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
             <button
               type="button"
               onClick={() => setIsRegisterModalOpen(false)}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+              style={{ padding: "8px 16px", background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "6px" }}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+              style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", border: "none", borderRadius: "6px", fontWeight: 600 }}
             >
               {isSubmitting ? "Registering..." : "Register Facility"}
             </button>
@@ -614,107 +1150,87 @@ const Shelters = () => {
         </form>
       </Modal>
 
-      {/* Edit Facility Modal */}
-      <Modal
-        isOpen={isEditModalOpen}
-        onClose={() => {
-          setIsEditModalOpen(false);
-          setSelectedFacility(null);
-        }}
-        title="Edit Shelter Facility"
-      >
-        <form onSubmit={handleEditFacility} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* MODAL 2: Edit Shelter Facility */}
+      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title={`Edit Facility — ${selectedFacility?.name}`}>
+        <form onSubmit={handleEditFacility} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Facility Name *</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Facility Name *</label>
             <input
               type="text"
-              required
               value={editForm.name}
               onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              required
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
             />
           </div>
-
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Facility Type</label>
+              <select
+                value={editForm.facility_type}
+                onChange={(e) => setEditForm({ ...editForm, facility_type: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              >
+                {FACILITY_TYPES.map((t) => (
+                  <option key={t} value={t}>{t.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Operational Status</label>
+              <select
+                value={editForm.status}
+                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              >
+                {FACILITY_STATUSES.map((s) => (
+                  <option key={s} value={s}>{s.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Address</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Address</label>
             <input
               type="text"
               value={editForm.address}
               onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
             />
           </div>
-
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Phone</label>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Phone</label>
               <input
                 type="text"
                 value={editForm.phone}
                 onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
               />
             </div>
-
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Facility Type</label>
-              <select
-                value={editForm.facility_type}
-                onChange={(e) => setEditForm({ ...editForm, facility_type: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              >
-                {FACILITY_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t.charAt(0).toUpperCase() + t.slice(1).replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Total Cage Capacity</label>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Total Capacity</label>
               <input
                 type="number"
-                min="0"
                 value={editForm.total_capacity}
                 onChange={(e) => setEditForm({ ...editForm, total_capacity: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
               />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Operational Status</label>
-              <select
-                value={editForm.status}
-                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              >
-                {FACILITY_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
             <button
               type="button"
-              onClick={() => {
-                setIsEditModalOpen(false);
-                setSelectedFacility(null);
-              }}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+              onClick={() => setIsEditModalOpen(false)}
+              style={{ padding: "8px 16px", background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "6px" }}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+              style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", border: "none", borderRadius: "6px", fontWeight: 600 }}
             >
               {isSubmitting ? "Saving..." : "Save Changes"}
             </button>
@@ -722,135 +1238,194 @@ const Shelters = () => {
         </form>
       </Modal>
 
-      {/* Delete Facility Modal */}
-      <Modal
-        isOpen={isDeleteModalOpen}
-        onClose={() => {
-          setIsDeleteModalOpen(false);
-          setSelectedFacility(null);
-        }}
-        title="Confirm Facility Deletion"
-      >
+      {/* MODAL 3: Delete Facility Confirmation */}
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Confirm Delete Facility">
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0 }}>
-            Are you sure you want to remove <strong>{selectedFacility?.name}</strong> from the facility directory? This action cannot be undone.
+          <p style={{ color: "#334155", fontSize: "14px" }}>
+            Are you sure you want to remove <strong>{selectedFacility?.name}</strong>? This action cannot be undone if physical sections or kennels exist under this facility.
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
             <button
-              type="button"
-              onClick={() => {
-                setIsDeleteModalOpen(false);
-                setSelectedFacility(null);
-              }}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+              onClick={() => setIsDeleteModalOpen(false)}
+              style={{ padding: "8px 16px", background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "6px" }}
             >
               Cancel
             </button>
             <button
-              type="button"
-              disabled={isSubmitting}
               onClick={handleDeleteFacility}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+              disabled={isSubmitting}
+              style={{ padding: "8px 16px", background: "#DC2626", color: "#FFF", border: "none", borderRadius: "6px", fontWeight: 600 }}
             >
-              <FaTrash /> {isSubmitting ? "Deleting..." : "Delete Facility"}
+              {isSubmitting ? "Deleting..." : "Confirm Delete"}
             </button>
           </div>
         </div>
       </Modal>
 
-      {/* Cage Allocation Modal */}
-      <Modal
-        isOpen={isCageModalOpen}
-        onClose={() => setIsCageModalOpen(false)}
-        title="Manage Cage & Kennel Allocation"
-      >
-        <form onSubmit={handleAssignCage} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* MODAL 4: Create Section */}
+      <Modal isOpen={isSectionModalOpen} onClose={() => setIsSectionModalOpen(false)} title="Add Section to Shelter Facility">
+        <form onSubmit={handleCreateSection} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Facility</label>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Target Facility *</label>
             <select
-              value={cageSel.facilityId}
-              onChange={(e) => onFacilityChange(e.target.value)}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            >
-              <option value="">Select a facility...</option>
-              {allShelters.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Section</label>
-            <select
-              value={cageSel.sectionId}
-              onChange={(e) => onSectionChange(e.target.value)}
-              disabled={!cageSel.facilityId}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            >
-              <option value="">Select a section...</option>
-              {cageSections.map((sec) => (
-                <option key={sec.id} value={sec.id}>
-                  {sec.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Kennel</label>
-            <select
-              value={cageSel.kennelId}
-              onChange={(e) => setCageSel({ ...cageSel, kennelId: e.target.value })}
-              disabled={!cageSel.sectionId}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-            >
-              <option value="">Select a kennel...</option>
-              {cageKennels.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog to Assign *</label>
-            <select
+              value={sectionForm.facility_id}
+              onChange={(e) => setSectionForm({ ...sectionForm, facility_id: e.target.value })}
               required
-              value={cageSel.dogId}
-              onChange={(e) => setCageSel({ ...cageSel, dogId: e.target.value })}
-              disabled={cageLoading}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
             >
-              <option value="">{cageLoading ? "Loading dogs..." : "Select a dog..."}</option>
-              {cageDogs.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
+              <option value="">-- Choose Facility --</option>
+              {allShelters.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
               ))}
             </select>
           </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Section Name *</label>
+            <input
+              type="text"
+              value={sectionForm.name}
+              onChange={(e) => setSectionForm({ ...sectionForm, name: e.target.value })}
+              placeholder="e.g. North Quarantine Block A"
+              required
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+            />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Section Type</label>
+              <select
+                value={sectionForm.section_type}
+                onChange={(e) => setSectionForm({ ...sectionForm, section_type: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              >
+                {SECTION_TYPES.map((st) => (
+                  <option key={st} value={st}>{st.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Section Capacity</label>
+              <input
+                type="number"
+                value={sectionForm.capacity}
+                onChange={(e) => setSectionForm({ ...sectionForm, capacity: e.target.value })}
+                placeholder="e.g. 20"
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              />
+            </div>
+          </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
             <button
               type="button"
-              onClick={() => setIsCageModalOpen(false)}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}
+              onClick={() => setIsSectionModalOpen(false)}
+              style={{ padding: "8px 16px", background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "6px" }}
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || cageLoading}
-              style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+              disabled={isSubmitting}
+              style={{ padding: "8px 16px", background: "#0D9488", color: "#FFF", border: "none", borderRadius: "6px", fontWeight: 600 }}
             >
-              {isSubmitting ? "Assigning..." : "Assign Cage"}
+              {isSubmitting ? "Creating..." : "Create Section"}
             </button>
           </div>
         </form>
       </Modal>
+
+      {/* MODAL 5: Create Kennel Unit */}
+      <Modal isOpen={isKennelCreateModalOpen} onClose={() => setIsKennelCreateModalOpen(false)} title="Add Physical Kennel Unit">
+        <form onSubmit={handleCreateKennel} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Target Section *</label>
+            <select
+              value={kennelForm.section_id}
+              onChange={(e) => setKennelForm({ ...kennelForm, section_id: e.target.value })}
+              required
+              style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+            >
+              <option value="">-- Choose Section --</option>
+              {allSections.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.facility_name} — {s.name} ({s.section_type || "general"})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Kennel Identifier *</label>
+              <input
+                type="text"
+                value={kennelForm.identifier}
+                onChange={(e) => setKennelForm({ ...kennelForm, identifier: e.target.value })}
+                placeholder="e.g. K-101"
+                required
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>Capacity</label>
+              <input
+                type="number"
+                value={kennelForm.capacity}
+                onChange={(e) => setKennelForm({ ...kennelForm, capacity: e.target.value })}
+                min={1}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
+            <button
+              type="button"
+              onClick={() => setIsKennelCreateModalOpen(false)}
+              style={{ padding: "8px 16px", background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "6px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", border: "none", borderRadius: "6px", fontWeight: 600 }}
+            >
+              {isSubmitting ? "Adding..." : "Add Kennel Unit"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Details View Modals */}
+      <ShelterDetailsModal
+        facilityId={viewShelterId}
+        isOpen={isShelterDetailsOpen}
+        onClose={() => {
+          setIsShelterDetailsOpen(false);
+          setViewShelterId(null);
+        }}
+      />
+
+      <KennelDetailsModal
+        kennel={selectedKennelForDetails}
+        isOpen={isKennelDetailsOpen}
+        onClose={() => {
+          setIsKennelDetailsOpen(false);
+          setSelectedKennelForDetails(null);
+        }}
+        onRefresh={() => fetchAllKennelsWorkspace()}
+        onOpenAssign={() => setIsAssignModalOpen(true)}
+      />
+
+      <KennelAssignmentModal
+        isOpen={isAssignModalOpen}
+        onClose={() => setIsAssignModalOpen(false)}
+        onSuccess={() => {
+          fetchShelters();
+          fetchAllKennelsWorkspace();
+          notifyDataChanged();
+        }}
+      />
     </div>
   );
 };

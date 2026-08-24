@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
-import DataTable from "../../../components/common/DataTable";
+import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaHome, FaPaw, FaUserPlus, FaCalendarCheck, FaSync } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
@@ -102,7 +102,7 @@ const FosterCoordinatorDashboard = () => {
     { title: "Total Care Capacity", value: loading ? "..." : String(availableCapacityCount), trend: "Available Slots", color: "#6366F1", icon: <FaCalendarCheck />, onClick: () => navigate("/fosters") },
   ];
 
-  const columns = [
+  const columns: Column<any>[] = [
     {
       key: "id",
       title: "Profile / Placement ID",

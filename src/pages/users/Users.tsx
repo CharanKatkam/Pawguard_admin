@@ -381,7 +381,7 @@ const Users = () => {
     try {
       setError(null);
 
-      const response = await userService.getUsers({ page_size: 100 });
+      const response = await userService.getUsers({ page_size: 20 });
       const rawBody = response as unknown;
       const rawData = (rawBody as { data?: unknown })?.data;
       const rawItems = (rawData as { items?: unknown })?.items;

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import DataTable from "../../components/common/DataTable";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import DataTable, { type Column } from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
@@ -10,26 +10,18 @@ import {
   FaUserCheck,
   FaClipboardCheck,
   FaPlus,
-  FaTrash,
   FaEye,
-  FaCheckCircle,
-  FaTimesCircle,
   FaHome,
-  FaCalendarAlt,
   FaSearch,
   FaDog,
-  FaUser,
-  FaStethoscope,
-  FaMedkit,
-  FaExternalLinkAlt,
-  FaQrcode,
-  FaDownload,
+  FaStar,
+  FaCheckDouble,
 } from "react-icons/fa";
-import adoptionService, { toAdoptionStatus } from "../../services/adoptionService";
-import dogService from "../../services/dogService";
+import adoptionService, {
+  type AdoptionScoreCreatePayload,
+} from "../../services/adoptionService";
 import petService from "../../services/petService";
-import medicalService from "../../services/medicalService";
-import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
+import { generateQrDataUrl } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
@@ -96,1696 +88,812 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "8px",
   border: "1px solid #CBD5E1",
   boxSizing: "border-box",
-};
-
-const extractErrorMessage = (err: unknown, fallback: string): string => {
-  if (err && typeof err === "object") {
-    const res = (err as { response?: { data?: { detail?: string; message?: string } } }).response;
-    if (res?.data?.detail) return res.data.detail;
-    if (res?.data?.message) return res.data.message;
-  }
-  return fallback;
+  fontSize: "14px",
 };
 
 const Adoptions = () => {
+  const [activeTab, setActiveTab] = useState<"queue" | "scoring" | "completed">("queue");
   const [adoptions, setAdoptions] = useState<Record<string, unknown>[]>([]);
+  const [dogs, setDogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
+
+  // Search & Pagination & Filter
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  // Debounce search (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Modals state
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
-  const [isScreeningModalOpen, setIsScreeningModalOpen] = useState(false);
-  const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
-  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  // Unique Dog QR Code Modal state
+  // Safety Tag QR Modal
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [qrDog, setQrDog] = useState<Record<string, unknown> | null>(null);
-  const [qrBlob, setQrBlob] = useState<Blob | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
-  const [qrError, setQrError] = useState<string | null>(null);
-  const [tagStatus, setTagStatus] = useState<string>("INACTIVE");
-  const [tagMetadata, setTagMetadata] = useState<Record<string, unknown> | null>(null);
   const [rawToken, setRawToken] = useState<string | null>(null);
-  const [isProvisioning, setIsProvisioning] = useState(false);
-  const [manualTokenInput, setManualTokenInput] = useState("");
 
-  const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
+  // Selection state
+  const [selectedAdoption, setSelectedAdoption] = useState<Record<string, unknown> | null>(null);
+  const [candidateScores, setCandidateScores] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Forms
+  const [newAppForm, setNewAppForm] = useState({
+    dog_id: "",
+    residential_status: "owned",
+    has_landlord_approval: true,
+    has_yard_fence: true,
+    household_members_count: 2,
+    existing_pets_medical_details: "1 neutered dog, vaccinated",
+    pet_care_experience: "5+ years of dog ownership",
+  });
+
+  const [scheduleForm, setScheduleForm] = useState({
+    date: "",
+    notes: "",
+  });
+
+  const [scoreForm, setScoreForm] = useState<AdoptionScoreCreatePayload>({
+    home_environment_score: 5,
+    pet_care_knowledge_score: 5,
+    financial_readiness_score: 4,
+    lifestyle_compatibility_score: 5,
+    recommendation: "Highly Recommended for Adoption",
+    notes: "Applicant has a secure fenced yard and extensive experience.",
+  });
+
+  const fetchAdoptions = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await adoptionService.getAdoptions();
+      const list = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      setAdoptions(list);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || err?.response?.data?.message || "Failed to load adoption applications.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchDogs = useCallback(async () => {
+    try {
+      const dogsRes = await petService.getPets();
+      const list = Array.isArray(dogsRes.data) ? dogsRes.data : Array.isArray(dogsRes) ? dogsRes : [];
+      setDogs(
+        list.map((d: any) => ({
+          id: d.id || d.dog_id || "",
+          name: d.name || "Dog",
+          label: `${d.name || "Dog"} (${d.registration_number || String(d.id || "").slice(0, 8)})`,
+        }))
+      );
+    } catch {
+      setDogs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdoptions();
+    fetchDogs();
+  }, [fetchAdoptions, fetchDogs]);
+
+  // Derived filtered adoptions
+  const filteredAdoptions = useMemo(() => {
+    return adoptions.filter((app) => {
+      const status = String(app.status || "").toLowerCase();
+      const matchesStatus = statusFilter === "all" || status === statusFilter.toLowerCase();
+      if (!matchesStatus) return false;
+
+      if (!debouncedSearch) return true;
+      const q = debouncedSearch.toLowerCase();
+      const searchable = [
+        app.id,
+        app.applicantName,
+        app.applicantEmail,
+        app.petName,
+        app.status,
+      ].join(" ").toLowerCase();
+      return searchable.includes(q);
+    });
+  }, [adoptions, statusFilter, debouncedSearch]);
+
+  const paginatedAdoptions = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredAdoptions.slice(start, start + pageSize);
+  }, [filteredAdoptions, page]);
+
+  // Stats KPI
+  const completedCount = adoptions.filter((a) => String(a.status).toLowerCase() === "completed").length;
+  const approvedCount = adoptions.filter((a) => String(a.status).toLowerCase() === "approved").length;
+  const pendingCount = adoptions.filter((a) => ["submitted", "vetting", "screening", "interview", "home_check"].includes(String(a.status).toLowerCase())).length;
+
+  const stats = [
+    { title: "Total Applications", value: `${adoptions.length}`, trend: "Records", color: "#2563EB", icon: <FaClipboardCheck /> },
+    { title: "Pending In-Review", value: `${pendingCount}`, trend: "Requires Action", color: "#F59E0B", icon: <FaUserCheck /> },
+    { title: "Approved Candidates", value: `${approvedCount}`, trend: "Approved", color: "#10B981", icon: <FaHeart /> },
+    { title: "Completed Adoptions", value: `${completedCount}`, trend: "Finalized", color: "#6366F1", icon: <FaCheckDouble /> },
+  ];
+
+  // Actions
+  const handleNewAppSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAppForm.dog_id) {
+      addToast("Please select a dog for the adoption application.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await adoptionService.createAdoption(newAppForm);
+      addToast("Adoption application registered successfully!", "success");
+      setIsNewModalOpen(false);
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to submit application.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleScheduleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAdoption?.id) return;
+    try {
+      setIsSubmitting(true);
+      await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
+        status: "home_check",
+        home_inspection_scheduled_at: scheduleForm.date ? new Date(scheduleForm.date).toISOString() : null,
+        home_inspection_notes: scheduleForm.notes,
+      });
+      addToast("Home inspection visit scheduled successfully!", "success");
+      setIsScheduleModalOpen(false);
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to schedule home inspection.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleScoreSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAdoption?.id) return;
+    try {
+      setIsSubmitting(true);
+      await adoptionService.addCandidateScore(String(selectedAdoption.id), scoreForm);
+      addToast("Candidate evaluation score logged successfully!", "success");
+      setIsScoreModalOpen(false);
+      fetchAdoptions();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to log candidate score.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStatusChange = async (appId: string, newStatus: string) => {
+    try {
+      setIsSubmitting(true);
+      await adoptionService.updateAdoptionStatus(appId, newStatus);
+      addToast(`Updated status to ${newStatus.toUpperCase()}!`, "success");
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to update status.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCompleteAdoption = async () => {
+    if (!selectedAdoption?.id) return;
+    try {
+      setIsSubmitting(true);
+      // 1. Update status to completed
+      await adoptionService.updateAdoptionStatus(String(selectedAdoption.id), "completed");
+      // 2. Create Companion Pet
+      await adoptionService.createCompanionPetFromAdoption(String(selectedAdoption.id));
+      addToast("Adoption completed and registered as Companion Pet!", "success");
+      setIsCompleteModalOpen(false);
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to finalize companion pet adoption.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedAdoption?.id) return;
+    try {
+      setIsSubmitting(true);
+      await adoptionService.deleteAdoption(String(selectedAdoption.id));
+      addToast("Adoption record soft deleted.", "success");
+      setIsDeleteModalOpen(false);
+      fetchAdoptions();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to delete record.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openInspectModal = async (row: Record<string, unknown>) => {
+    setSelectedAdoption(row);
+    setIsDetailsModalOpen(true);
+    try {
+      const scoresRes = await adoptionService.getCandidateScores(String(row.id));
+      setCandidateScores(scoresRes?.data || scoresRes || []);
+    } catch {
+      setCandidateScores([]);
+    }
+  };
 
   const openQrModal = async (dog: Record<string, unknown> | null) => {
     if (!dog) return;
-    const id = String(dog.dog_id || dog.original_dog_id || (dog.companion_pet as any)?.original_dog_id || dog.id || (dog.companion_pet as any)?.id || dog.companion_pet_id || "");
-    if (!id) {
-      addToast("Could not determine the Dog Master ID for Safety Tag provisioning.", "error");
-      return;
-    }
+    const id = String(dog.dog_id || dog.id || "");
+    if (!id) return;
 
-    setQrDog(dog);
     setQrImageUrl(null);
-    setQrError(null);
     setRawToken(null);
-    setManualTokenInput("");
-    setTagStatus("INACTIVE");
     setIsQrModalOpen(true);
 
     try {
       setQrLoading(true);
-
-      const possibleKeys = [
-        `pawguard_safety_tag_token_${id}`,
-        `pawguard_safety_tag_token_${dog?.id}`,
-        `pawguard_safety_tag_token_${(dog as any)?.dog_id}`,
-        `pawguard_safety_tag_token_${dog?.registration_number}`,
-      ].filter(Boolean);
-
-      let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
-      if (!savedToken) {
-        for (const k of possibleKeys) {
-          const t = localStorage.getItem(k) || sessionStorage.getItem(k);
-          if (t) {
-            savedToken = t;
-            break;
-          }
-        }
-      }
-
-      if (savedToken) {
-        setRawToken(savedToken);
-        const qrUrl = await generateQrDataUrl(savedToken);
-        const blob = await generateQrBlob(savedToken);
-        setQrImageUrl(qrUrl);
-        setQrBlob(blob);
-        localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
-        setTagStatus("ACTIVE");
-      }
-
-      // Check backend metadata for Safety Tag status
-      try {
-        const metaRes = await petService.getSafetyTagMetadata(id);
-        const metaData = metaRes?.data || metaRes;
-        if (metaData) {
-          setTagMetadata(metaData);
-          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
-          if (isActive) {
-            setTagStatus("ACTIVE");
-          } else if (metaData.is_active === false || String(metaData.status || "").toUpperCase() === "INACTIVE") {
-            setTagStatus("INACTIVE");
-          }
-        }
-      } catch (metaErr: unknown) {
-        const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
-        const status = e?.response?.status;
-        const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
-
-        if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-          setQrError("Dog Master record not found. A valid Dog Master record must exist on the backend before a Safety Tag can be provisioned.");
-        } else if (apiMsg) {
-          setQrError(String(apiMsg));
-        }
-      }
-    } catch (err: unknown) {
-      const e = err as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
-      const status = e?.response?.status;
-      const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
-      if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-        setQrError("Dog Master record not found. A valid Dog Master record must exist on the backend before a Safety Tag can be provisioned.");
-      } else {
-        setQrError(apiMsg || "Failed to load Safety Tag metadata.");
-      }
+      const token = `PAWGUARD-TAG-${id.slice(0, 8).toUpperCase()}`;
+      setRawToken(token);
+      const qrUrl = await generateQrDataUrl(token);
+      setQrImageUrl(qrUrl);
+    } catch {
+      // Quiet fail for QR generation
     } finally {
       setQrLoading(false);
     }
   };
 
-  const handleProvisionTag = async (forceReissue = false) => {
-    if (!qrDog) return;
-    const id = String(qrDog.dog_id || qrDog.original_dog_id || (qrDog.companion_pet as any)?.original_dog_id || qrDog.id || (qrDog.companion_pet as any)?.id || qrDog.companion_pet_id || "");
-    if (!id) return;
-
-    setIsProvisioning(true);
-    setQrError(null);
-
-    try {
-      // POST /api/v1/dogs/{dog_id}/safety-tag (or ?force_reissue=true)
-      const res = await petService.provisionSafetyTag(id, forceReissue);
-      const data = res?.data || res || {};
-      const token = data.raw_token || data.token || data.rawToken;
-
-      if (!token) {
-        throw new Error("Backend provisioning response did not include data.raw_token.");
-      }
-
-      setRawToken(token);
-      const keysToStore = [
-        id,
-        qrDog?.id,
-        (qrDog as any)?.dog_id,
-        (qrDog as any)?.original_dog_id,
-        (qrDog as any)?.registration_number,
-      ].filter(Boolean);
-
-      for (const k of keysToStore) {
-        sessionStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
-        localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
-      }
-
-      const qrDataUrl = await generateQrDataUrl(token);
-      localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrDataUrl);
-
-      setQrImageUrl(qrDataUrl);
-      setTagStatus("ACTIVE");
-      setIsReProvisionConfirmOpen(false);
-
-      addToast("Safety Tag Provisioned! QR generated directly from raw_token.", "success");
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { message?: string; response?: { data?: { error?: { message?: string }; message?: string } } };
-      const msg = e?.response?.data?.error?.message || e?.response?.data?.message || e?.message || "Failed to provision Safety Tag.";
-      addToast(msg, "error");
-      setQrError(msg);
-    } finally {
-      setIsProvisioning(false);
-    }
-  };
-
-  const closeQrModal = () => {
-    if (qrImageUrl && qrImageUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(qrImageUrl);
-    }
-    setQrImageUrl(null);
-    setQrBlob(null);
-    setQrDog(null);
-    setQrError(null);
-    setTagMetadata(null);
-    setRawToken(null);
-    setTagStatus("INACTIVE");
-    setIsQrModalOpen(false);
-  };
-
-  const handleDownloadQr = () => {
-    if (!qrImageUrl || !qrDog) return;
-    const name = String(qrDog.name || "dog").replace(/[^a-zA-Z0-9-_]/g, "_");
-    const link = document.createElement("a");
-    if (qrBlob) {
-      const url = URL.createObjectURL(qrBlob);
-      link.href = url;
-      link.download = `PawGuard_SafetyTag_${name}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } else {
-      link.href = qrImageUrl;
-      link.download = `PawGuard_SafetyTag_${name}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-  };
-  
-  const [selectedApp, setSelectedApp] = useState<Record<string, unknown> | null>(null);
-  const [selectedDogDetail, setSelectedDogDetail] = useState<Record<string, unknown> | null>(null);
-  const [selectedDogMedical, setSelectedDogMedical] = useState<Record<string, unknown>[]>([]);
-  const [selectedDogLoading, setSelectedDogLoading] = useState<boolean>(false);
-  const [activeDetailTab, setActiveDetailTab] = useState<"applicant" | "dog" | "medical">("applicant");
-
-  // Form states
-  const [newForm, setNewForm] = useState({ applicantName: "", petName: "", dogId: "", residentialStatus: "owned" });
-  const [scheduleForm, setScheduleForm] = useState({ appId: "", date: "", notes: "" });
-  const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [screeningForm, setScreeningForm] = useState({ appId: "", nextStage: "interview", notes: "" });
-  const [approveForm, setApproveForm] = useState({ appId: "" });
-  const [rejectionReason, setRejectionReason] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dogs, setDogs] = useState<Record<string, unknown>[]>([]);
-
-  const fetchAdoptions = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await adoptionService.getAdoptions();
-      if (response && Array.isArray(response.data)) {
-        const sorted = [...response.data].sort((a: any, b: any) => {
-          const timeA = new Date(a.created_at || a.submitted_at || a.date || 0).getTime();
-          const timeB = new Date(b.created_at || b.submitted_at || b.date || 0).getTime();
-          return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
-        });
-        setAdoptions(sorted);
-      }
-    } catch {
-      addToast("Failed to load adoption queue.", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [addToast]);
-
-  useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchAdoptions();
-      dogService
-        .getDogs({ is_adoptable: true })
-        .then((res) => {
-          const list = Array.isArray(res) ? res : res?.data;
-          if (Array.isArray(list)) setDogs(list as Record<string, unknown>[]);
-        })
-        .catch(() => setDogs([]));
-    });
-  }, [fetchAdoptions]);
-
-  const openDetailsModal = async (
-    appRow: Record<string, unknown>,
-    initialTab: "applicant" | "dog" | "medical" = "applicant"
-  ) => {
-    try {
-      setSelectedApp(appRow);
-      setActiveDetailTab(initialTab);
-      setIsDetailsModalOpen(true);
-      setSelectedDogDetail(null);
-      setSelectedDogMedical([]);
-      setSelectedDogLoading(true);
-
-      const appId = String(appRow.id || appRow.applicationId || "");
-      let currentApp = appRow;
-      if (appId) {
-        const fullDetails = await adoptionService.getAdoptionById(appId);
-        if (fullDetails) {
-          currentApp = fullDetails;
-          setSelectedApp(fullDetails);
-        }
-      }
-
-      const dogId = String(
-        currentApp.dog_id ||
-        currentApp.petId ||
-        (currentApp.dog as Record<string, unknown> | undefined)?.id ||
-        ""
-      );
-
-      if (dogId) {
-        const [dogRes, medRes] = await Promise.allSettled([
-          petService.getPetById(dogId),
-          medicalService.getMedicalHistory(dogId),
-        ]);
-
-        if (dogRes.status === "fulfilled" && dogRes.value) {
-          const valObj = dogRes.value as Record<string, unknown>;
-          const dogData = valObj.data || valObj;
-          if (dogData && typeof dogData === "object") {
-            setSelectedDogDetail(dogData as Record<string, unknown>);
-          }
-        }
-
-        if (medRes.status === "fulfilled" && medRes.value) {
-          const valObj = medRes.value as Record<string, unknown>;
-          const medData = valObj.data || valObj || [];
-          if (Array.isArray(medData)) {
-            setSelectedDogMedical(medData as Record<string, unknown>[]);
-          }
-        }
-      }
-    } catch {
-      // Keep basic row if detail fetch fails
-    } finally {
-      setSelectedDogLoading(false);
-    }
-  };
-
-  const handleCreateNewAdoption = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newForm.applicantName) {
-      addToast("Applicant Name is required", "error");
-      return;
-    }
-    if (!newForm.dogId) {
-      addToast("Please select the dog for this application.", "error");
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      await adoptionService.createAdoption({
-        applicant_name: newForm.applicantName,
-        pet_name: newForm.petName,
-        dog_id: newForm.dogId,
-        residential_status: newForm.residentialStatus,
-      });
-      addToast(`New adoption application logged for ${newForm.applicantName}!`, "success");
-      setIsNewModalOpen(false);
-      setNewForm({ applicantName: "", petName: "", dogId: "", residentialStatus: "owned" });
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to log application."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleStartScreeningDirect = async (appRow: Record<string, unknown>) => {
-    const id = String(appRow.id || appRow.applicationId || "");
-    try {
-      setIsSubmitting(true);
-      const adopterId = String(appRow.adopter_id || appRow.adopterId || "");
-      const petName = String(appRow.petName || "selected dog");
-
-      await adoptionService.updateAdoptionStatus(id, "screening", adopterId, petName);
-      addToast(`Application #${id} moved to Screening. Review applicant & dog details below.`, "success");
-      fetchAdoptions();
-      notifyDataChanged();
-
-      const updatedRow = { ...appRow, status: "screening" };
-      await openDetailsModal(updatedRow, "dog");
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to move application to screening."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleCompleteScreening = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const id = screeningForm.appId || String(selectedApp?.id || selectedApp?.applicationId || "");
-    if (!id) {
-      addToast("Please select an application to complete screening.", "error");
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      const targetApp = adoptions.find((a) => String(a.id || a.applicationId) === id) || selectedApp;
-      const adopterId = String(targetApp?.adopter_id || targetApp?.adopterId || "");
-      const petName = String(targetApp?.petName || "selected dog");
-
-      if (screeningForm.notes.trim()) {
-        await adoptionService.updateAdoptionDetails(id, {
-          vetting_officer_notes: screeningForm.notes.trim(),
-        });
-      }
-
-      const nextStatus = toAdoptionStatus(screeningForm.nextStage || "interview");
-      await adoptionService.updateAdoptionStatus(id, nextStatus, adopterId, petName);
-
-      addToast(`Screening completed for application #${id}. Status updated to ${nextStatus}!`, "success");
-      setIsScreeningModalOpen(false);
-      setIsDetailsModalOpen(false);
-      setScreeningForm({ appId: "", nextStage: "interview", notes: "" });
-      setSelectedApp(null);
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to complete screening."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleScheduleVerification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setScheduleError(null);
-    const appId = scheduleForm.appId || String(selectedApp?.id || selectedApp?.applicationId || "");
-    if (!appId) {
-      addToast("Please select an application to schedule a visit for.", "error");
-      return;
-    }
-    if (!scheduleForm.date) {
-      addToast("Please pick an inspection date.", "error");
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      const targetApp = adoptions.find((a) => String(a.id || a.applicationId) === appId) || selectedApp;
-      const adopterId = String(targetApp?.adopter_id || targetApp?.adopterId || "");
-      const petName = String(targetApp?.petName || "your pet");
-
-      await adoptionService.scheduleHomeInspection(appId, scheduleForm.date, scheduleForm.notes, adopterId, petName);
-      addToast("Home verification visit scheduled and applicant notified.", "success");
-      setIsScheduleModalOpen(false);
-      setIsDetailsModalOpen(false);
-      setScheduleForm({ appId: "", date: "", notes: "" });
-      setScheduleError(null);
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const errMsg = extractErrorMessage(err, "Failed to schedule home verification.");
-      setScheduleError(errMsg);
-      addToast(errMsg, "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleApproveAdoption = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const id = approveForm.appId || String(selectedApp?.id || selectedApp?.applicationId || "");
-    if (!id) {
-      addToast("Please select an application to approve.", "error");
-      return;
-    }
-
-    const targetApp = adoptions.find((a) => String(a.id || a.applicationId) === id) || selectedApp;
-    const currentStatus = String(targetApp?.status || "").toLowerCase();
-    
-    // Enforce screening completion rule
-    if (currentStatus === "submitted" || currentStatus === "screening") {
-      addToast("Cannot approve application directly from screening. Please complete screening & verification first.", "error");
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      const adopterId = String(targetApp?.adopter_id || targetApp?.adopterId || "");
-      const petName = String(targetApp?.petName || "selected dog");
-
-      await adoptionService.updateAdoptionStatus(id, "approved", adopterId, petName);
-      addToast(`Adoption application #${id} Approved! Applicant notified.`, "success");
-      setIsApproveModalOpen(false);
-      setIsDetailsModalOpen(false);
-      setApproveForm({ appId: "" });
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to approve application."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleRejectAdoption = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedApp) return;
-    const id = String(selectedApp.id || selectedApp.applicationId || "");
-    try {
-      setIsSubmitting(true);
-      const adopterId = String(selectedApp.adopter_id || selectedApp.adopterId || "");
-      const petName = String(selectedApp.petName || "selected dog");
-
-      if (rejectionReason.trim()) {
-        await adoptionService.updateAdoptionDetails(id, {
-          status: "rejected",
-          vetting_officer_notes: rejectionReason.trim(),
-        });
-      }
-      await adoptionService.updateAdoptionStatus(id, "rejected", adopterId, petName);
-
-      addToast(`Application #${id} rejected and applicant notified.`, "success");
-      setIsRejectModalOpen(false);
-      setIsDetailsModalOpen(false);
-      setRejectionReason("");
-      setSelectedApp(null);
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to reject application."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleCompleteAdoption = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedApp) return;
-    const id = String(selectedApp.id || selectedApp.applicationId || "");
-    try {
-      setIsSubmitting(true);
-      const adopterId = String(selectedApp.adopter_id || selectedApp.adopterId || "");
-      const petName = String(selectedApp.petName || "selected dog");
-
-      await adoptionService.updateAdoptionStatus(id, "completed", adopterId, petName);
-      addToast(`Adoption #${id} finalized and completed!`, "success");
-      setIsCompleteModalOpen(false);
-      setIsDetailsModalOpen(false);
-      setSelectedApp(null);
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to complete adoption."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDeleteApplication = async () => {
-    if (!selectedApp) return;
-    const id = String(selectedApp.id || selectedApp.applicationId || "");
-    try {
-      setIsSubmitting(true);
-      await adoptionService.deleteAdoption(id);
-      addToast(`Deleted application #${id}`, "success");
-      setIsDeleteModalOpen(false);
-      setIsDetailsModalOpen(false);
-      setSelectedApp(null);
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      addToast(extractErrorMessage(err, "Failed to delete application."), "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const completedAdoptions = adoptions.filter(
-    (a) => String(a.status).toLowerCase() === "approved" || String(a.status).toLowerCase() === "completed"
-  ).length;
-
-  const pendingApplications = adoptions.filter((a) =>
-    ["submitted", "screening", "interview", "vetting"].includes(String(a.status).toLowerCase())
-  ).length;
-
-  const scheduledVerifications = adoptions.filter(
-    (a) => String(a.status).toLowerCase() === "home_check" || Boolean(a.home_inspection_scheduled_at)
-  ).length;
-
-  const approvableApps = adoptions.filter((a) =>
-    ["interview", "home_check", "vetting"].includes(String(a.status).toLowerCase())
-  );
-
-  const stats = [
+  const columns: Column<Record<string, unknown>>[] = [
     {
-      title: "Adoptions Completed",
-      value: `${completedAdoptions} Pets`,
-      trend: "Approved / Completed",
-      color: "#10B981",
-      icon: <FaHeart />,
-      onClick: () => {
-        document.getElementById("adoptions-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "id",
+      title: "App ID",
+      render: (_v, row) => <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{String(row.id || "").slice(0, 8)}</span>,
     },
     {
-      title: "Pending Applications",
-      value: `${pendingApplications} Reviews`,
-      trend: "Under Screening",
-      color: "#F59E0B",
-      icon: <FaClipboardCheck />,
-      onClick: () => {
-        document.getElementById("adoptions-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
+      key: "applicantName",
+      title: "Applicant",
+      render: (_v, row) => (
+        <div>
+          <strong>{String(row.applicantName || "—")}</strong>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>{String(row.applicantEmail || "")}</div>
+        </div>
+      ),
     },
     {
-      title: "Home Verifications",
-      value: `${scheduledVerifications} Visits`,
-      trend: "Scheduled Inspections",
-      color: "#2563EB",
-      icon: <FaUserCheck />,
-      onClick: () => {
-        setIsScheduleModalOpen(true);
-      },
+      key: "petName",
+      title: "Rescue Dog",
+      render: (_v, row) => (
+        <div>
+          <strong>{String(row.petName || "—")}</strong>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>{String(row.petBreed || "Canine")}</div>
+        </div>
+      ),
     },
-  ];
-
-  const columns = [
-    { key: "applicationId", title: "App ID" },
-    { key: "applicantName", title: "Applicant Name" },
-    { key: "petName", title: "Pet Interested" },
-    { key: "date", title: "Applied Date" },
     {
       key: "status",
-      title: "Decision Status",
-      render: (val: unknown) => <StatusBadge status={String(val || "submitted")} />,
+      title: "Stage & Status",
+      render: (_v, row) => <StatusBadge status={String(row.status || "")} />,
+    },
+    {
+      key: "date",
+      title: "Applied Date",
+      render: (_v, row) => <span>{row.date ? formatDateTime(String(row.date)) : "—"}</span>,
     },
   ];
 
   return (
     <div>
+      {/* Header Banner */}
       <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Adoption Requests &amp; Approvals</h1>
+        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Adoption Operations Suite</h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          End-to-end adoption management: review questionnaires, perform screening, schedule home inspections, approve applications, and deliver real-time applicant updates.
+          Process adoption questionnaires, score candidates, verify home environments, execute legal contracts, and convert adopted dogs to companion pets.
         </p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
+      {error && (
+        <div style={{ marginBottom: "20px", padding: "14px 18px", borderRadius: "10px", backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "13px", fontWeight: 600 }}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Quick Action Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <Can permission="create_adoptions">
-          <QuickActionCard icon={<FaPlus />} title="New Adoption Request" subtitle="Log walk-in applicant" color="#2563EB" onClick={() => setIsNewModalOpen(true)} />
+          <QuickActionCard icon={<FaPlus />} title="New Application" subtitle="Register applicant" color="#2563EB" onClick={() => setIsNewModalOpen(true)} />
         </Can>
-        <Can permission="create_adoptions">
-          <QuickActionCard icon={<FaUserCheck />} title="Schedule Home Verification" subtitle="Assign field coordinator" color="#10B981" onClick={() => setIsScheduleModalOpen(true)} />
+        <Can permission="edit_adoptions">
+          <QuickActionCard icon={<FaHome />} title="Schedule Home Inspection" subtitle="Assign field visit" color="#10B981" onClick={() => setActiveTab("queue")} />
+        </Can>
+        <Can permission="edit_adoptions">
+          <QuickActionCard icon={<FaStar />} title="Score Candidates" subtitle="Evaluate match" color="#F59E0B" onClick={() => setActiveTab("scoring")} />
         </Can>
         <Can permission="approve_adoptions">
-          <QuickActionCard icon={<FaHeart />} title="Approve Adoption" subtitle="Issue certificate &amp; finalize" color="#6366F1" onClick={() => setIsApproveModalOpen(true)} />
+          <QuickActionCard icon={<FaCheckDouble />} title="Finalize Companion Pet" subtitle="Complete legal process" color="#6366F1" onClick={() => setActiveTab("completed")} />
         </Can>
       </div>
 
+      {/* KPI Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         {stats.map((s) => (
           <StatCard key={s.title} {...s} />
         ))}
       </div>
 
-      <div id="adoptions-table-card" className="soft-card" style={{ padding: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            Adoption Applications Queue
-          </h3>
-          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading applications...</span>}
-        </div>
-        <DataTable
-          columns={columns}
-          data={adoptions}
-          module="adoptions"
-          onDelete={(row) => {
-            setSelectedApp(row);
-            setIsDeleteModalOpen(true);
+      {/* Navigation Tabs */}
+      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", borderBottom: "2px solid #E2E8F0" }}>
+        <button
+          onClick={() => setActiveTab("queue")}
+          style={{
+            padding: "10px 18px",
+            border: "none",
+            borderBottom: activeTab === "queue" ? "3px solid #2563EB" : "3px solid transparent",
+            background: "none",
+            color: activeTab === "queue" ? "#2563EB" : "#64748B",
+            fontWeight: 700,
+            fontSize: "15px",
+            cursor: "pointer",
           }}
-          renderRowActions={(row: Record<string, unknown>) => {
-            const st = String(row.status || "").toLowerCase();
-            return (
-              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => void openDetailsModal(row)}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    padding: "6px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid #93C5FD",
-                    background: "#EFF6FF",
-                    color: "#1D4ED8",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  <FaEye /> View
-                </button>
-
-                {st === "submitted" && (
-                  <button
-                    type="button"
-                    onClick={() => void handleStartScreeningDirect(row)}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #C084FC",
-                      background: "#F3E8FF",
-                      color: "#7E22CE",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Start Screening
-                  </button>
-                )}
-
-                {st === "screening" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedApp(row);
-                      setScreeningForm({ appId: String(row.id || row.applicationId), nextStage: "interview", notes: String(row.vetting_officer_notes || "") });
-                      setIsScreeningModalOpen(true);
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #C084FC",
-                      background: "#F3E8FF",
-                      color: "#7E22CE",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <FaSearch /> Complete Screening
-                  </button>
-                )}
-
-                {(st === "submitted" || st === "screening" || st === "interview" || st === "vetting") && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedApp(row);
-                      setScheduleForm({ appId: String(row.id || row.applicationId), date: "", notes: "" });
-                      setIsScheduleModalOpen(true);
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #FDE68A",
-                      background: "#FFFBEB",
-                      color: "#D97706",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <FaHome /> Schedule Visit
-                  </button>
-                )}
-
-                {/* APPROVE ACTION IS GATED: Only available after screening (interview, home_check, vetting) */}
-                {(st === "interview" || st === "home_check" || st === "vetting") && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedApp(row);
-                      setApproveForm({ appId: String(row.id || row.applicationId) });
-                      setIsApproveModalOpen(true);
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #6EE7B7",
-                      background: "#ECFDF5",
-                      color: "#059669",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <FaCheckCircle /> Approve
-                  </button>
-                )}
-
-                {(st === "submitted" || st === "screening" || st === "interview" || st === "home_check" || st === "vetting") && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedApp(row);
-                      setRejectionReason("");
-                      setIsRejectModalOpen(true);
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #FCA5A5",
-                      background: "#FEF2F2",
-                      color: "#DC2626",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <FaTimesCircle /> Reject
-                  </button>
-                )}
-
-                {st === "approved" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedApp(row);
-                        setIsCompleteModalOpen(true);
-                      }}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "6px 10px",
-                        borderRadius: "6px",
-                        border: "1px solid #A7F3D0",
-                        background: "#D1FAE5",
-                        color: "#047857",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <FaHeart /> Complete
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedApp(row);
-                        setRejectionReason("");
-                        setIsRejectModalOpen(true);
-                      }}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "6px 10px",
-                        borderRadius: "6px",
-                        border: "1px solid #FCA5A5",
-                        background: "#FEF2F2",
-                        color: "#DC2626",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <FaTimesCircle /> Reject
-                    </button>
-                  </>
-                )}
-              </div>
-            );
+        >
+          Applications Queue &amp; Review ({adoptions.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("scoring")}
+          style={{
+            padding: "10px 18px",
+            border: "none",
+            borderBottom: activeTab === "scoring" ? "3px solid #2563EB" : "3px solid transparent",
+            background: "none",
+            color: activeTab === "scoring" ? "#2563EB" : "#64748B",
+            fontWeight: 700,
+            fontSize: "15px",
+            cursor: "pointer",
           }}
-        />
+        >
+          Candidate Evaluation &amp; Scoring
+        </button>
+        <button
+          onClick={() => setActiveTab("completed")}
+          style={{
+            padding: "10px 18px",
+            border: "none",
+            borderBottom: activeTab === "completed" ? "3px solid #2563EB" : "3px solid transparent",
+            background: "none",
+            color: activeTab === "completed" ? "#2563EB" : "#64748B",
+            fontWeight: 700,
+            fontSize: "15px",
+            cursor: "pointer",
+          }}
+        >
+          Completed Adoptions &amp; Companion Pets ({completedCount})
+        </button>
       </div>
 
-      {/* Application Details & Comprehensive Screening Modal */}
-      <Modal
-        isOpen={isDetailsModalOpen}
-        onClose={() => {
-          setIsDetailsModalOpen(false);
-          setSelectedApp(null);
-          setSelectedDogDetail(null);
-          setSelectedDogMedical([]);
-        }}
-        title={`Adoption Application #${String(selectedApp?.ticketNumber || selectedApp?.id || "")} — Screening Review`}
-        maxWidth="780px"
-      >
-        {selectedApp && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {/* Header Summary Banner */}
-            <div
-              style={{
-                background: "#F8FAFC",
-                border: "1px solid #E2E8F0",
-                borderRadius: "10px",
-                padding: "16px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "12px",
-              }}
-            >
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#0F172A" }}>
-                  Applicant: {String(selectedApp.applicantName || "-")}
-                </h3>
-                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  Requested Pet: <strong style={{ color: "#2563EB" }}>{String(selectedApp.petName || "-")}</strong> &bull; Submitted: {String(selectedApp.date || selectedApp.created_at || "-")}
-                </div>
+      {activeTab === "queue" && (
+        <div className="soft-card" style={{ padding: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+              Adoption Applications Directory
+            </h3>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <div style={{ position: "relative", minWidth: "240px" }}>
+                <FaSearch style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
+                <input
+                  type="text"
+                  placeholder="Search applicant, pet, email..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ ...inputStyle, paddingLeft: "36px" }}
+                />
               </div>
-              <StatusBadge status={String(selectedApp.status || "submitted")} />
-            </div>
-
-            {/* Navigation Tabs */}
-            <div
-              style={{
-                display: "flex",
-                borderBottom: "2px solid #E2E8F0",
-                gap: "8px",
-                overflowX: "auto",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setActiveDetailTab("applicant")}
-                style={{
-                  padding: "10px 16px",
-                  fontWeight: 700,
-                  fontSize: "13px",
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  color: activeDetailTab === "applicant" ? "#2563EB" : "#64748B",
-                  borderBottom: activeDetailTab === "applicant" ? "3px solid #2563EB" : "3px solid transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
                 }}
+                style={{ ...inputStyle, width: "auto" }}
               >
-                <FaUser /> Applicant Questionnaire
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveDetailTab("dog")}
-                style={{
-                  padding: "10px 16px",
-                  fontWeight: 700,
-                  fontSize: "13px",
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  color: activeDetailTab === "dog" ? "#2563EB" : "#64748B",
-                  borderBottom: activeDetailTab === "dog" ? "3px solid #2563EB" : "3px solid transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <FaDog /> Requested Dog Profile
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveDetailTab("medical")}
-                style={{
-                  padding: "10px 16px",
-                  fontWeight: 700,
-                  fontSize: "13px",
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  color: activeDetailTab === "medical" ? "#2563EB" : "#64748B",
-                  borderBottom: activeDetailTab === "medical" ? "3px solid #2563EB" : "3px solid transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <FaStethoscope /> Dog Health &amp; Medical ({selectedDogMedical.length})
-              </button>
-            </div>
-
-            {/* TAB 1: APPLICANT QUESTIONNAIRE */}
-            {activeDetailTab === "applicant" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Email</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                      {String(selectedApp.applicantEmail || "-")}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Phone</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                      {String(selectedApp.applicantPhone || "-")}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Residential Status</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px", textTransform: "capitalize" }}>
-                      {String(selectedApp.residential_status || "-")}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Household Members</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                      {String(selectedApp.household_members_count ?? "-")}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Yard Fenced</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: selectedApp.has_yard_fence ? "#059669" : "#DC2626", marginTop: "4px" }}>
-                      {selectedApp.has_yard_fence ? "Yes — Fenced Yard" : "No / Unfenced"}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Landlord Approval</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: selectedApp.has_landlord_approval ? "#059669" : "#DC2626", marginTop: "4px" }}>
-                      {selectedApp.has_landlord_approval ? "Yes — Approved" : "N/A or Pending"}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Pet Care Experience</div>
-                    <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
-                      {String(selectedApp.pet_care_experience || "No prior notes recorded.")}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Existing Pets Medical Details</div>
-                    <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
-                      {String(selectedApp.existing_pets_medical_details || "None reported.")}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Vetting / Officer Notes</div>
-                    <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
-                      {String(selectedApp.vetting_officer_notes || "No officer notes.")}
-                    </div>
-                  </div>
-                  {Boolean(selectedApp.home_inspection_scheduled_at) && (
-                    <div>
-                      <div style={{ fontSize: "11px", fontWeight: 700, color: "#D97706", textTransform: "uppercase" }}>Scheduled Home Verification</div>
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <FaCalendarAlt color="#D97706" /> {formatDateTime(selectedApp.home_inspection_scheduled_at as string)}
-                      </div>
-                      {Boolean(selectedApp.home_inspection_notes) && (
-                        <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                          Notes: {String(selectedApp.home_inspection_notes)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: REQUESTED DOG PROFILE */}
-            {activeDetailTab === "dog" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                {selectedDogLoading ? (
-                  <div style={{ padding: "30px", textAlign: "center", color: "#2563EB", fontWeight: 600 }}>
-                    Loading dog profile details...
-                  </div>
-                ) : selectedDogDetail ? (
-                  <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "12px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
-                      <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
-                        {(selectedDogDetail.photo_url || selectedDogDetail.photo) ? (
-                          <img
-                            src={String(selectedDogDetail.photo_url || selectedDogDetail.photo)}
-                            alt={String(selectedDogDetail.name || "Dog")}
-                            style={{ width: "72px", height: "72px", borderRadius: "12px", objectFit: "cover", border: "1px solid #CBD5E1" }}
-                          />
-                        ) : (
-                          <div style={{ width: "72px", height: "72px", borderRadius: "12px", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
-                            <FaDog />
-                          </div>
-                        )}
-                        <div>
-                          <h3 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0F172A" }}>
-                            {String(selectedDogDetail.name || selectedApp.petName || "Unnamed Dog")}
-                          </h3>
-                          <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-                            Reg / Tag ID: <strong style={{ fontFamily: "monospace", color: "#2563EB" }}>{String(selectedDogDetail.registration_number || selectedDogDetail.id || "-")}</strong>
-                          </div>
-                          <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-                            Breed: <strong>{String(selectedDogDetail.breed || "Canine")}</strong> {selectedDogDetail.breed_classification ? `(${selectedDogDetail.breed_classification})` : ""}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => openQrModal(selectedDogDetail)}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          padding: "8px 14px",
-                          borderRadius: "8px",
-                          border: "none",
-                          background: "#6D28D9",
-                          color: "#FFFFFF",
-                          fontSize: "12px",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <FaQrcode /> View QR Code
-                      </button>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "8px" }}>
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Gender</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", textTransform: "capitalize" }}>
-                          {String(selectedDogDetail.gender || "-")}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Estimated Age</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
-                          {String(selectedDogDetail.estimated_age || (selectedDogDetail.age_months ? `${selectedDogDetail.age_months} months` : "-"))}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Weight</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
-                          {selectedDogDetail.weight_kg || selectedDogDetail.weight ? `${selectedDogDetail.weight_kg || selectedDogDetail.weight} kg` : "-"}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Coat Color / Markings</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>
-                          {String(selectedDogDetail.color || selectedDogDetail.distinguishing_marks || "-")}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Temperament</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", textTransform: "capitalize" }}>
-                          {String(selectedDogDetail.temperament || "-")}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Spayed / Neutered</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: selectedDogDetail.is_spayed_neutered ? "#059669" : "#D97706", marginTop: "2px" }}>
-                          {selectedDogDetail.is_spayed_neutered ? "Yes — Neutered/Spayed" : "Not Neutered"}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Microchip ID</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "2px", fontFamily: "monospace" }}>
-                          {String(selectedDogDetail.microchip_id || "Not Microchipped")}
-                        </div>
-                      </div>
-
-                      <div style={{ background: "#FFFFFF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Facility Status</div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#2563EB", marginTop: "2px", textTransform: "uppercase" }}>
-                          {String(selectedDogDetail.status || selectedDogDetail.current_status || "Shelter Care")}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ padding: "20px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #E2E8F0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
-                    Dog profile information loaded from application details ({String(selectedApp.petName || "Selected Dog")}).
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 3: DOG HEALTH & MEDICAL RECORDS */}
-            {activeDetailTab === "medical" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                {selectedDogLoading ? (
-                  <div style={{ padding: "30px", textAlign: "center", color: "#2563EB", fontWeight: 600 }}>
-                    Loading clinical health &amp; medical records...
-                  </div>
-                ) : selectedDogMedical.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                      Clinical Health &amp; Veterinary Records ({selectedDogMedical.length} entries)
-                    </div>
-                    {selectedDogMedical.map((rec, idx) => (
-                      <div key={idx} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "8px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", background: "#EFF6FF", color: "#2563EB", textTransform: "uppercase" }}>
-                              {String(rec.categoryName || rec.type || "Medical")}
-                            </span>
-                            <strong style={{ fontSize: "13px", color: "#0F172A" }}>{String(rec.treatment || rec.vaccineName || rec.diagnosis || "-")}</strong>
-                          </div>
-                          <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
-                            Recorded: {String(rec.date || "-")} &bull; {String(rec.vetName || "Staff Vet")}
-                          </div>
-                        </div>
-                        {Boolean(rec.nextDueAt) && (
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "4px 8px", borderRadius: "6px", border: "1px solid #FDE68A" }}>
-                            Next Due: {String(rec.nextDueAt)}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ padding: "24px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #E2E8F0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
-                    <FaMedkit style={{ fontSize: "24px", color: "#94A3B8", marginBottom: "6px" }} />
-                    <br />
-                    No clinical medical history or vaccination records logged yet for this dog in the database.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Modal Actions Footer */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #E2E8F0", paddingTop: "14px", marginTop: "8px" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsDetailsModalOpen(false);
-                  setSelectedApp(null);
-                  setSelectedDogDetail(null);
-                  setSelectedDogMedical([]);
-                }}
-                style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
-              >
-                Close Details
-              </button>
-
-              <div style={{ display: "flex", gap: "8px" }}>
-                {String(selectedApp.status).toLowerCase() === "submitted" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDetailsModalOpen(false);
-                      void handleStartScreeningDirect(selectedApp);
-                    }}
-                    style={{ padding: "10px 16px", borderRadius: "8px", border: "none", background: "#7E22CE", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    Start Screening
-                  </button>
-                )}
-
-                {String(selectedApp.status).toLowerCase() === "screening" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDetailsModalOpen(false);
-                      setScreeningForm({ appId: String(selectedApp.id || selectedApp.applicationId), nextStage: "interview", notes: String(selectedApp.vetting_officer_notes || "") });
-                      setIsScreeningModalOpen(true);
-                    }}
-                    style={{ padding: "10px 16px", borderRadius: "8px", border: "none", background: "#7E22CE", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    Complete Screening
-                  </button>
-                )}
-
-                {["screening", "interview", "vetting", "submitted"].includes(String(selectedApp.status).toLowerCase()) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDetailsModalOpen(false);
-                      setScheduleForm({ appId: String(selectedApp.id || selectedApp.applicationId), date: "", notes: "" });
-                      setIsScheduleModalOpen(true);
-                    }}
-                    style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #D97706", background: "#FFFBEB", color: "#D97706", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    Schedule Visit
-                  </button>
-                )}
-
-                {["interview", "home_check", "vetting"].includes(String(selectedApp.status).toLowerCase()) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDetailsModalOpen(false);
-                      setApproveForm({ appId: String(selectedApp.id || selectedApp.applicationId) });
-                      setIsApproveModalOpen(true);
-                    }}
-                    style={{ padding: "10px 16px", borderRadius: "8px", border: "none", background: "#059669", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    Approve Adoption
-                  </button>
-                )}
-
-                {["submitted", "screening", "interview", "home_check", "vetting"].includes(String(selectedApp.status).toLowerCase()) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDetailsModalOpen(false);
-                      setRejectionReason("");
-                      setIsRejectModalOpen(true);
-                    }}
-                    style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#DC2626", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    Reject
-                  </button>
-                )}
-              </div>
+                <option value="all">All Stages</option>
+                <option value="submitted">Submitted</option>
+                <option value="vetting">Vetting</option>
+                <option value="screening">Screening</option>
+                <option value="interview">Interview</option>
+                <option value="home_check">Home Visit</option>
+                <option value="approved">Approved</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+              {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
             </div>
           </div>
-        )}
-      </Modal>
 
-      {/* New Adoption Request Modal */}
-      <Modal isOpen={isNewModalOpen} onClose={() => setIsNewModalOpen(false)} title="Log New Adoption Application">
-        <form onSubmit={handleCreateNewAdoption} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Applicant Full Name *</label>
-            <input type="text" required placeholder="e.g. Emily Clark" value={newForm.applicantName} onChange={(e) => setNewForm({ ...newForm, applicantName: e.target.value })} style={inputStyle} />
+          <DataTable
+            columns={columns}
+            data={paginatedAdoptions}
+            module="adoptions"
+            onDelete={(row) => {
+              setSelectedAdoption(row);
+              setIsDeleteModalOpen(true);
+            }}
+            renderRowActions={(row: Record<string, unknown>) => (
+              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => void openInspectModal(row)}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                >
+                  <FaEye /> Inspect
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedAdoption(row);
+                    setIsScheduleModalOpen(true);
+                  }}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                >
+                  <FaHome /> Visit
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedAdoption(row);
+                    setIsScoreModalOpen(true);
+                  }}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #FDE68A", background: "#FEF3C7", color: "#B45309", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                >
+                  <FaStar /> Score
+                </button>
+                {String(row.status).toLowerCase() !== "approved" && String(row.status).toLowerCase() !== "completed" && (
+                  <button
+                    onClick={() => void handleStatusChange(String(row.id), "approved")}
+                    style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Approve
+                  </button>
+                )}
+                {String(row.status).toLowerCase() === "approved" && (
+                  <button
+                    onClick={() => {
+                      setSelectedAdoption(row);
+                      setIsCompleteModalOpen(true);
+                    }}
+                    style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #818CF8", background: "#EEF2FF", color: "#4338CA", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Finalize
+                  </button>
+                )}
+              </div>
+            )}
+          />
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #E2E8F0" }}>
+            <span style={{ fontSize: "13px", color: "#64748B" }}>
+              Showing {filteredAdoptions.length > 0 ? (page - 1) * pageSize + 1 : 0} to {Math.min(page * pageSize, filteredAdoptions.length)} of {filteredAdoptions.length} records
+            </span>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page <= 1 ? "#F1F5F9" : "#FFF", cursor: page <= 1 ? "not-allowed" : "pointer" }}
+              >
+                Previous
+              </button>
+              <button
+                disabled={page * pageSize >= filteredAdoptions.length}
+                onClick={() => setPage((p) => p + 1)}
+                style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page * pageSize >= filteredAdoptions.length ? "#F1F5F9" : "#FFF", cursor: page * pageSize >= filteredAdoptions.length ? "not-allowed" : "pointer" }}
+              >
+                Next
+              </button>
+            </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === "scoring" && (
+        <div className="soft-card" style={{ padding: "20px" }}>
+          <h3 style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+            Candidate Readiness &amp; Scoring Station
+          </h3>
+          <p style={{ color: "#64748B", fontSize: "14px", marginBottom: "20px" }}>
+            Score applicants on home environment safety, pet care knowledge, financial readiness, and lifestyle compatibility.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {adoptions.map((app) => (
+              <div key={String(app.id)} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: "16px", color: "#0F172A" }}>
+                    {String(app.applicantName)} &bull; Pet: {String(app.petName)}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
+                    Housing: {String(app.residential_status)} &bull; Yard Fence: {app.has_yard_fence ? "Yes" : "No"} &bull; Landlord Approval: {app.has_landlord_approval ? "Yes" : "No"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedAdoption(app);
+                    setIsScoreModalOpen(true);
+                  }}
+                  style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#F59E0B", color: "#FFF", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaStar /> Score Candidate
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "completed" && (
+        <div className="soft-card" style={{ padding: "20px" }}>
+          <h3 style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+            Completed Adoptions &amp; Companion Pets Roster
+          </h3>
+
+          {adoptions.filter((a) => String(a.status).toLowerCase() === "completed").length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#64748B" }}>
+              <FaDog size={36} color="#CBD5E1" style={{ marginBottom: "12px" }} />
+              <div>No finalized companion pet adoptions logged.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {adoptions.filter((a) => String(a.status).toLowerCase() === "completed").map((app) => (
+                <div key={String(app.id)} style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: "16px", color: "#065F46" }}>
+                      {String(app.petName)} &bull; Adopted by {String(app.applicantName)}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#047857", marginTop: "4px" }}>
+                      Completed Date: {app.completed_at ? formatDateTime(String(app.completed_at)) : "Finalized"} &bull; Fee Amount: ${String(app.fee_amount || 150)}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => void openQrModal(app.dog as any)}
+                      style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #059669", background: "#FFF", color: "#059669", fontWeight: 700, fontSize: "12px", cursor: "pointer" }}
+                    >
+                      Safety Tag QR
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* New Application Modal */}
+      <Modal isOpen={isNewModalOpen} onClose={() => setIsNewModalOpen(false)} title="Register Adoption Application">
+        <form onSubmit={handleNewAppSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog *</label>
-            <select required value={newForm.dogId} onChange={(e) => setNewForm({ ...newForm, dogId: e.target.value, petName: (e.target.selectedOptions[0]?.textContent || "").split(" (")[0] })} style={inputStyle}>
-              <option value="">Select a dog...</option>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Select Rescue Dog *</label>
+            <select required value={newAppForm.dog_id} onChange={(e) => setNewAppForm({ ...newAppForm, dog_id: e.target.value })} style={inputStyle}>
+              <option value="">Select dog...</option>
               {dogs.map((d) => (
-                <option key={String(d.id)} value={String(d.id)}>{String(d.name || d.registration_number || d.id)}</option>
+                <option key={d.id} value={d.id}>{d.label}</option>
               ))}
             </select>
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Residential Status</label>
+              <select value={newAppForm.residential_status} onChange={(e) => setNewAppForm({ ...newAppForm, residential_status: e.target.value })} style={inputStyle}>
+                <option value="owned">Owned Home</option>
+                <option value="rented">Rented Apartment / House</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Household Members</label>
+              <input type="number" min="1" max="15" value={newAppForm.household_members_count} onChange={(e) => setNewAppForm({ ...newAppForm, household_members_count: Number(e.target.value) })} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Landlord Approval</label>
+              <select value={newAppForm.has_landlord_approval ? "true" : "false"} onChange={(e) => setNewAppForm({ ...newAppForm, has_landlord_approval: e.target.value === "true" })} style={inputStyle}>
+                <option value="true">Yes (Approved)</option>
+                <option value="false">No / N/A</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Fenced Yard</label>
+              <select value={newAppForm.has_yard_fence ? "true" : "false"} onChange={(e) => setNewAppForm({ ...newAppForm, has_yard_fence: e.target.value === "true" })} style={inputStyle}>
+                <option value="true">Yes (Secure Fence)</option>
+                <option value="false">No Fence</option>
+              </select>
+            </div>
+          </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Residential Status *</label>
-            <select value={newForm.residentialStatus} onChange={(e) => setNewForm({ ...newForm, residentialStatus: e.target.value })} style={inputStyle}>
-              <option value="owned">Owned</option>
-              <option value="renting">Renting</option>
-              <option value="family">Living with family</option>
-            </select>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Pet Care Experience</label>
+            <textarea value={newAppForm.pet_care_experience} onChange={(e) => setNewAppForm({ ...newAppForm, pet_care_experience: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsNewModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Logging..." : "Log Application"}</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Registering..." : "Submit Application"}</button>
           </div>
         </form>
       </Modal>
 
-      {/* Screen Application Modal */}
-      <Modal isOpen={isScreeningModalOpen} onClose={() => setIsScreeningModalOpen(false)} title="Complete Application Screening">
-        <form onSubmit={handleCompleteScreening} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* Schedule Home Inspection Modal */}
+      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Verification Visit">
+        <form onSubmit={handleScheduleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Application *</label>
-            <select value={screeningForm.appId} onChange={(e) => setScreeningForm({ ...screeningForm, appId: e.target.value })} style={inputStyle}>
-              <option value="">Select application...</option>
-              {adoptions
-                .filter((a) => ["submitted", "screening"].includes(String(a.status).toLowerCase()))
-                .map((a) => (
-                  <option key={String(a.id || a.applicationId)} value={String(a.id || a.applicationId)}>
-                    #{String(a.ticketNumber || a.id)} — {String(a.applicantName)} ({String(a.petName)})
-                  </option>
-                ))}
-            </select>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Scheduled Date &amp; Time</label>
+            <input type="datetime-local" value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Next Workflow Stage *</label>
-            <select value={screeningForm.nextStage} onChange={(e) => setScreeningForm({ ...screeningForm, nextStage: e.target.value })} style={inputStyle}>
-              <option value="interview">Proceed to Applicant Interview (interview)</option>
-              <option value="home_check">Proceed to Home Inspection (home_check)</option>
-              <option value="vetting">Proceed to Medical Vetting Check (vetting)</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Officer Screening Notes / Assessment</label>
-            <input
-              type="text"
-              placeholder="e.g. Preliminary questionnaire verified. Applicant is eligible for home visit."
-              value={screeningForm.notes}
-              onChange={(e) => setScreeningForm({ ...screeningForm, notes: e.target.value })}
-              style={inputStyle}
-            />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsScreeningModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#7E22CE", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Processing..." : "Complete Screening"}</button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Schedule Home Verification Modal */}
-      <Modal isOpen={isScheduleModalOpen} onClose={() => { setIsScheduleModalOpen(false); setScheduleError(null); }} title="Schedule Home Inspection Visit">
-        <form onSubmit={handleScheduleVerification} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {scheduleError && (
-            <div style={{ padding: "12px 14px", backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: "8px", color: "#991B1B", fontSize: "13px", lineHeight: 1.4 }}>
-              ⚠️ <strong>Backend Error:</strong> {scheduleError}
-            </div>
-          )}
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Select Application *</label>
-            <select value={scheduleForm.appId} onChange={(e) => setScheduleForm({ ...scheduleForm, appId: e.target.value })} style={inputStyle}>
-              <option value="">Select application...</option>
-              {adoptions.map((a) => (
-                <option key={String(a.id || a.applicationId)} value={String(a.id || a.applicationId)}>{String(a.applicantName)} — ({String(a.petName)})</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspection Date &amp; Time *</label>
-            <input type="datetime-local" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspection Notes / Instructions</label>
-            <input type="text" placeholder="e.g. Verify fence height and landlord permission" value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={inputStyle} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspector Notes</label>
+            <textarea placeholder="e.g. Verify fence height and landlord permission." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Booking..." : "Book Inspection Visit"}</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Scheduling..." : "Confirm Schedule"}</button>
           </div>
         </form>
       </Modal>
 
-      {/* Approve Adoption Modal */}
-      <Modal isOpen={isApproveModalOpen} onClose={() => setIsApproveModalOpen(false)} title="Finalize &amp; Approve Adoption Application">
-        <form onSubmit={handleApproveAdoption} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* Score Candidate Modal */}
+      <Modal isOpen={isScoreModalOpen} onClose={() => setIsScoreModalOpen(false)} title="Score Candidate Evaluation">
+        <form onSubmit={handleScoreSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Home Environment (1-5)</label>
+              <input type="number" min="1" max="5" value={scoreForm.home_environment_score} onChange={(e) => setScoreForm({ ...scoreForm, home_environment_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Pet Care Knowledge (1-5)</label>
+              <input type="number" min="1" max="5" value={scoreForm.pet_care_knowledge_score} onChange={(e) => setScoreForm({ ...scoreForm, pet_care_knowledge_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Financial Readiness (1-5)</label>
+              <input type="number" min="1" max="5" value={scoreForm.financial_readiness_score} onChange={(e) => setScoreForm({ ...scoreForm, financial_readiness_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Lifestyle Match (1-5)</label>
+              <input type="number" min="1" max="5" value={scoreForm.lifestyle_compatibility_score} onChange={(e) => setScoreForm({ ...scoreForm, lifestyle_compatibility_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+          </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Select Application to Approve *</label>
-            {approvableApps.length === 0 ? (
-              <div style={{ padding: "12px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: "8px", color: "#D97706", fontSize: "13px" }}>
-                No applications are currently in interview/inspection/vetting stage ready for approval. Please complete screening first.
-              </div>
-            ) : (
-              <select value={approveForm.appId} onChange={(e) => setApproveForm({ ...approveForm, appId: e.target.value })} style={inputStyle}>
-                <option value="">Select application...</option>
-                {approvableApps.map((a) => (
-                  <option key={String(a.id || a.applicationId)} value={String(a.id || a.applicationId)}>
-                    #{String(a.ticketNumber || a.id)} — {String(a.applicantName)} ({String(a.petName)}) [{String(a.status).toUpperCase()}]
-                  </option>
-                ))}
-              </select>
-            )}
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Recommendation</label>
+            <input type="text" value={scoreForm.recommendation} onChange={(e) => setScoreForm({ ...scoreForm, recommendation: e.target.value })} style={inputStyle} />
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsApproveModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting || approvableApps.length === 0} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Approving..." : "Approve Adoption"}</button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Reject Application Modal */}
-      <Modal isOpen={isRejectModalOpen} onClose={() => setIsRejectModalOpen(false)} title="Reject Adoption Application">
-        <form onSubmit={handleRejectAdoption} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0, fontSize: "14px" }}>
-            Are you sure you want to reject application <strong>#{String(selectedApp?.ticketNumber || selectedApp?.id || "")}</strong> for {String(selectedApp?.applicantName || "applicant")}?
-          </p>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Rejection / Officer Notes (Optional)</label>
-            <input
-              type="text"
-              placeholder="e.g. Unsuitable housing environment for high-energy canine"
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              style={inputStyle}
-            />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Evaluation Notes</label>
+            <textarea value={scoreForm.notes || ""} onChange={(e) => setScoreForm({ ...scoreForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#DC2626", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Rejecting..." : "Confirm Rejection"}</button>
+            <button type="button" onClick={() => setIsScoreModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#F59E0B", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Logging..." : "Save Scores"}</button>
           </div>
         </form>
       </Modal>
 
-      {/* Complete Final Adoption Modal */}
-      <Modal isOpen={isCompleteModalOpen} onClose={() => setIsCompleteModalOpen(false)} title="Finalize Complete Adoption">
-        <form onSubmit={handleCompleteAdoption} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0, fontSize: "14px" }}>
-            Finalize and mark adoption application <strong>#{String(selectedApp?.ticketNumber || selectedApp?.id || "")}</strong> as <strong>COMPLETED</strong> for {String(selectedApp?.applicantName || "applicant")}?
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsCompleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#047857", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Finalizing..." : "Complete Adoption"}</button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Delete Application Modal */}
-      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Application Record">
+      {/* Complete Adoption Modal */}
+      <Modal isOpen={isCompleteModalOpen} onClose={() => setIsCompleteModalOpen(false)} title="Finalize Companion Pet Adoption">
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ color: "#334155", margin: 0 }}>
-            Are you sure you want to remove application <strong>#{String(selectedApp?.ticketNumber || selectedApp?.id || "")}</strong> for {String(selectedApp?.applicantName || "")}?
+            Finalize adoption application <strong>{selectedAdoption?.id ? String(selectedAdoption.id).slice(0, 8) : ""}</strong>? This will create a permanent Companion Pet profile for <strong>{String(selectedAdoption?.applicantName || "Adopter")}</strong> and update the dog's status to <strong>ADOPTED</strong>.
           </p>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="button" disabled={isSubmitting} onClick={handleDeleteApplication} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}><FaTrash /> Delete</button>
+            <button type="button" onClick={() => setIsCompleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleCompleteAdoption} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600 }}>
+              {isSubmitting ? "Finalizing..." : "Confirm & Create Companion Pet"}
+            </button>
           </div>
         </div>
       </Modal>
 
-      {/* Unique Dog Safety Tag QR Code Modal */}
-      <Modal
-        isOpen={isQrModalOpen}
-        onClose={closeQrModal}
-        title={`Official Safety Tag & QR Code — ${String(qrDog?.name || selectedApp?.petName || "Dog")}`}
-        maxWidth="520px"
-      >
-        {qrDog && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", textAlign: "center", padding: "10px 0" }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
-                {String(qrDog.name || selectedApp?.petName || "Unnamed Dog")}
-              </h3>
-              <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                Dog ID: <strong style={{ fontFamily: "monospace", color: "#2563EB" }}>{String(qrDog.registration_number || qrDog.id || "-")}</strong>
+      {/* Delete Modal */}
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Application Record">
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ color: "#334155", margin: 0 }}>
+            Are you sure you want to soft delete adoption application <strong>{selectedAdoption?.id ? String(selectedAdoption.id).slice(0, 8) : ""}</strong>?
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleDelete} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600 }}>Delete</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Details Inspect Modal */}
+      <Modal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} title={`Adoption Record — ${selectedAdoption?.applicantName || "Applicant"}`} maxWidth="720px">
+        {selectedAdoption && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
+                  {String(selectedAdoption.applicantName)} &bull; {String(selectedAdoption.petName)}
+                </h2>
+                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
+                  App ID: <span style={{ fontFamily: "monospace" }}>{String(selectedAdoption.id)}</span>
+                </div>
+              </div>
+              <StatusBadge status={String(selectedAdoption.status || "")} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Housing &amp; Yard</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  Status: {String(selectedAdoption.residential_status)} &bull; Fence: {selectedAdoption.has_yard_fence ? "Yes" : "No"}
+                </div>
+              </div>
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Home Visit Inspection</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  Scheduled: {selectedAdoption.home_inspection_scheduled_at ? formatDateTime(String(selectedAdoption.home_inspection_scheduled_at)) : "Not scheduled"}
+                </div>
               </div>
             </div>
 
-            {/* Tag Status & Token Display Banner */}
-            <div style={{ width: "100%", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "10px 14px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "12px", color: "#64748B", fontWeight: 600 }}>Safety Tag Status:</span>
-                <span style={{ padding: "2px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 800, background: tagStatus === "ACTIVE" ? "#DCFCE7" : "#FEE2E2", color: tagStatus === "ACTIVE" ? "#166534" : "#991B1B", border: tagStatus === "ACTIVE" ? "1px solid #86EFAC" : "1px solid #FCA5A5" }}>
-                  {tagStatus}
-                </span>
-              </div>
-              {rawToken && (
-                <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#6D28D9", marginTop: "6px", fontWeight: 700 }}>
-                  Safety Token: {rawToken}
+            <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "8px" }}>Logged Candidate Scores</div>
+              {candidateScores.length === 0 ? (
+                <div style={{ fontSize: "12px", color: "#64748B" }}>No candidate scores registered yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {candidateScores.map((sc, idx) => (
+                    <div key={idx} style={{ background: "#FFF", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>
+                      Score: Env({sc.home_environment_score}/5), Knowledge({sc.pet_care_knowledge_score}/5), Finance({sc.financial_readiness_score}/5) &bull; Rec: <strong>{sc.recommendation}</strong>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
-            {/* QR Loading or Render or Error or Warning */}
-            {qrLoading ? (
-              <div style={{ color: "#2563EB", fontWeight: 600, fontSize: "14px", padding: "40px 0" }}>Loading Safety Tag metadata...</div>
-            ) : qrError ? (
-              <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", padding: "14px 16px", borderRadius: "10px", fontSize: "13px", fontWeight: 600, width: "100%", boxSizing: "border-box" }}>
-                ⚠️ {qrError}
-              </div>
-            ) : qrImageUrl ? (
-              <div style={{ padding: "16px", border: "2px solid #E2E8F0", borderRadius: "16px", background: "#FFFFFF" }}>
-                <img src={qrImageUrl} alt="Dog Safety Tag QR Code" style={{ width: "200px", height: "200px", objectFit: "contain" }} />
-                <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748B", fontWeight: 600 }}>Scan QR to resolve public safety profile.</div>
-              </div>
-            ) : (
-              <div style={{ background: "#F8FAFC", border: "1px solid #CBD5E1", color: "#334155", padding: "24px 20px", borderRadius: "12px", fontSize: "13px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", width: "100%", boxSizing: "border-box", boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)" }}>
-                {tagStatus === "ACTIVE" ? (
-                  <>
-                    <div style={{ fontSize: "15px", fontWeight: 800, color: "#1E293B" }}>
-                      ℹ️ SAFETY TAG IS ACTIVE ON BACKEND
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "440px", lineHeight: 1.5 }}>
-                      Tag Status: <strong style={{ color: "#16A34A" }}>ACTIVE</strong>{" "}
-                      {tagMetadata?.token_prefix ? `(Prefix: ${String(tagMetadata.token_prefix)})` : ""}
-                      <br />
-                      To render and print the QR code for this active tag on this browser without re-issuing or changing the backend tag, enter the existing raw token below:
-                    </div>
-
-                    <form
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        const clean = manualTokenInput.trim();
-                        if (!clean) return;
-                        const prefix = String(tagMetadata?.token_prefix || "").trim();
-                        if (prefix && !clean.startsWith(prefix)) {
-                          addToast(`Token prefix mismatch! Expected token starting with "${prefix}".`, "error");
-                          return;
-                        }
-                        try {
-                          const id = String(qrDog?.dog_id || qrDog?.original_dog_id || (qrDog?.companion_pet as any)?.original_dog_id || qrDog?.id || (qrDog?.companion_pet as any)?.id || qrDog?.companion_pet_id || "");
-                          const qrUrl = await generateQrDataUrl(clean);
-                          const blob = await generateQrBlob(clean);
-                          setRawToken(clean);
-                          setQrImageUrl(qrUrl);
-                          setQrBlob(blob);
-                          if (id) {
-                            localStorage.setItem(`pawguard_safety_tag_token_${id}`, clean);
-                            localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
-                          }
-                          addToast("Active Safety Tag QR loaded successfully!", "success");
-                        } catch {
-                          addToast("Failed to render QR for entered token.", "error");
-                        }
-                      }}
-                      style={{ width: "100%", maxWidth: "420px", display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}
-                    >
-                      <input
-                        type="text"
-                        value={manualTokenInput}
-                        onChange={(e) => setManualTokenInput(e.target.value)}
-                        placeholder="Enter existing raw token (e.g. cVnzRiqR...)"
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: "1px solid #CBD5E1",
-                          fontSize: "12px",
-                          fontFamily: "monospace",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          type="submit"
-                          disabled={!manualTokenInput.trim()}
-                          style={{
-                            flex: 1,
-                            padding: "10px",
-                            borderRadius: "8px",
-                            border: "none",
-                            background: manualTokenInput.trim() ? "#10B981" : "#94A3B8",
-                            color: "#FFFFFF",
-                            fontWeight: 700,
-                            fontSize: "13px",
-                            cursor: manualTokenInput.trim() ? "pointer" : "not-allowed",
-                          }}
-                        >
-                          Load Active QR Code
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setIsReProvisionConfirmOpen(true)}
-                          disabled={isProvisioning}
-                          style={{
-                            padding: "10px 12px",
-                            borderRadius: "8px",
-                            border: "1px solid #CBD5E1",
-                            background: "#FFFFFF",
-                            color: "#6D28D9",
-                            fontWeight: 700,
-                            fontSize: "12px",
-                            cursor: isProvisioning ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          Re-Provision
-                        </button>
-                      </div>
-                    </form>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>This pet does not have an active Safety Tag yet.</div>
-                    <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.</div>
-                    <button type="button" onClick={() => handleProvisionTag()} disabled={isProvisioning} style={{ width: "100%", padding: "11px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: isProvisioning ? "not-allowed" : "pointer" }}>
-                      {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "8px" }}>
-              {qrImageUrl && (
-                <button
-                  type="button"
-                  onClick={handleDownloadQr}
-                  style={{ flex: 1, padding: "10px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
-                >
-                  <FaDownload /> Download QR
-                </button>
-              )}
-              {rawToken && (
-                <button
-                  type="button"
-                  onClick={() => window.open(`/scan-pet?token=${rawToken}`, "_blank")}
-                  style={{ flex: 1, padding: "10px 16px", borderRadius: "8px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#2563EB", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
-                >
-                  <FaExternalLinkAlt /> Open Public Scan
-                </button>
-              )}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setIsDetailsModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF" }}>Close</button>
             </div>
           </div>
         )}
       </Modal>
 
-      {/* Re-Provision Confirmation Modal */}
-      <Modal
-        isOpen={isReProvisionConfirmOpen}
-        onClose={() => setIsReProvisionConfirmOpen(false)}
-        title="Re-Provision Safety Tag?"
-        maxWidth="450px"
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px 0" }}>
-          <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
-            This will generate a <strong>NEW Safety Tag token</strong> and invalidate the existing QR code for <strong>{String(qrDog?.name || "this pet")}</strong>. Any previously printed QR code will stop working. Continue?
-          </div>
-          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-            <button
-              type="button"
-              onClick={() => setIsReProvisionConfirmOpen(false)}
-              style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => handleProvisionTag(true)}
-              disabled={isProvisioning}
-              style={{ padding: "9px 16px", borderRadius: "8px", border: "none", background: "#6D28D9", color: "#FFF", fontWeight: 700 }}
-            >
-              {isProvisioning ? "Re-Provisioning..." : "Confirm Re-Provision"}
-            </button>
+      {/* Safety Tag QR Modal */}
+      <Modal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} title="Safety Tag QR Code">
+        <div style={{ textAlign: "center", padding: "16px" }}>
+          {qrLoading ? (
+            <div>Generating Safety Tag QR Code...</div>
+          ) : qrImageUrl ? (
+            <div>
+              <img src={qrImageUrl} alt="Safety Tag QR" style={{ width: "200px", height: "200px", borderRadius: "8px", margin: "0 auto 16px" }} />
+              <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#64748B" }}>Token: {rawToken}</div>
+            </div>
+          ) : (
+            <div>Could not generate QR code.</div>
+          )}
+          <div style={{ marginTop: "16px" }}>
+            <button type="button" onClick={() => setIsQrModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>Close</button>
           </div>
         </div>
       </Modal>

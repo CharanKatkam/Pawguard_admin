@@ -327,39 +327,6 @@ export const notificationService = {
     return await notificationService.getNotifications();
   },
 
-  subscribeToNotifications: (
-    onNotification?: (notification: NotificationItem) => void,
-    onError?: (error: Error) => void
-  ): (() => void) => {
-    const seen = new Set<string>();
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    const poll = async () => {
-      try {
-        const list = await notificationService.getNotifications(1, 10);
-        const fresh = list.filter((n) => n.id && !seen.has(n.id));
-        list.forEach((n) => n.id && seen.add(n.id));
-        if (onNotification) {
-          fresh.forEach((n) => onNotification(n));
-        }
-      } catch (err) {
-        if (onError) {
-          onError(err instanceof Error ? err : new Error("Failed to poll notifications"));
-        }
-      }
-    };
-
-    poll();
-    timer = setInterval(poll, 15000);
-
-    return () => {
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-  },
-
   // GET /api/v1/admin/notifications/overview
   getGovernanceOverview: async (): Promise<NotificationGovernanceOverview> => {
     const response = await api.get("/admin/notifications/overview");

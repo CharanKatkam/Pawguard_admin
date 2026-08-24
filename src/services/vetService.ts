@@ -17,8 +17,20 @@ const unwrapData = (res: unknown): Record<string, unknown> => {
   return asRecord(body);
 };
 
+export interface PartnerClinicPayload {
+  name: string;
+  address: string;
+  phone: string;
+  email?: string;
+  latitude?: number;
+  longitude?: number;
+  is_emergency?: boolean;
+  services?: string;
+  is_active?: boolean;
+}
+
 export const vetService = {
-  // GET /companion-pets/clinics - list active veterinary clinics (vet directory)
+  // GET /companion-pets/clinics - list active veterinary clinics
   getClinics: async (params?: Record<string, unknown>) => {
     const response = await api.get("/companion-pets/clinics", { params });
     return {
@@ -103,13 +115,46 @@ export const vetService = {
     };
   },
 
-  // GET /portal/admin/veterinary-network - list partner veterinary network clinics/doctors
+  // GET /portal/veterinary-network (or /portal/admin/veterinary-network)
   getPartnerVeterinaryNetwork: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/portal/admin/veterinary-network", { params });
-    return {
-      data: unwrapList(response),
-      meta: asRecord(response).meta,
-    };
+    try {
+      const response = await api.get("/portal/veterinary-network", { params });
+      return {
+        data: unwrapList(response),
+        meta: asRecord(response).meta,
+      };
+    } catch {
+      const response = await api.get("/portal/admin/veterinary-network", { params });
+      return {
+        data: unwrapList(response),
+        meta: asRecord(response).meta,
+      };
+    }
+  },
+
+  // POST /portal/admin/veterinary-network
+  createPartnerClinic: async (payload: PartnerClinicPayload) => {
+    const response = await api.post("/portal/admin/veterinary-network", payload);
+    await publishActionEvent({
+      module: "medical",
+      action: "create",
+      title: "New Partner Clinic Registered",
+      message: `Clinic "${payload.name}" added to partner network directory.`,
+      targetRoles: ["super_admin", "veterinarian", "rescue_centre_admin"],
+    });
+    return unwrapData(response);
+  },
+
+  // PUT /portal/admin/veterinary-network/{partner_id}
+  updatePartnerClinic: async (partnerId: string, payload: Partial<PartnerClinicPayload>) => {
+    const response = await api.put(`/portal/admin/veterinary-network/${partnerId}`, payload);
+    return unwrapData(response);
+  },
+
+  // DELETE /portal/admin/veterinary-network/{partner_id}
+  deletePartnerClinic: async (partnerId: string) => {
+    const response = await api.delete(`/portal/admin/veterinary-network/${partnerId}`);
+    return unwrapData(response);
   },
 };
 

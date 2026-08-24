@@ -11,6 +11,12 @@ export type SectionType =
   | "general"
   | "adoption";
 
+export type KennelSanitationState =
+  | "clean"
+  | "needs_cleaning"
+  | "disinfecting"
+  | "out_of_service";
+
 export interface ShelterFacilityPayload {
   name: string;
   address?: string;
@@ -32,8 +38,32 @@ export interface KennelPayload {
   capacity?: number;
 }
 
+export interface CleaningLogPayload {
+  sanitation_state_after: KennelSanitationState;
+  cleaning_method?: string;
+  notes?: string;
+}
+
+export interface CareLogPayload {
+  dog_id: string;
+  log_type: string;
+  notes: string;
+}
+
 export const shelterService = {
-  // GET /shelter/facilities (paginated)
+  // GET /dashboards/shelter - Aggregate Dashboard Data
+  getShelterDashboard: async () => {
+    const response = await api.get("/dashboards/shelter");
+    return response.data;
+  },
+
+  // GET /admin/dashboard/shelter-stats - Admin Shelter Statistics
+  getShelterStats: async () => {
+    const response = await api.get("/admin/dashboard/shelter-stats");
+    return response.data;
+  },
+
+  // GET /shelter/facilities (paginated, with search & filters)
   getShelters: async (params?: Record<string, unknown>) => {
     const response = await api.get("/shelter/facilities", { params });
     return response.data;
@@ -46,7 +76,7 @@ export const shelterService = {
       module: "shelter",
       action: "create",
       title: "New Shelter Facility Added",
-      message: `Facility ${data.name} registered with capacity ${data.total_capacity ?? "unspecified"}.`,
+      message: `Facility "${data.name}" registered with capacity ${data.total_capacity ?? "unspecified"}.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager"],
     });
     return response.data;
@@ -65,7 +95,7 @@ export const shelterService = {
       module: "shelter",
       action: "update",
       title: "Shelter Facility Updated",
-      message: `Facility ${data.name || facilityId} details updated.`,
+      message: `Facility details updated for ${data.name || facilityId}.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager"],
     });
     return response.data;
@@ -78,7 +108,7 @@ export const shelterService = {
       module: "shelter",
       action: "delete",
       title: "Shelter Facility Removed",
-      message: `Facility ${facilityId} deleted from the shelter directory.`,
+      message: `Facility ${facilityId} removed from shelter directory.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager"],
     });
     return response.data;
@@ -90,9 +120,28 @@ export const shelterService = {
     return response.data;
   },
 
-  // POST /shelter/facilities/{facility_id}/sections - ShelterSectionCreate { name, section_type, capacity }
+  // POST /shelter/facilities/bulk/delete
+  bulkDeleteFacilities: async (facilityIds: string[]) => {
+    const response = await api.post("/shelter/facilities/bulk/delete", { facility_ids: facilityIds });
+    return response.data;
+  },
+
+  // POST /shelter/facilities/bulk/status
+  bulkUpdateFacilityStatus: async (facilityIds: string[], status: FacilityStatus) => {
+    const response = await api.post("/shelter/facilities/bulk/status", { facility_ids: facilityIds, status });
+    return response.data;
+  },
+
+  // POST /shelter/facilities/{facility_id}/sections - ShelterSectionCreate
   createFacilitySection: async (facilityId: string, data: SectionPayload) => {
     const response = await api.post(`/shelter/facilities/${facilityId}/sections`, data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "create",
+      title: "Shelter Section Created",
+      message: `Section "${data.name}" (${data.section_type || "general"}) added.`,
+      targetRoles: ["super_admin", "shelter_manager"],
+    });
     return response.data;
   },
 
@@ -102,9 +151,16 @@ export const shelterService = {
     return response.data;
   },
 
-  // POST /shelter/sections/{section_id}/kennels - KennelCreate { identifier, capacity }
+  // POST /shelter/sections/{section_id}/kennels - KennelCreate
   createSectionKennel: async (sectionId: string, data: KennelPayload) => {
     const response = await api.post(`/shelter/sections/${sectionId}/kennels`, data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "create",
+      title: "New Kennel Added",
+      message: `Kennel unit "${data.identifier}" registered.`,
+      targetRoles: ["super_admin", "shelter_manager"],
+    });
     return response.data;
   },
 
@@ -114,25 +170,57 @@ export const shelterService = {
     return response.data;
   },
 
-  // POST /shelter/kennels/{kennel_id}/assign/{dog_id} (no body required)
+  // POST /shelter/kennels/{kennel_id}/assign/{dog_id}
   assignDogToKennel: async (kennelId: string, dogId: string) => {
     const response = await api.post(`/shelter/kennels/${kennelId}/assign/${dogId}`);
+    await publishActionEvent({
+      module: "shelter",
+      action: "update",
+      title: "Animal Assigned to Kennel",
+      message: `Animal ${dogId} assigned to kennel ${kennelId}.`,
+      targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
+    });
     return response.data;
   },
 
-  // PUT /shelter/kennels/{kennel_id}/sanitation (no body required)
+  // PUT /shelter/kennels/{kennel_id}/sanitation (marks sanitized/clean)
   updateKennelSanitation: async (kennelId: string) => {
     const response = await api.put(`/shelter/kennels/${kennelId}/sanitation`);
     return response.data;
   },
 
-  // GET /shelter/transfers - FacilityTransferResponse list (shelter placement requests)
+  // GET /shelter/kennels/{kennel_id}/cleaning-logs
+  getKennelCleaningLogs: async (kennelId: string, params?: Record<string, unknown>) => {
+    const response = await api.get(`/shelter/kennels/${kennelId}/cleaning-logs`, { params });
+    return response.data;
+  },
+
+  // POST /shelter/kennels/{kennel_id}/cleaning-logs
+  createKennelCleaningLog: async (kennelId: string, data: CleaningLogPayload) => {
+    const response = await api.post(`/shelter/kennels/${kennelId}/cleaning-logs`, data);
+    await publishActionEvent({
+      module: "shelter",
+      action: "create",
+      title: "Kennel Cleaning Logged",
+      message: `Kennel ${kennelId} status set to ${data.sanitation_state_after}.`,
+      targetRoles: ["super_admin", "shelter_manager"],
+    });
+    return response.data;
+  },
+
+  // GET /shelter/transfers
   getTransfers: async (params?: Record<string, unknown>) => {
     const response = await api.get("/shelter/transfers", { params });
     return response.data;
   },
 
-  // POST /shelter/transfers - FacilityTransferCreate (request a dog's placement)
+  // GET /shelter/transfers/{transfer_id}
+  getTransferById: async (transferId: string) => {
+    const response = await api.get(`/shelter/transfers/${transferId}`);
+    return response.data;
+  },
+
+  // POST /shelter/transfers - FacilityTransferCreate
   createTransfer: async (data: {
     dog_id: string;
     from_facility_id: string;
@@ -144,20 +232,7 @@ export const shelterService = {
       module: "shelter",
       action: "create",
       title: "Shelter Placement Requested",
-      message: `Placement requested for dog ${data.dog_id} to facility ${data.to_facility_id}.`,
-      targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
-    });
-    return response.data;
-  },
-
-  // POST /shelter/transfers/{transfer_id}/confirm-receiver
-  confirmTransferReceiver: async (transferId: string) => {
-    const response = await api.post(`/shelter/transfers/${transferId}/confirm-receiver`);
-    await publishActionEvent({
-      module: "shelter",
-      action: "approve",
-      title: "Shelter Placement Approved",
-      message: `Receiver facility confirmed placement ${transferId}.`,
+      message: `Placement requested for animal ${data.dog_id} to facility ${data.to_facility_id}.`,
       targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
     });
     return response.data;
@@ -169,10 +244,35 @@ export const shelterService = {
     await publishActionEvent({
       module: "shelter",
       action: "approve",
-      title: "Shelter Placement Confirmed",
+      title: "Sender Confirmed Placement",
       message: `Sender facility confirmed handover for placement ${transferId}.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager"],
     });
+    return response.data;
+  },
+
+  // POST /shelter/transfers/{transfer_id}/confirm-receiver
+  confirmTransferReceiver: async (transferId: string) => {
+    const response = await api.post(`/shelter/transfers/${transferId}/confirm-receiver`);
+    await publishActionEvent({
+      module: "shelter",
+      action: "approve",
+      title: "Receiver Confirmed Placement",
+      message: `Receiver facility confirmed placement ${transferId}.`,
+      targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
+    });
+    return response.data;
+  },
+
+  // POST /shelter/care-logs
+  createCareLog: async (data: CareLogPayload) => {
+    const response = await api.post("/shelter/care-logs", data);
+    return response.data;
+  },
+
+  // GET /shelter/dogs/{dog_id}/care-logs
+  getCareLogs: async (dogId: string) => {
+    const response = await api.get(`/shelter/dogs/${dogId}/care-logs`);
     return response.data;
   },
 };

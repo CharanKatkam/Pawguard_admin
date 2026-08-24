@@ -94,8 +94,8 @@ const ShelterTransfers = () => {
   const loadLookups = async () => {
     try {
       const [facRes, dogRes] = await Promise.all([
-        shelterService.getShelters({ page: 1, page_size: 200 }),
-        petService.getPets({ page: 1, page_size: 200 }),
+        shelterService.getShelters({ page: 1, page_size: 20 }),
+        petService.getPets({ page: 1, page_size: 20 }),
       ]);
       setFacilities(unwrapList(facRes));
       setDogs(unwrapList(dogRes));

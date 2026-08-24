@@ -58,7 +58,6 @@ const RescueRequests = () => {
   const { addToast } = useToast();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
   const tableSectionRef = useRef<HTMLDivElement>(null);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -423,29 +422,15 @@ const RescueRequests = () => {
   };
 
   const filteredRequests = requests.filter((r) => {
-    const matchesStatus =
-      statusFilter === "all"
-        ? true
-        : statusFilter === "pending"
-        ? ["reported", "pending", "new"].includes(r.status)
-        : statusFilter === "rescued"
-        ? ["rescued", "located", "secured", "admitted", "completed"].includes(r.status)
-        : statusFilter === "rejected"
-        ? ["rejected", "failed", "invalid"].includes(r.status)
-        : r.status === statusFilter;
-
-    if (!matchesStatus) return false;
-    if (!searchQuery.trim()) return true;
-
-    const q = searchQuery.toLowerCase().trim();
-    return (
-      String(r.ticket_number || "").toLowerCase().includes(q) ||
-      String(r.reporter || "").toLowerCase().includes(q) ||
-      String(r.phone || "").toLowerCase().includes(q) ||
-      String(r.location || "").toLowerCase().includes(q) ||
-      String(r.severity || "").toLowerCase().includes(q) ||
-      String(r.status || "").toLowerCase().includes(q)
-    );
+    return statusFilter === "all"
+      ? true
+      : statusFilter === "pending"
+      ? ["reported", "pending", "new"].includes(r.status)
+      : statusFilter === "rescued"
+      ? ["rescued", "located", "secured", "admitted", "completed"].includes(r.status)
+      : statusFilter === "rejected"
+      ? ["rejected", "failed", "invalid"].includes(r.status)
+      : r.status === statusFilter;
   });
 
   return (
@@ -534,44 +519,6 @@ const RescueRequests = () => {
         />
       </div>
 
-      <div style={{ marginBottom: "16px", display: "flex", gap: "12px", alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: "420px" }}>
-          <input
-            type="text"
-            placeholder="Search ticket, reporter, phone, location, status..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "10px 14px 10px 36px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              fontSize: "13px",
-              boxSizing: "border-box",
-            }}
-          />
-          <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }}>
-            🔍
-          </span>
-        </div>
-        {searchQuery && (
-          <button
-            onClick={() => setSearchQuery("")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: "6px",
-              border: "1px solid #CBD5E1",
-              background: "#FFFFFF",
-              color: "#64748B",
-              fontSize: "12px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Clear Search
-          </button>
-        )}
-      </div>
 
       <div ref={tableSectionRef}>
         {statusFilter !== "all" && (

@@ -2,7 +2,7 @@ import { useState } from "react";
 import Modal from "../common/Modal";
 import { useToast } from "../../context/ToastContext";
 import notificationService from "../../services/notificationService";
-import { notifyDataChanged } from "../../utils/dataSync";
+import { refetchNotifications } from "../../hooks/useNotifications";
 
 interface SendNotificationModalProps {
   isOpen: boolean;
@@ -39,7 +39,7 @@ const SendNotificationModal = ({ isOpen, onClose }: SendNotificationModalProps) 
         type,
       });
       addToast("Notification sent", "success");
-      notifyDataChanged();
+      void refetchNotifications();
       setTitle("");
       setMessage("");
       setType("system");

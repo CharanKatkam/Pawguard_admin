@@ -17,7 +17,7 @@ import {
   FaUserCheck,
 } from "react-icons/fa";
 import volunteerService from "../../../services/volunteerService";
-import notificationService from "../../../services/notificationService";
+import { fetchSharedNotifications } from "../../../hooks/useNotifications";
 import { getCurrentUser } from "../../../utils/roleUtils";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { formatDateTime } from "../../../utils/dateUtils";
@@ -55,7 +55,7 @@ const VolunteerDashboard = () => {
 
       const [shiftRes, notifRes, summaryRes, statusRes] = await Promise.allSettled([
         volunteerService.getShifts(),
-        notificationService.getNotifications(1, 20),
+        fetchSharedNotifications(),
         profileId ? volunteerService.getServiceSummary(profileId) : Promise.resolve(null),
         volunteerService.getMyStatus().catch(() => null),
       ]);

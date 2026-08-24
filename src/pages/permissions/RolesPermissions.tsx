@@ -305,7 +305,7 @@ const RolesPermissions = () => {
     try {
       setUsersLoading(true);
       setUserError(null);
-      const res = await userService.getUsers({ page_size: 100 });
+      const res = await userService.getUsers({ page_size: 20 });
       const rawBody = res as unknown;
       const rawData = (rawBody as { data?: unknown })?.data;
       const rawItems = (rawData as { items?: unknown })?.items;

@@ -1,6 +1,74 @@
 import api from "../api/axios";
 import { publishActionEvent } from "../utils/eventSystem";
 
+export interface ClinicalExamPayload {
+  dog_id: string;
+  body_condition_score?: number;
+  dental_health?: string;
+  ocular_aural_notes?: string;
+  coat_condition?: string;
+  visible_injuries?: string;
+  triage_diagnosis: string;
+}
+
+export interface MedicalTreatmentPayload {
+  dog_id: string;
+  treatment_type: string;
+  description: string;
+  anesthesia_log?: string;
+  post_op_notes?: string;
+  inventory_consumptions?: Array<{ item_id: string; quantity: number }>;
+}
+
+export interface VaccinationRecordPayload {
+  dog_id: string;
+  vaccine_name: string;
+  next_due_at?: string;
+  lot_number?: string;
+}
+
+export interface VaccineProtocolPayload {
+  name: string;
+  default_interval_days?: number;
+  is_required?: boolean;
+}
+
+export interface PrescriptionPayload {
+  dog_id: string;
+  drug_name: string;
+  dosage: string;
+  route: string;
+  start_at: string;
+  end_at: string;
+  inventory_consumptions?: Array<{ item_id: string; quantity: number }>;
+}
+
+export interface PrescriptionUpdatePayload {
+  drug_name?: string;
+  dosage?: string;
+  route?: string;
+  start_at?: string;
+  end_at?: string;
+  is_active?: boolean;
+}
+
+export interface MedicationAdministrationPayload {
+  dog_id: string;
+  medication_name: string;
+  dosage: string;
+  route: string;
+  administered_at: string;
+  administered_by_id: string;
+  notes?: string;
+}
+
+export interface MedicalClearancePayload {
+  clearance_type: string;
+  status: string;
+  decision_notes?: string;
+  expires_at?: string;
+}
+
 const pick = (data: Record<string, unknown>, ...keys: string[]): unknown => {
   for (const k of keys) {
     const v = data[k];
@@ -10,8 +78,8 @@ const pick = (data: Record<string, unknown>, ...keys: string[]): unknown => {
 };
 
 const normalizeMedicalRow = (r: Record<string, unknown>, type: string): Record<string, unknown> => {
-  const vetIdRaw = r.administered_by || r.vet_id;
-  const vetName = vetIdRaw ? `Vet ID: ${String(vetIdRaw).slice(0, 8)}` : "-";
+  const vetIdRaw = r.administered_by || r.vet_id || r.authored_by_id;
+  const vetName = vetIdRaw ? `Vet ID: ${String(vetIdRaw).slice(0, 8)}` : "Attending Vet";
 
   if (type === "exams") {
     const notes: string[] = [];
@@ -51,6 +119,8 @@ const normalizeMedicalRow = (r: Record<string, unknown>, type: string): Record<s
       treatment: r.treatment_type ? `${r.treatment_type}${r.description ? `: ${r.description}` : ""}` : (r.description || "-"),
       treatmentType: r.treatment_type || "-",
       description: r.description || "-",
+      anesthesiaLog: r.anesthesia_log || null,
+      postOpNotes: r.post_op_notes || null,
       date: r.treatment_date || r.created_at || "-",
       raw: r,
     };
@@ -118,28 +188,81 @@ const normalizeMedicalRow = (r: Record<string, unknown>, type: string): Record<s
 };
 
 export const medicalService = {
-  getMedicalRecords: async () => {
+  // GET /dashboards/medical
+  getMedicalDashboard: async () => {
+    const response = await api.get("/dashboards/medical");
+    return response.data;
+  },
+
+  // GET /admin/dashboard/medical-stats
+  getMedicalStats: async () => {
+    const response = await api.get("/admin/dashboard/medical-stats");
+    return response.data;
+  },
+
+  // GET /medical/exams
+  getExams: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/medical/exams", { params });
+    return response.data;
+  },
+
+  // GET /medical/treatments
+  getTreatments: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/medical/treatments", { params });
+    return response.data;
+  },
+
+  // GET /medical/vaccinations
+  getVaccinations: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/medical/vaccinations", { params });
+    return response.data;
+  },
+
+  // GET /medical/prescriptions
+  getPrescriptions: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/medical/prescriptions", { params });
+    return response.data;
+  },
+
+  // GET /medical/vaccine-protocols
+  getVaccineProtocols: async () => {
+    const response = await api.get("/medical/vaccine-protocols");
+    return response.data;
+  },
+
+  // POST /medical/vaccine-protocols
+  createVaccineProtocol: async (payload: VaccineProtocolPayload) => {
+    const response = await api.post("/medical/vaccine-protocols", payload);
+    return response.data;
+  },
+
+  // GET /medical/records aggregate across exams, vaccinations, treatments, prescriptions
+  getMedicalRecords: async (params?: Record<string, unknown>) => {
     const [exams, vaccinations, treatments, prescriptions] = await Promise.all([
-      api.get("/medical/exams").catch(() => ({ data: [] })),
-      api.get("/medical/vaccinations").catch(() => ({ data: [] })),
-      api.get("/medical/treatments").catch(() => ({ data: [] })),
-      api.get("/medical/prescriptions").catch(() => ({ data: [] })),
+      api.get("/medical/exams", { params }).catch(() => ({ data: [] })),
+      api.get("/medical/vaccinations", { params }).catch(() => ({ data: [] })),
+      api.get("/medical/treatments", { params }).catch(() => ({ data: [] })),
+      api.get("/medical/prescriptions", { params }).catch(() => ({ data: [] })),
     ]);
+
     const unwrap = (res: { data?: { data?: Record<string, unknown>[] } | Record<string, unknown>[] }): Record<string, unknown>[] => {
       const data = res?.data;
       if (Array.isArray(data)) return data;
       if (data && typeof data === "object" && Array.isArray(data.data)) return data.data;
       return [];
     };
+
     const rows = [
       ...unwrap(exams).map((r) => normalizeMedicalRow(r, "exams")),
       ...unwrap(vaccinations).map((r) => normalizeMedicalRow(r, "vaccinations")),
       ...unwrap(treatments).map((r) => normalizeMedicalRow(r, "treatments")),
       ...unwrap(prescriptions).map((r) => normalizeMedicalRow(r, "prescriptions")),
     ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+
     return { data: rows, total: rows.length };
   },
 
+  // GET /medical/dogs/{dog_id}/history
   getMedicalHistory: async (dogId: string) => {
     try {
       const response = await api.get(`/medical/dogs/${dogId}/history`);
@@ -163,92 +286,186 @@ export const medicalService = {
     }
   },
 
-  // GET /medical/clearances/dogs/{dog_id} - list medical clearance certificates for a dog
+  // GET /medical/clearances/dogs/{dog_id}
   getDogClearances: async (dogId: string) => {
     const response = await api.get(`/medical/clearances/dogs/${dogId}`);
     const list = Array.isArray(response?.data?.data) ? response.data.data : Array.isArray(response?.data) ? response.data : [];
     return list;
   },
 
-  createMedicalExam: async (data: Record<string, unknown>) => {
-    const dogId = pick(data, "dog_id", "dogId", "petName");
+  // POST /medical/exams
+  createMedicalExam: async (data: Record<string, unknown> | ClinicalExamPayload) => {
+    const raw = data as Record<string, unknown>;
+    const dogId = pick(raw, "dog_id", "dogId", "petName");
     if (!dogId) throw new Error("Dog selection is required to record a clinical exam.");
 
-    const diagnosis = pick(data, "triage_diagnosis", "diagnosis", "chiefComplaint") || "Routine Clinical Checkup";
-    const bcs = Number(pick(data, "body_condition_score", "bodyConditionScore", "bcs")) || 5;
+    const diagnosis = pick(raw, "triage_diagnosis", "diagnosis", "chiefComplaint") || "Routine Clinical Checkup";
+    const bcs = Number(pick(raw, "body_condition_score", "bodyConditionScore", "bcs")) || 5;
 
-    const notesParts: string[] = [];
-    const chiefComplaint = pick(data, "chief_complaint", "chiefComplaint");
-    if (chiefComplaint) notesParts.push(`Complaint: ${chiefComplaint}`);
-    const visibleInjuries = pick(data, "visible_injuries", "visibleInjuries", "treatment");
-    if (visibleInjuries) notesParts.push(`Exam: ${visibleInjuries}`);
-    const vetNotes = pick(data, "vet_notes", "vetNotes", "notes");
-    if (vetNotes) notesParts.push(`Notes: ${vetNotes}`);
-
-    const payload: Record<string, unknown> = {
-      dog_id: dogId,
+    const payload: ClinicalExamPayload = {
+      dog_id: String(dogId),
       triage_diagnosis: String(diagnosis),
       body_condition_score: bcs,
+      dental_health: (pick(raw, "dental_health", "dental") as string) || undefined,
+      ocular_aural_notes: (pick(raw, "ocular_aural_notes", "ocular") as string) || undefined,
+      coat_condition: (pick(raw, "coat_condition", "coat") as string) || undefined,
+      visible_injuries: (pick(raw, "visible_injuries", "treatment", "injuries") as string) || undefined,
     };
-    if (notesParts.length > 0) {
-      payload.visible_injuries = notesParts.join("; ");
-    } else if (data.treatment) {
-      payload.visible_injuries = String(data.treatment);
-    }
 
     const response = await api.post("/medical/exams", payload);
     await publishActionEvent({
       module: "medical",
       action: "create",
-      title: "Clinical Medical Exam Created",
+      title: "Clinical Medical Exam Recorded",
       message: `Clinical examination recorded for patient ${dogId}. Diagnosis: ${diagnosis}.`,
       targetRoles: ["super_admin", "veterinarian", "rescue_centre_admin", "shelter_manager"],
     });
     return response.data;
   },
 
-  createVaccination: async (data: Record<string, unknown>) => {
-    const dogId = pick(data, "dog_id", "dogId", "petName");
-    if (!dogId) throw new Error("Dog selection is required to log a vaccination.");
-    const vaccineName = pick(data, "vaccine_name", "vaccineName");
-    if (!vaccineName) throw new Error("Vaccine name is required.");
-    const payload: Record<string, unknown> = { dog_id: dogId, vaccine_name: vaccineName };
-    if (data.nextDueAt || data.next_due_at) payload.next_due_at = pick(data, "next_due_at", "nextDueAt");
-    if (data.lotNumber || data.lot_number) payload.lot_number = pick(data, "lot_number", "lotNumber");
-    const response = await api.post("/medical/vaccinations", payload);
-    return response.data;
-  },
-
-  scheduleSurgery: async (data: Record<string, unknown>) => {
-    const dogId = pick(data, "dog_id", "dogId", "petName");
-    if (!dogId) throw new Error("Dog selection is required to schedule a treatment.");
-    const treatmentType = pick(data, "treatment_type", "treatmentType", "procedure");
+  // POST /medical/treatments
+  createMedicalTreatment: async (data: Record<string, unknown> | MedicalTreatmentPayload) => {
+    const raw = data as Record<string, unknown>;
+    const dogId = pick(raw, "dog_id", "dogId", "petName");
+    if (!dogId) throw new Error("Dog selection is required to record a treatment.");
+    const treatmentType = pick(raw, "treatment_type", "treatmentType", "procedure");
     if (!treatmentType) throw new Error("Procedure/treatment type is required.");
-    const payload: Record<string, unknown> = {
-      dog_id: dogId,
-      treatment_type: treatmentType,
-      description: pick(data, "description", "treatment") || "",
+
+    const payload: MedicalTreatmentPayload = {
+      dog_id: String(dogId),
+      treatment_type: String(treatmentType),
+      description: String(pick(raw, "description", "treatment") || "Medical procedure completed."),
+      anesthesia_log: (pick(raw, "anesthesia_log", "anesthesiaLog") as string) || undefined,
+      post_op_notes: (pick(raw, "post_op_notes", "postOpNotes") as string) || undefined,
+      inventory_consumptions: raw.inventory_consumptions as any,
     };
+
     const response = await api.post("/medical/treatments", payload);
+    await publishActionEvent({
+      module: "medical",
+      action: "create",
+      title: "Medical Treatment / Surgery Recorded",
+      message: `Treatment (${treatmentType}) recorded for patient ${dogId}.`,
+      targetRoles: ["super_admin", "veterinarian", "rescue_centre_admin", "shelter_manager"],
+    });
     return response.data;
   },
 
-  issueCertificate: async (data: Record<string, unknown>) => {
-    const dogId = pick(data, "dog_id", "dogId", "petName");
+  // Alias for backward compatibility
+  scheduleSurgery: async (data: Record<string, unknown>) => {
+    return medicalService.createMedicalTreatment(data);
+  },
+
+  // POST /medical/vaccinations
+  createVaccination: async (data: Record<string, unknown> | VaccinationRecordPayload) => {
+    const raw = data as Record<string, unknown>;
+    const dogId = pick(raw, "dog_id", "dogId", "petName");
+    if (!dogId) throw new Error("Dog selection is required to log a vaccination.");
+    const vaccineName = pick(raw, "vaccine_name", "vaccineName");
+    if (!vaccineName) throw new Error("Vaccine name is required.");
+
+    const payload: VaccinationRecordPayload = {
+      dog_id: String(dogId),
+      vaccine_name: String(vaccineName),
+      next_due_at: (pick(raw, "next_due_at", "nextDueAt") as string) || undefined,
+      lot_number: (pick(raw, "lot_number", "lotNumber") as string) || undefined,
+    };
+
+    const response = await api.post("/medical/vaccinations", payload);
+    await publishActionEvent({
+      module: "medical",
+      action: "create",
+      title: "Vaccination Administered",
+      message: `Vaccine ${vaccineName} administered to patient ${dogId}.`,
+      targetRoles: ["super_admin", "veterinarian", "rescue_centre_admin", "shelter_manager"],
+    });
+    return response.data;
+  },
+
+  // POST /medical/prescriptions
+  createPrescription: async (data: Record<string, unknown> | PrescriptionPayload) => {
+    const raw = data as Record<string, unknown>;
+    const dogId = pick(raw, "dog_id", "dogId", "petName");
+    if (!dogId) throw new Error("Dog selection is required to prescribe medication.");
+    const drugName = pick(raw, "drug_name", "drugName");
+    if (!drugName) throw new Error("Drug name is required.");
+
+    const payload: PrescriptionPayload = {
+      dog_id: String(dogId),
+      drug_name: String(drugName),
+      dosage: String(pick(raw, "dosage") || "As directed"),
+      route: String(pick(raw, "route") || "Oral"),
+      start_at: String(pick(raw, "start_at", "startAt") || new Date().toISOString()),
+      end_at: String(pick(raw, "end_at", "endAt") || new Date(Date.now() + 7 * 86400000).toISOString()),
+      inventory_consumptions: raw.inventory_consumptions as any,
+    };
+
+    const response = await api.post("/medical/prescriptions", payload);
+    await publishActionEvent({
+      module: "medical",
+      action: "create",
+      title: "Prescription Issued",
+      message: `Prescription (${drugName}) issued for patient ${dogId}.`,
+      targetRoles: ["super_admin", "veterinarian", "rescue_centre_admin", "shelter_manager"],
+    });
+    return response.data;
+  },
+
+  // PUT /medical/prescriptions/{prescription_id}
+  updatePrescription: async (prescriptionId: string, payload: PrescriptionUpdatePayload) => {
+    const response = await api.put(`/medical/prescriptions/${prescriptionId}`, payload);
+    return response.data;
+  },
+
+  // PATCH /medical/prescriptions/{prescription_id}/status
+  updatePrescriptionStatus: async (prescriptionId: string, isActive: boolean) => {
+    const response = await api.patch(`/medical/prescriptions/${prescriptionId}/status`, { is_active: isActive });
+    return response.data;
+  },
+
+  // POST /medical/administrations
+  logMedicationAdministration: async (payload: MedicationAdministrationPayload) => {
+    const response = await api.post("/medical/administrations", payload);
+    await publishActionEvent({
+      module: "medical",
+      action: "update",
+      title: "Medication Administered",
+      message: `Medication (${payload.medication_name}) logged for dog ${payload.dog_id}.`,
+      targetRoles: ["super_admin", "veterinarian", "shelter_manager"],
+    });
+    return response.data;
+  },
+
+  // GET /medical/prescriptions/{prescription_id}/administrations
+  getPrescriptionAdministrations: async (prescriptionId: string) => {
+    const response = await api.get(`/medical/prescriptions/${prescriptionId}/administrations`);
+    return response.data;
+  },
+
+  // GET /medical/dogs/{dog_id}/administrations
+  getDogAdministrations: async (dogId: string) => {
+    const response = await api.get(`/medical/dogs/${dogId}/administrations`);
+    return response.data;
+  },
+
+  // POST /medical/clearance/{dog_id}
+  issueCertificate: async (data: Record<string, unknown> | MedicalClearancePayload) => {
+    const raw = data as Record<string, unknown>;
+    const dogId = pick(raw, "dog_id", "dogId", "petName");
     if (!dogId) throw new Error("Dog selection is required to issue a clearance certificate.");
 
-    const rawStatus = String(pick(data, "status", "certStatus") || "approved").toLowerCase();
+    const rawStatus = String(pick(raw, "status", "certStatus") || "approved").toLowerCase();
     const status = (rawStatus === "denied" || rawStatus === "pending") ? rawStatus : "approved";
-    const clearanceType = String(pick(data, "clearance_type", "clearanceType", "certType") || "adoption_surgery");
-    const notes = pick(data, "decision_notes", "notes") || "Healthy, cleared for adoption.";
+    const clearanceType = String(pick(raw, "clearance_type", "clearanceType", "certType") || "adoption_surgery");
+    const notes = pick(raw, "decision_notes", "notes") || "Healthy, cleared for adoption.";
 
-    const payload: Record<string, unknown> = {
+    const payload: MedicalClearancePayload = {
       clearance_type: clearanceType,
-      status: status,
+      status,
       decision_notes: String(notes),
     };
-    if (data.expires_at) {
-      payload.expires_at = String(data.expires_at);
+    if (raw.expires_at) {
+      payload.expires_at = String(raw.expires_at);
     }
 
     const response = await api.post(`/medical/clearance/${dogId}`, payload);
@@ -263,8 +480,16 @@ export const medicalService = {
     return response.data;
   },
 
+  // DELETE /medical/{entity_type}/{entity_id}
   deleteMedicalRecord: async (id: string, entityType: string = "exams") => {
     const response = await api.delete(`/medical/${entityType}/${id}`);
+    await publishActionEvent({
+      module: "medical",
+      action: "delete",
+      title: "Medical Record Removed",
+      message: `Medical entity (${entityType} #${id}) removed from system.`,
+      targetRoles: ["super_admin", "veterinarian", "shelter_manager"],
+    });
     return response.data;
   },
 };

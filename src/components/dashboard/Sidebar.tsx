@@ -20,6 +20,7 @@ import {
   FaSearchLocation,
   FaTruck,
   FaBell,
+  FaGlobe,
 } from "react-icons/fa";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef } from "react";
@@ -87,6 +88,8 @@ const renderIcon = (iconType: RoleMenuItem["iconType"]) => {
       return <FaTruck />;
     case "notifications":
       return <FaBell />;
+    case "cms":
+      return <FaGlobe />;
     default:
       return <FaTachometerAlt />;
   }

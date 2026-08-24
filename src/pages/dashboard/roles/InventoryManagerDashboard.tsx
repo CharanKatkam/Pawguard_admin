@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
-import DataTable from "../../../components/common/DataTable";
+import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import {
   FaBoxes,
@@ -207,7 +207,7 @@ const InventoryManagerDashboard = () => {
     },
   ];
 
-  const columns = [
+  const columns: Column<any>[] = [
     {
       key: "sku",
       title: "Batch / Item Code",

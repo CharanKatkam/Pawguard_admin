@@ -174,8 +174,8 @@ const VaccinationReminders = () => {
       setRemLoading(true);
       setRemError(null);
       const [vacc, rx, admin, rem] = await Promise.all([
-        reminderService.getVaccinations({ dog_id: dogId, page: 1, page_size: 100 }),
-        reminderService.getPrescriptions({ dog_id: dogId, page: 1, page_size: 100 }),
+        reminderService.getVaccinations({ dog_id: dogId, page: 1, page_size: 20 }),
+        reminderService.getPrescriptions({ dog_id: dogId, page: 1, page_size: 20 }),
         reminderService.getDogAdministrations(dogId),
         reminderService.getPetReminders(dogId),
       ]);

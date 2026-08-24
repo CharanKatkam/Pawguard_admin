@@ -2,42 +2,48 @@ import api from "../api/axios";
 import { publishActionEvent } from "../utils/eventSystem";
 
 export type DonationType = "one_time" | "recurring" | "sponsorship";
-export type DonationStatus = "pending" | "completed" | "failed" | "refunded" | "cancelled";
+export type DonationStatus = "pending" | "success" | "failed" | "refunded";
 
-export interface DonationCreate {
+export interface DonationCreatePayload {
   amount: number;
   currency?: string;
   donation_type?: DonationType;
-  notes?: string;
-  dog_id?: string;
-  campaign_id?: string;
-  donor_name?: string;
-  donor_email?: string;
-  donor_phone?: string;
-  payment_method?: string;
-  transaction_id?: string;
-  purpose?: string;
+  notes?: string | null;
+  dog_id?: string | null;
+  campaign_id?: string | null;
+  donor_name?: string | null;
+  donor_email?: string | null;
+  donor_phone?: string | null;
+  payment_method?: string | null;
+  transaction_id?: string | null;
+  purpose?: string | null;
 }
 
-export interface DonationStatusUpdate {
+export interface DonationStatusUpdatePayload {
   status: DonationStatus;
 }
 
-export interface DonationReconcileRequest {
-  reconciliation_notes?: string;
-  notes?: string;
-}
-
-export interface SponsorshipCreate {
+export interface SponsorshipCreatePayload {
   dog_id: string;
   amount: number;
   currency?: string;
-  sponsor_name?: string;
-  sponsor_email?: string;
-  sponsor_phone?: string;
-  payment_method?: string;
+  sponsor_name?: string | null;
+  sponsor_email?: string | null;
+  sponsor_phone?: string | null;
+  payment_method?: string | null;
   duration_months?: number;
-  notes?: string;
+  notes?: string | null;
+}
+
+export interface DonationCampaignCreatePayload {
+  name: string;
+  description?: string | null;
+  target_amount: number;
+  currency?: string;
+  campaign_type?: string;
+  status?: "draft" | "active" | "completed" | "cancelled";
+  start_date: string;
+  end_date?: string | null;
 }
 
 export interface DonationFilters {
@@ -52,24 +58,12 @@ export interface DonationFilters {
   sort_order?: string;
 }
 
-/** Robust array extractor across varied API response wrapper formats */
-export const extractArray = (body: any): any[] => {
-  if (Array.isArray(body)) return body;
-  if (Array.isArray(body?.data)) return body.data;
-  if (Array.isArray(body?.items)) return body.items;
-  if (Array.isArray(body?.donations)) return body.donations;
-  if (Array.isArray(body?.sponsorships)) return body.sponsorships;
-  if (Array.isArray(body?.donors)) return body.donors;
-  if (Array.isArray(body?.results)) return body.results;
-  return [];
-};
-
 /** Robust status helper for valid completed revenue contributions */
 export const isCompletedDonationStatus = (statusRaw: unknown): boolean => {
   const s = String(statusRaw ?? "").toLowerCase().trim();
-  if (!s) return true; // Default donations are valid
+  if (!s) return true;
   if (["failed", "refunded", "cancelled", "declined"].includes(s)) return false;
-  return true; // Matches "completed", "success", "posted", "paid", "approved", "successful", "active"
+  return true;
 };
 
 /** Robust status helper for refunded entries */
@@ -86,33 +80,49 @@ export const isValidSponsorshipStatus = (statusRaw: unknown): boolean => {
   return true;
 };
 
+/** Robust array extractor across varied API response wrapper formats */
+export const extractArray = (body: any): any[] => {
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.data)) return body.data;
+  if (Array.isArray(body?.items)) return body.items;
+  if (Array.isArray(body?.donations)) return body.donations;
+  if (Array.isArray(body?.sponsorships)) return body.sponsorships;
+  if (Array.isArray(body?.campaigns)) return body.campaigns;
+  if (Array.isArray(body?.donors)) return body.donors;
+  if (Array.isArray(body?.results)) return body.results;
+  return [];
+};
+
 /** Normalize raw DonationResponse row to standard page format. */
 export const normalizeDonationRow = (d: any): any => ({
   id: d.id || d._id || d.donation_id,
   donorId: d.donor_id || d.user_id,
   donorName: d.donor_name || d.user?.full_name || d.user_name || d.name || "Anonymous Donor",
-  donorEmail: d.donor_email || d.user?.email || d.email,
-  donorPhone: d.donor_phone || d.phone,
+  donorEmail: d.donor_email || d.user?.email || d.email || "—",
+  donorPhone: d.donor_phone || d.phone || "—",
   dogId: d.dog_id,
   campaignId: d.campaign_id,
   amount: Number(d.amount || d.total_amount || d.price || d.donation_amount || 0),
   currency: d.currency || "INR",
   type: d.donation_type || d.type || "one_time",
-  status: d.status || "completed",
+  status: (String(d.status || "").toLowerCase() === "completed" ? "success" : String(d.status || "success").toLowerCase()) as DonationStatus,
   transactionId: d.transaction_id || d.payment_id || d.tx_id,
   notes: d.notes || d.purpose || d.description,
-  paymentProvider: d.payment_provider || d.payment_method,
+  paymentProvider: d.payment_provider || d.payment_method || "Online Gateway",
+  receiptFileKey: d.receipt_file_key,
   date: d.created_at || d.transaction_date || d.date || d.updated_at,
+  dog: d.dog,
+  raw: d,
 });
 
 export const donationsService = {
-  // GET /api/v1/admin/dashboard/donation-summary
+  // GET /admin/dashboard/donation-summary
   getDonationSummary: async () => {
     const response = await api.get("/admin/dashboard/donation-summary");
     return response.data?.data ?? response.data;
   },
 
-  // GET /api/v1/donations
+  // GET /donations - List donations (paginated)
   getDonations: async (params?: DonationFilters) => {
     const response = await api.get("/donations", { params });
     const body = response.data;
@@ -121,7 +131,7 @@ export const donationsService = {
     return { ...body, data: rows, total: body?.meta?.total ?? body?.total ?? rows.length };
   },
 
-  // GET /api/v1/donations/history
+  // GET /donations/history - My donation history
   getDonationHistory: async () => {
     const response = await api.get("/donations/history");
     const body = response.data;
@@ -129,8 +139,15 @@ export const donationsService = {
     return raw.map(normalizeDonationRow);
   },
 
-  // POST /api/v1/donations (DonationCreate)
-  createDonation: async (payload: DonationCreate) => {
+  // GET /donations/{id}
+  getDonationById: async (id: string) => {
+    const response = await api.get(`/donations/${id}`);
+    const raw = response.data?.data ?? response.data;
+    return normalizeDonationRow(raw);
+  },
+
+  // POST /donations (DonationCreate)
+  createDonation: async (payload: DonationCreatePayload) => {
     const response = await api.post("/donations", {
       amount: Number(payload.amount),
       currency: payload.currency || "INR",
@@ -138,12 +155,6 @@ export const donationsService = {
       notes: payload.notes || null,
       dog_id: payload.dog_id || null,
       campaign_id: payload.campaign_id || null,
-      donor_name: payload.donor_name || null,
-      donor_email: payload.donor_email || null,
-      donor_phone: payload.donor_phone || null,
-      payment_method: payload.payment_method || null,
-      transaction_id: payload.transaction_id || null,
-      purpose: payload.purpose || null,
     });
     await publishActionEvent({
       module: "finance",
@@ -155,7 +166,7 @@ export const donationsService = {
     return response.data?.data ?? response.data;
   },
 
-  // PATCH /api/v1/donations/{donation_id}/status (DonationStatusUpdate)
+  // PATCH /donations/{donation_id}/status (DonationStatusUpdate)
   updateDonationStatus: async (donationId: string, status: DonationStatus) => {
     const response = await api.patch(`/donations/${donationId}/status`, { status });
     await publishActionEvent({
@@ -168,9 +179,9 @@ export const donationsService = {
     return response.data?.data ?? response.data;
   },
 
-  // POST /api/v1/donations/{donation_id}/reconcile (DonationReconcileRequest)
-  reconcileDonation: async (donationId: string, reconciliation_notes?: string) => {
-    const notesText = reconciliation_notes || "Reconciled by Finance User";
+  // POST /donations/{donation_id}/reconcile
+  reconcileDonation: async (donationId: string, notes?: string) => {
+    const notesText = notes || "Reconciled by Finance User";
     const response = await api.post(`/donations/${donationId}/reconcile`, {
       reconciliation_notes: notesText,
       notes: notesText,
@@ -179,25 +190,25 @@ export const donationsService = {
       module: "finance",
       action: "update",
       title: "Donation Reconciled",
-      message: `Donation ${donationId} marked as reconciled.`,
+      message: `Donation ${donationId} reconciled to general ledger.`,
       targetRoles: ["super_admin", "finance_user"],
     });
     return response.data?.data ?? response.data;
   },
 
-  // POST /api/v1/donations/bulk/status-update
-  bulkUpdateDonationStatus: async (donationIds: string[], status: DonationStatus) => {
-    const response = await api.post("/donations/bulk/status-update", { donation_ids: donationIds, status });
-    return response.data?.data ?? response.data;
-  },
-
-  // GET /api/v1/donations/{donation_id}/receipt
+  // GET /donations/{donation_id}/receipt
   getDonationReceipt: async (donationId: string) => {
     const response = await api.get(`/donations/${donationId}/receipt`);
     return response.data ?? response;
   },
 
-  // GET /api/v1/donations/donors
+  // POST /donations/{donation_id}/resend-receipt
+  resendReceipt: async (donationId: string) => {
+    const response = await api.post(`/donations/${donationId}/resend-receipt`);
+    return response.data;
+  },
+
+  // GET /donations/donors
   getDonors: async (params?: { search?: string; page?: number; page_size?: number }) => {
     const response = await api.get("/donations/donors", { params });
     const body = response.data;
@@ -205,7 +216,13 @@ export const donationsService = {
     return { ...body, data: raw, total: body?.meta?.total ?? body?.total ?? raw.length };
   },
 
-  // GET /api/v1/donations/sponsorships
+  // GET /donations/donors/{id}
+  getDonorById: async (donorId: string) => {
+    const response = await api.get(`/donations/donors/${donorId}`);
+    return response.data?.data ?? response.data;
+  },
+
+  // GET /donations/sponsorships
   getSponsorships: async (params?: { page?: number; page_size?: number }) => {
     const response = await api.get("/donations/sponsorships", { params });
     const body = response.data;
@@ -213,8 +230,8 @@ export const donationsService = {
     return { ...body, data: raw, total: body?.meta?.total ?? body?.total ?? raw.length };
   },
 
-  // POST /api/v1/donations/sponsorships
-  createSponsorship: async (payload: SponsorshipCreate) => {
+  // POST /donations/sponsorships
+  createSponsorship: async (payload: SponsorshipCreatePayload) => {
     const response = await api.post("/donations/sponsorships", {
       dog_id: payload.dog_id,
       amount: Number(payload.amount),
@@ -236,28 +253,47 @@ export const donationsService = {
     return response.data?.data ?? response.data;
   },
 
-  // PATCH /api/v1/donations/sponsorships/{sponsorship_id}/status
+  // PATCH /donations/sponsorships/{sponsorship_id}/status
   updateSponsorshipStatus: async (sponsorshipId: string, status: string) => {
     const response = await api.patch(`/donations/sponsorships/${sponsorshipId}/status`, { status });
-    await publishActionEvent({
-      module: "finance",
-      action: "update",
-      title: "Sponsorship Status Updated",
-      message: `Sponsorship ${sponsorshipId} status set to ${status}.`,
-      targetRoles: ["super_admin", "finance_user"],
-    });
     return response.data?.data ?? response.data;
   },
 
-  // GET /api/v1/donations/sponsorships/{sponsorship_id}
-  getSponsorshipById: async (sponsorshipId: string) => {
-    const response = await api.get(`/donations/sponsorships/${sponsorshipId}`);
+  // GET /donations/campaigns - List campaigns
+  getCampaigns: async (params?: { status?: string; search?: string; page?: number; page_size?: number }) => {
+    const response = await api.get("/donations/campaigns", { params });
+    const body = response.data;
+    const raw = extractArray(body);
+    return { ...body, data: raw, total: body?.meta?.total ?? body?.total ?? raw.length };
+  },
+
+  // POST /donations/campaigns - Create campaign
+  createCampaign: async (payload: DonationCampaignCreatePayload) => {
+    const response = await api.post("/donations/campaigns", payload);
     return response.data?.data ?? response.data;
   },
 
-  // POST /api/v1/finance/reconcile/donations
-  reconcileFinanceDonations: async (payload?: Record<string, unknown>) => {
-    const response = await api.post("/finance/reconcile/donations", payload || {});
+  // POST /donations/campaigns/{id}/publish
+  publishCampaign: async (campaignId: string) => {
+    const response = await api.post(`/donations/campaigns/${campaignId}/publish`);
+    return response.data?.data ?? response.data;
+  },
+
+  // POST /donations/campaigns/{id}/cancel
+  cancelCampaign: async (campaignId: string) => {
+    const response = await api.post(`/donations/campaigns/${campaignId}/cancel`);
+    return response.data?.data ?? response.data;
+  },
+
+  // POST /donations/bulk/status-update
+  bulkUpdateDonationStatus: async (donationIds: string[], status: DonationStatus) => {
+    const response = await api.post("/donations/bulk/status-update", { donation_ids: donationIds, status });
+    return response.data?.data ?? response.data;
+  },
+
+  // POST /donations/bulk/delete
+  bulkDeleteDonations: async (donationIds: string[]) => {
+    const response = await api.post("/donations/bulk/delete", { donation_ids: donationIds });
     return response.data?.data ?? response.data;
   },
 };

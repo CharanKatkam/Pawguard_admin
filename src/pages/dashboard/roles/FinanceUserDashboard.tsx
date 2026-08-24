@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
-import DataTable from "../../../components/common/DataTable";
+import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import {
   FaCoins,
@@ -169,7 +169,7 @@ const FinanceUserDashboard = () => {
     { title: "Registered Donors", value: loading ? "..." : String(donorCountVal), trend: "Active Contributors", color: "#0284C7", icon: <FaUsers />, onClick: () => navigate("/finance?tab=donations") },
   ];
 
-  const columns = [
+  const columns: Column<any>[] = [
     {
       key: "id",
       header: "Donation ID",

@@ -188,8 +188,8 @@ const ShelterManagerDashboard = () => {
       setError(null);
 
       const [facilitiesRes, dogsRes, rescueCasesRes] = await Promise.all([
-        shelterService.getShelters({ page: 1, page_size: 100 }),
-        petService.getPets({ page: 1, page_size: 100 }),
+        shelterService.getShelters({ page: 1, page_size: 20 }),
+        petService.getPets({ page: 1, page_size: 20 }),
         rescueService.getRescueCases({ page: 1, page_size: 20 }),
       ]);
 

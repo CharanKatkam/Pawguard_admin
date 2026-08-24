@@ -18,7 +18,8 @@ export interface ActionEventPayload {
     | "vehicle"
     | "lost_found"
     | "settings"
-    | "role";
+    | "role"
+    | "cms";
   action: "create" | "update" | "approve" | "reject" | "assign" | "delete";
   title: string;
   message: string;

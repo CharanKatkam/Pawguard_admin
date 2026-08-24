@@ -293,23 +293,13 @@ const VehicleManagement = () => {
         rescuesList = Array.isArray(rawR) ? rawR : Array.isArray(rawR?.data) ? rawR.data : [];
       }
 
-      // Default initial fallback fleet if backend returns empty list
-      const defaultFleet: Record<string, unknown>[] = [
-        { id: "veh-001", vehicle_number: "PGV-001", plate: "AP 21 EX 1001", model: "Force Traveler Rescue Van", type: "Rescue Van", capacity: 4, assigned_driver: "Shiv", fuel_level: "85%", location: "Kurnool Central Base", base_location: "Central Depot", status: "Available", last_service_date: "2026-07-10", next_service_date: "2026-10-10", insurance_expiry: "2026-12-31", registration_expiry: "2029-01-15" },
-        { id: "veh-002", vehicle_number: "PGV-002", plate: "AP 21 EX 1002", model: "Tata Winger Intensive Ambulance", type: "Ambulance", capacity: 2, assigned_driver: "Sana", fuel_level: "60%", location: "Kurnool North Station", base_location: "North Station", status: "On Rescue", last_service_date: "2026-06-20", next_service_date: "2026-09-20", insurance_expiry: "2026-09-01", registration_expiry: "2028-05-20" },
-        { id: "veh-003", vehicle_number: "PGV-003", plate: "AP 21 EX 1003", model: "Mahindra Bolero Emergency Rescue", type: "Ambulance", capacity: 3, assigned_driver: "Priya Verma", fuel_level: "90%", location: "Kurnool South Hub", base_location: "South Hub", status: "Available", last_service_date: "2026-08-01", next_service_date: "2026-11-01", insurance_expiry: "2027-03-15", registration_expiry: "2029-08-10" },
-        { id: "veh-004", vehicle_number: "PGV-004", plate: "AP 21 EX 1004", model: "Eicher Heavy Transport Unit", type: "Transport Truck", capacity: 8, assigned_driver: "Unassigned", fuel_level: "40%", location: "Shelter Maintenance Depot", base_location: "Shelter Depot", status: "Maintenance", last_service_date: "2026-05-15", next_service_date: "2026-08-25", insurance_expiry: "2026-09-10", registration_expiry: "2027-11-05" },
-        { id: "veh-005", vehicle_number: "PGV-005", plate: "AP 21 EX 1005", model: "Maruti Suzuki Eeco Pet Ambulance", type: "Ambulance", capacity: 2, assigned_driver: "Officer 33", fuel_level: "75%", location: "Regional Station", base_location: "Regional Depot", status: "Assigned", last_service_date: "2026-07-25", next_service_date: "2026-10-25", insurance_expiry: "2027-06-18", registration_expiry: "2028-12-01" },
-        { id: "veh-006", vehicle_number: "PGV-006", plate: "AP 21 EX 1006", model: "Force Trax Rapid Response", type: "Utility Vehicle", capacity: 3, assigned_driver: "Unassigned", fuel_level: "15%", location: "Central Workshop", base_location: "Central Base", status: "Out of Service", last_service_date: "2026-04-10", next_service_date: "2026-07-10", insurance_expiry: "2026-08-15", registration_expiry: "2027-02-28" },
-      ];
-
       let rawVehicles: Record<string, unknown>[] = [];
       if (vehiclesRes.status === "fulfilled") {
         const resVal = vehiclesRes.value;
-        const fetchedList = Array.isArray(resVal) ? resVal : Array.isArray(resVal?.data) ? resVal.data : [];
-        rawVehicles = fetchedList.length > 0 ? fetchedList : defaultFleet;
+        rawVehicles = Array.isArray(resVal) ? resVal : Array.isArray(resVal?.data) ? resVal.data : [];
       } else {
-        rawVehicles = defaultFleet;
+        const errObj = vehiclesRes.reason as { response?: { data?: { detail?: string } } };
+        setError(errObj?.response?.data?.detail || "Failed to load vehicle fleet.");
       }
 
       const formatted = rawVehicles.map((item) => formatVehicleRow(item, rescuesList));

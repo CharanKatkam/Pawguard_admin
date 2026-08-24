@@ -204,7 +204,7 @@ const Pets = () => {
 
   const fetchAllDogs = async () => {
     try {
-      const response = await petService.getPets({ page: 1, page_size: 100 });
+      const response = await petService.getPets({ page: 1, page_size: 20 });
       setAllDogs(unwrapList(response).map(formatDog));
     } catch {
       setAllDogs([]);

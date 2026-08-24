@@ -68,6 +68,7 @@ const getPageTitle = (pathname: string): string => {
   if (path.includes("/lost-and-found")) return "Lost & Found Registry";
   if (path.includes("/reports")) return "Reports & Analytics";
   if (path.includes("/roles-permissions")) return "Roles & Permissions";
+  if (path.includes("/cms")) return "Website Management (CMS)";
   if (path.includes("/audit-logs")) return "Audit Trail Logs";
   if (path.includes("/certificates")) return "Vaccines & Certificates";
   if (path.includes("/notifications")) return "System Notifications";

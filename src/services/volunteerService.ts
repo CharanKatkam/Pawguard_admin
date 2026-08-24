@@ -196,9 +196,21 @@ export const volunteerService = {
     return response.data;
   },
 
+  // GET /dashboards/volunteer - Volunteer Dashboard summary
+  getVolunteerDashboard: async () => {
+    const response = await api.get("/dashboards/volunteer");
+    return response.data;
+  },
+
   // GET /admin/dashboard/volunteer-stats - Admin stats
   getVolunteerStats: async () => {
     const response = await api.get("/admin/dashboard/volunteer-stats");
+    return response.data;
+  },
+
+  // POST /volunteers/bulk/delete - Bulk delete profiles
+  bulkDeleteProfiles: async (profileIds: string[]) => {
+    const response = await api.post("/volunteers/bulk/delete", { profile_ids: profileIds });
     return response.data;
   },
 

@@ -1,12 +1,32 @@
-import { useState, useEffect, useCallback } from "react";
-import DataTable from "../../components/common/DataTable";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import DataTable, { type Column } from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaStethoscope, FaSyringe, FaNotesMedical, FaFileMedical, FaTrash, FaUserMd, FaEye, FaHeartbeat, FaClipboardList, FaCheckCircle } from "react-icons/fa";
-import medicalService from "../../services/medicalService";
+import {
+  FaStethoscope,
+  FaSyringe,
+  FaNotesMedical,
+  FaFileMedical,
+  FaTrash,
+  FaUserMd,
+  FaEye,
+  FaHeartbeat,
+  FaClipboardList,
+  FaCheckCircle,
+  FaPills,
+  FaSearch,
+} from "react-icons/fa";
+import medicalService, {
+  type ClinicalExamPayload,
+  type MedicalTreatmentPayload,
+  type VaccinationRecordPayload,
+  type PrescriptionPayload,
+  type MedicationAdministrationPayload,
+  type MedicalClearancePayload,
+} from "../../services/medicalService";
 import dogService from "../../services/dogService";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
@@ -17,6 +37,7 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "8px",
   border: "1px solid #CBD5E1",
   boxSizing: "border-box",
+  fontSize: "14px",
 };
 
 const MedicalRecords = () => {
@@ -26,10 +47,28 @@ const MedicalRecords = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const { addToast } = useToast();
 
+  // Search & Pagination & Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  // Debounce search input (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   // Modals state
   const [isExamModalOpen, setIsExamModalOpen] = useState(false);
   const [isVaccineModalOpen, setIsVaccineModalOpen] = useState(false);
   const [isSurgeryModalOpen, setIsSurgeryModalOpen] = useState(false);
+  const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
+  const [isAdministrationModalOpen, setIsAdministrationModalOpen] = useState(false);
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -37,13 +76,59 @@ const MedicalRecords = () => {
   const [selectedDogProfile, setSelectedDogProfile] = useState<Record<string, unknown> | null>(null);
   const [dogHistory, setDogHistory] = useState<Record<string, unknown>[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState("all");
 
   // Form states
-  const [examForm, setExamForm] = useState({ dogId: "", diagnosis: "", treatment: "" });
-  const [vaccineForm, setVaccineForm] = useState({ dogId: "", vaccineName: "", nextDueAt: "" });
-  const [surgeryForm, setSurgeryForm] = useState({ dogId: "", procedure: "", description: "" });
-  const [certForm, setCertForm] = useState({ dogId: "", clearanceType: "health_clearance", notes: "" });
+  const [examForm, setExamForm] = useState<ClinicalExamPayload>({
+    dog_id: "",
+    body_condition_score: 5,
+    dental_health: "",
+    ocular_aural_notes: "",
+    coat_condition: "",
+    visible_injuries: "",
+    triage_diagnosis: "",
+  });
+
+  const [vaccineForm, setVaccineForm] = useState<VaccinationRecordPayload>({
+    dog_id: "",
+    vaccine_name: "",
+    next_due_at: "",
+    lot_number: "",
+  });
+
+  const [surgeryForm, setSurgeryForm] = useState<MedicalTreatmentPayload>({
+    dog_id: "",
+    treatment_type: "",
+    description: "",
+    anesthesia_log: "",
+    post_op_notes: "",
+  });
+
+  const [prescriptionForm, setPrescriptionForm] = useState<PrescriptionPayload>({
+    dog_id: "",
+    drug_name: "",
+    dosage: "",
+    route: "Oral",
+    start_at: new Date().toISOString().split("T")[0],
+    end_at: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+  });
+
+  const [adminForm, setAdminForm] = useState<MedicationAdministrationPayload>({
+    dog_id: "",
+    medication_name: "",
+    dosage: "",
+    route: "Oral",
+    administered_at: new Date().toISOString(),
+    administered_by_id: "",
+    notes: "",
+  });
+
+  const [certForm, setCertForm] = useState<MedicalClearancePayload>({
+    clearance_type: "adoption_surgery",
+    status: "approved",
+    decision_notes: "Healthy, cleared for adoption.",
+    expires_at: "",
+  });
+  const [certDogId, setCertDogId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchCertificates = useCallback(async (dogList: Record<string, unknown>[] = dogs) => {
@@ -110,9 +195,36 @@ const MedicalRecords = () => {
   const dogLabel = (d: Record<string, unknown> | undefined) =>
     d?.name ? `${String(d.name)}${d.breed ? ` (${String(d.breed)})` : ""}` : d?.id ? String(d.id) : "";
 
+  // Filtered & Paginated records
+  const filteredRecords = useMemo(() => {
+    return medicalRecords.filter((r) => {
+      const matchesCategory = categoryFilter === "all" || r.type === categoryFilter;
+      if (!matchesCategory) return false;
+
+      if (!debouncedSearch) return true;
+      const q = debouncedSearch.toLowerCase();
+      const searchable = [
+        String(r.recordId || ""),
+        String(r.petName || ""),
+        String(r.petId || ""),
+        String(r.vetName || ""),
+        String(r.diagnosis || ""),
+        String(r.treatment || ""),
+        String(r.vaccineName || ""),
+        String(r.drugName || ""),
+      ].join(" ").toLowerCase();
+      return searchable.includes(q);
+    });
+  }, [medicalRecords, categoryFilter, debouncedSearch]);
+
+  const paginatedRecords = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredRecords.slice(start, start + pageSize);
+  }, [filteredRecords, page]);
+
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!examForm.dogId || !examForm.diagnosis) {
+    if (!examForm.dog_id || !examForm.triage_diagnosis) {
       addToast("Dog and diagnosis are required", "error");
       return;
     }
@@ -121,7 +233,15 @@ const MedicalRecords = () => {
       await medicalService.createMedicalExam(examForm);
       addToast("Clinical examination recorded!", "success");
       setIsExamModalOpen(false);
-      setExamForm({ dogId: "", diagnosis: "", treatment: "" });
+      setExamForm({
+        dog_id: "",
+        body_condition_score: 5,
+        dental_health: "",
+        ocular_aural_notes: "",
+        coat_condition: "",
+        visible_injuries: "",
+        triage_diagnosis: "",
+      });
       fetchRecords();
       notifyDataChanged();
     } catch (err: unknown) {
@@ -135,16 +255,16 @@ const MedicalRecords = () => {
 
   const handleLogVaccine = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!vaccineForm.dogId || !vaccineForm.vaccineName) {
+    if (!vaccineForm.dog_id || !vaccineForm.vaccine_name) {
       addToast("Dog and vaccine name are required", "error");
       return;
     }
     try {
       setIsSubmitting(true);
       await medicalService.createVaccination(vaccineForm);
-      addToast(`Vaccination logged for ${dogLabel(dogs.find((d) => d.id === vaccineForm.dogId))}!`, "success");
+      addToast("Vaccination logged successfully!", "success");
       setIsVaccineModalOpen(false);
-      setVaccineForm({ dogId: "", vaccineName: "", nextDueAt: "" });
+      setVaccineForm({ dog_id: "", vaccine_name: "", next_due_at: "", lot_number: "" });
       fetchRecords();
       notifyDataChanged();
     } catch (err: unknown) {
@@ -158,21 +278,82 @@ const MedicalRecords = () => {
 
   const handleScheduleSurgery = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!surgeryForm.dogId || !surgeryForm.procedure) {
-      addToast("Dog and procedure are required", "error");
+    if (!surgeryForm.dog_id || !surgeryForm.treatment_type) {
+      addToast("Dog and procedure type are required", "error");
       return;
     }
     try {
       setIsSubmitting(true);
-      await medicalService.scheduleSurgery(surgeryForm);
-      addToast(`Treatment "${surgeryForm.procedure}" scheduled!`, "success");
+      await medicalService.createMedicalTreatment(surgeryForm);
+      addToast(`Treatment "${surgeryForm.treatment_type}" recorded!`, "success");
       setIsSurgeryModalOpen(false);
-      setSurgeryForm({ dogId: "", procedure: "", description: "" });
+      setSurgeryForm({ dog_id: "", treatment_type: "", description: "", anesthesia_log: "", post_op_notes: "" });
       fetchRecords();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      const msg = e?.response?.data?.detail || e?.message || "Failed to schedule treatment.";
+      const msg = e?.response?.data?.detail || e?.message || "Failed to record treatment.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCreatePrescription = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prescriptionForm.dog_id || !prescriptionForm.drug_name) {
+      addToast("Dog and drug name are required", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await medicalService.createPrescription(prescriptionForm);
+      addToast(`Prescription for ${prescriptionForm.drug_name} issued!`, "success");
+      setIsPrescriptionModalOpen(false);
+      setPrescriptionForm({
+        dog_id: "",
+        drug_name: "",
+        dosage: "",
+        route: "Oral",
+        start_at: new Date().toISOString().split("T")[0],
+        end_at: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+      });
+      fetchRecords();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to issue prescription.";
+      addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLogAdministration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminForm.dog_id || !adminForm.medication_name) {
+      addToast("Dog and medication name are required", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await medicalService.logMedicationAdministration(adminForm);
+      addToast(`Medication administration logged!`, "success");
+      setIsAdministrationModalOpen(false);
+      setAdminForm({
+        dog_id: "",
+        medication_name: "",
+        dosage: "",
+        route: "Oral",
+        administered_at: new Date().toISOString(),
+        administered_by_id: "",
+        notes: "",
+      });
+      fetchRecords();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const msg = e?.response?.data?.detail || e?.message || "Failed to log administration.";
       addToast(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -181,16 +362,17 @@ const MedicalRecords = () => {
 
   const handleIssueCert = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!certForm.dogId) {
+    if (!certDogId) {
       addToast("Dog selection is required", "error");
       return;
     }
     try {
       setIsSubmitting(true);
-      await medicalService.issueCertificate(certForm);
+      await medicalService.issueCertificate({ ...certForm, dog_id: certDogId });
       addToast("Clearance certificate issued!", "success");
       setIsCertModalOpen(false);
-      setCertForm({ dogId: "", clearanceType: "health_clearance", notes: "" });
+      setCertForm({ clearance_type: "adoption_surgery", status: "approved", decision_notes: "Healthy, cleared for adoption.", expires_at: "" });
+      setCertDogId("");
       fetchRecords();
       fetchCertificates();
       notifyDataChanged();
@@ -273,13 +455,13 @@ const MedicalRecords = () => {
     { title: "Certificates Issued", value: `${certificatesIssued} Issued`, trend: "Approved", color: "#6366F1", icon: <FaFileMedical /> },
   ];
 
-  const columns = [
-    { key: "recordId", title: "Record ID" },
-    { key: "petName", title: "Pet Name & ID" },
-    { key: "vetName", title: "Attending Vet" },
-    { key: "diagnosis", title: "Diagnosis" },
-    { key: "treatment", title: "Treatment Plan" },
-    { key: "status", title: "Health Status" },
+  const columns: Column<Record<string, unknown>>[] = [
+    { key: "recordId", title: "Record ID", render: (_v, row) => <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{String(row.recordId || row.id || "-").slice(0, 8)}</span> },
+    { key: "petName", title: "Pet Name & ID", render: (_v, row) => <div><strong>{String(row.petName || "-")}</strong><div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(row.petId || "-")}</div></div> },
+    { key: "vetName", title: "Attending Vet", render: (_v, row) => <span>{String(row.vetName || "-")}</span> },
+    { key: "diagnosis", title: "Diagnosis / Type", render: (_v, row) => <span>{String(row.diagnosis && row.diagnosis !== "-" ? row.diagnosis : row.categoryName || row.type || "-")}</span> },
+    { key: "treatment", title: "Treatment / Notes", render: (_v, row) => <span style={{ maxWidth: "240px", display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.treatment || "-")}</span> },
+    { key: "date", title: "Date Recorded", render: (_v, row) => <span>{row.date ? formatDateTime(row.date as string) : "-"}</span> },
   ];
 
   return (
@@ -287,22 +469,28 @@ const MedicalRecords = () => {
       <div style={{ marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#fff" }}>
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>Medical Records &amp; Clinical Care</h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Centralized veterinary management system: patient histories, surgical logs, treatment schedules, and medical clearance certificates.
+          Centralized veterinary management system: patient histories, clinical exams, surgical logs, prescriptions, medication administration, and medical clearance certificates.
         </p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "24px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <Can permission="create_medical">
-          <QuickActionCard icon={<FaStethoscope />} title="Record Examination" subtitle="Log new clinical diagnosis" color="#2563EB" onClick={() => setIsExamModalOpen(true)} />
+          <QuickActionCard icon={<FaStethoscope />} title="Record Examination" subtitle="Log clinical diagnosis" color="#2563EB" onClick={() => setIsExamModalOpen(true)} />
         </Can>
         <Can permission="create_medical">
-          <QuickActionCard icon={<FaSyringe />} title="Log Vaccination" subtitle="Administer vaccine booster" color="#10B981" onClick={() => setIsVaccineModalOpen(true)} />
+          <QuickActionCard icon={<FaSyringe />} title="Log Vaccination" subtitle="Administer booster" color="#10B981" onClick={() => setIsVaccineModalOpen(true)} />
         </Can>
         <Can permission="create_medical">
-          <QuickActionCard icon={<FaUserMd />} title="Schedule Treatment" subtitle="Book surgical operation" color="#F59E0B" onClick={() => setIsSurgeryModalOpen(true)} />
+          <QuickActionCard icon={<FaUserMd />} title="Record Surgery" subtitle="Surgical & anesthesia log" color="#F59E0B" onClick={() => setIsSurgeryModalOpen(true)} />
         </Can>
         <Can permission="create_medical">
-          <QuickActionCard icon={<FaFileMedical />} title="Issue Certificate" subtitle="Generate health clearance" color="#6366F1" onClick={() => setIsCertModalOpen(true)} />
+          <QuickActionCard icon={<FaPills />} title="Prescribe Drug" subtitle="Issue medication Rx" color="#8B5CF6" onClick={() => setIsPrescriptionModalOpen(true)} />
+        </Can>
+        <Can permission="create_medical">
+          <QuickActionCard icon={<FaClipboardList />} title="Log Administration" subtitle="Record dose given" color="#0D9488" onClick={() => setIsAdministrationModalOpen(true)} />
+        </Can>
+        <Can permission="create_medical">
+          <QuickActionCard icon={<FaFileMedical />} title="Issue Clearance" subtitle="Adoption certificate" color="#6366F1" onClick={() => setIsCertModalOpen(true)} />
         </Can>
       </div>
 
@@ -315,13 +503,26 @@ const MedicalRecords = () => {
       <div className="soft-card" style={{ padding: "20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
           <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            Patient Clinical Directory
+            Patient Clinical Directory ({filteredRecords.length})
           </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div style={{ position: "relative", minWidth: "240px" }}>
+              <FaSearch style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
+              <input
+                type="text"
+                placeholder="Search patient, diagnosis, vet..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ ...inputStyle, paddingLeft: "36px" }}
+              />
+            </div>
             <select
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              onChange={(e) => {
+                setCategoryFilter(e.target.value);
+                setPage(1);
+              }}
+              style={{ ...inputStyle, width: "auto" }}
             >
               <option value="all">All Medical Categories</option>
               <option value="exams">Clinical Exams</option>
@@ -329,12 +530,13 @@ const MedicalRecords = () => {
               <option value="treatments">Treatments &amp; Surgeries</option>
               <option value="prescriptions">Prescriptions</option>
             </select>
-            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading records...</span>}
+            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
           </div>
         </div>
+
         <DataTable
           columns={columns}
-          data={categoryFilter === "all" ? medicalRecords : medicalRecords.filter((r) => r.type === categoryFilter)}
+          data={paginatedRecords}
           module="medical"
           onDelete={(row) => {
             setSelectedRecord(row);
@@ -363,14 +565,37 @@ const MedicalRecords = () => {
             </div>
           )}
         />
+
+        {/* Server-side style Pagination Controls */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #E2E8F0" }}>
+          <span style={{ fontSize: "13px", color: "#64748B" }}>
+            Showing {filteredRecords.length > 0 ? (page - 1) * pageSize + 1 : 0} to {Math.min(page * pageSize, filteredRecords.length)} of {filteredRecords.length} records
+          </span>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page <= 1 ? "#F1F5F9" : "#FFF", cursor: page <= 1 ? "not-allowed" : "pointer" }}
+            >
+              Previous
+            </button>
+            <button
+              disabled={page * pageSize >= filteredRecords.length}
+              onClick={() => setPage((p) => p + 1)}
+              style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page * pageSize >= filteredRecords.length ? "#F1F5F9" : "#FFF", cursor: page * pageSize >= filteredRecords.length ? "not-allowed" : "pointer" }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Record Examination Modal */}
       <Modal isOpen={isExamModalOpen} onClose={() => setIsExamModalOpen(false)} title="Log Clinical Examination">
         <form onSubmit={handleCreateExam} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog *</label>
-            <select required value={examForm.dogId} onChange={(e) => setExamForm({ ...examForm, dogId: e.target.value })} style={inputStyle}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Patient Dog *</label>
+            <select required value={examForm.dog_id} onChange={(e) => setExamForm({ ...examForm, dog_id: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
                 <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
@@ -378,12 +603,26 @@ const MedicalRecords = () => {
             </select>
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Diagnosis *</label>
-            <input type="text" required placeholder="e.g. Malnutrition & Dehydration" value={examForm.diagnosis} onChange={(e) => setExamForm({ ...examForm, diagnosis: e.target.value })} style={inputStyle} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Triage Diagnosis *</label>
+            <input type="text" required placeholder="e.g. Malnutrition & Dehydration" value={examForm.triage_diagnosis} onChange={(e) => setExamForm({ ...examForm, triage_diagnosis: e.target.value })} style={inputStyle} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Body Condition Score (1-9)</label>
+              <input type="number" min="1" max="9" value={examForm.body_condition_score} onChange={(e) => setExamForm({ ...examForm, body_condition_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dental Health</label>
+              <input type="text" placeholder="e.g. Mild tartar buildup" value={examForm.dental_health} onChange={(e) => setExamForm({ ...examForm, dental_health: e.target.value })} style={inputStyle} />
+            </div>
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Visible Injuries / Treatment Plan</label>
-            <input type="text" placeholder="e.g. IV Fluids & Antibiotics" value={examForm.treatment} onChange={(e) => setExamForm({ ...examForm, treatment: e.target.value })} style={inputStyle} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Coat & Skin Condition</label>
+            <input type="text" placeholder="e.g. Slightly matted, healthy skin" value={examForm.coat_condition} onChange={(e) => setExamForm({ ...examForm, coat_condition: e.target.value })} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Visible Injuries / Exam Findings</label>
+            <textarea placeholder="e.g. Laceration on left hind leg..." value={examForm.visible_injuries} onChange={(e) => setExamForm({ ...examForm, visible_injuries: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsExamModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
@@ -396,8 +635,8 @@ const MedicalRecords = () => {
       <Modal isOpen={isVaccineModalOpen} onClose={() => setIsVaccineModalOpen(false)} title="Log Vaccination Booster">
         <form onSubmit={handleLogVaccine} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog *</label>
-            <select required value={vaccineForm.dogId} onChange={(e) => setVaccineForm({ ...vaccineForm, dogId: e.target.value })} style={inputStyle}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Patient Dog *</label>
+            <select required value={vaccineForm.dog_id} onChange={(e) => setVaccineForm({ ...vaccineForm, dog_id: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
                 <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
@@ -406,11 +645,17 @@ const MedicalRecords = () => {
           </div>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Vaccine Name *</label>
-            <input type="text" required placeholder="e.g. Rabies Core Booster" value={vaccineForm.vaccineName} onChange={(e) => setVaccineForm({ ...vaccineForm, vaccineName: e.target.value })} style={inputStyle} />
+            <input type="text" required placeholder="e.g. Rabies Core Booster / DHPP" value={vaccineForm.vaccine_name} onChange={(e) => setVaccineForm({ ...vaccineForm, vaccine_name: e.target.value })} style={inputStyle} />
           </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Next Due Date</label>
-            <input type="date" value={vaccineForm.nextDueAt} onChange={(e) => setVaccineForm({ ...vaccineForm, nextDueAt: e.target.value })} style={inputStyle} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Lot Number</label>
+              <input type="text" placeholder="e.g. LOT-48213" value={vaccineForm.lot_number} onChange={(e) => setVaccineForm({ ...vaccineForm, lot_number: e.target.value })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Next Due Date</label>
+              <input type="date" value={vaccineForm.next_due_at} onChange={(e) => setVaccineForm({ ...vaccineForm, next_due_at: e.target.value })} style={inputStyle} />
+            </div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsVaccineModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
@@ -419,12 +664,12 @@ const MedicalRecords = () => {
         </form>
       </Modal>
 
-      {/* Schedule Treatment Modal */}
-      <Modal isOpen={isSurgeryModalOpen} onClose={() => setIsSurgeryModalOpen(false)} title="Schedule Surgical Treatment">
+      {/* Record Treatment / Surgery Modal */}
+      <Modal isOpen={isSurgeryModalOpen} onClose={() => setIsSurgeryModalOpen(false)} title="Record Treatment & Surgery">
         <form onSubmit={handleScheduleSurgery} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog *</label>
-            <select required value={surgeryForm.dogId} onChange={(e) => setSurgeryForm({ ...surgeryForm, dogId: e.target.value })} style={inputStyle}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Patient Dog *</label>
+            <select required value={surgeryForm.dog_id} onChange={(e) => setSurgeryForm({ ...surgeryForm, dog_id: e.target.value })} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
                 <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
@@ -432,16 +677,116 @@ const MedicalRecords = () => {
             </select>
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Procedure *</label>
-            <input type="text" required placeholder="e.g. Spay & Neutering" value={surgeryForm.procedure} onChange={(e) => setSurgeryForm({ ...surgeryForm, procedure: e.target.value })} style={inputStyle} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Treatment / Procedure Type *</label>
+            <input type="text" required placeholder="e.g. Spay / Neuter / Wound Debridement" value={surgeryForm.treatment_type} onChange={(e) => setSurgeryForm({ ...surgeryForm, treatment_type: e.target.value })} style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Description</label>
-            <input type="text" placeholder="e.g. Ovariohysterectomy, general anesthesia" value={surgeryForm.description} onChange={(e) => setSurgeryForm({ ...surgeryForm, description: e.target.value })} style={inputStyle} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Description *</label>
+            <textarea required placeholder="e.g. Ovariohysterectomy, sterile surgical technique..." value={surgeryForm.description} onChange={(e) => setSurgeryForm({ ...surgeryForm, description: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Anesthesia Log</label>
+            <input type="text" placeholder="e.g. Isoflurane, 45 minutes, stable vitals" value={surgeryForm.anesthesia_log} onChange={(e) => setSurgeryForm({ ...surgeryForm, anesthesia_log: e.target.value })} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Post-Op Notes</label>
+            <input type="text" placeholder="e.g. Monitor incision site, soft diet for 48h" value={surgeryForm.post_op_notes} onChange={(e) => setSurgeryForm({ ...surgeryForm, post_op_notes: e.target.value })} style={inputStyle} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsSurgeryModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#F59E0B", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Booking..." : "Schedule Treatment"}</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#F59E0B", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Saving..." : "Record Treatment"}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Prescribe Medication Modal */}
+      <Modal isOpen={isPrescriptionModalOpen} onClose={() => setIsPrescriptionModalOpen(false)} title="Prescribe Medication">
+        <form onSubmit={handleCreatePrescription} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Patient Dog *</label>
+            <select required value={prescriptionForm.dog_id} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, dog_id: e.target.value })} style={inputStyle}>
+              <option value="">Select dog...</option>
+              {dogs.map((d) => (
+                <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Drug Name *</label>
+            <input type="text" required placeholder="e.g. Amoxicillin / Meloxicam" value={prescriptionForm.drug_name} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, drug_name: e.target.value })} style={inputStyle} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dosage *</label>
+              <input type="text" required placeholder="e.g. 250mg twice daily" value={prescriptionForm.dosage} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, dosage: e.target.value })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Route</label>
+              <select value={prescriptionForm.route} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, route: e.target.value })} style={inputStyle}>
+                <option value="Oral">Oral</option>
+                <option value="Subcutaneous">Subcutaneous (SC)</option>
+                <option value="Intramuscular">Intramuscular (IM)</option>
+                <option value="Intravenous">Intravenous (IV)</option>
+                <option value="Topical">Topical</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Start Date</label>
+              <input type="date" value={prescriptionForm.start_at} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, start_at: e.target.value })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>End Date</label>
+              <input type="date" value={prescriptionForm.end_at} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, end_at: e.target.value })} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsPrescriptionModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#8B5CF6", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Issuing..." : "Issue Prescription"}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Log Medication Administration Modal */}
+      <Modal isOpen={isAdministrationModalOpen} onClose={() => setIsAdministrationModalOpen(false)} title="Log Medication Administration">
+        <form onSubmit={handleLogAdministration} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Patient Dog *</label>
+            <select required value={adminForm.dog_id} onChange={(e) => setAdminForm({ ...adminForm, dog_id: e.target.value })} style={inputStyle}>
+              <option value="">Select dog...</option>
+              {dogs.map((d) => (
+                <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Medication Name *</label>
+            <input type="text" required placeholder="e.g. Amoxicillin / Paracetamol" value={adminForm.medication_name} onChange={(e) => setAdminForm({ ...adminForm, medication_name: e.target.value })} style={inputStyle} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dosage Administered *</label>
+              <input type="text" required placeholder="e.g. 250mg" value={adminForm.dosage} onChange={(e) => setAdminForm({ ...adminForm, dosage: e.target.value })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Route</label>
+              <select value={adminForm.route} onChange={(e) => setAdminForm({ ...adminForm, route: e.target.value })} style={inputStyle}>
+                <option value="Oral">Oral</option>
+                <option value="Subcutaneous">Subcutaneous (SC)</option>
+                <option value="Intramuscular">Intramuscular (IM)</option>
+                <option value="Intravenous">Intravenous (IV)</option>
+                <option value="Topical">Topical</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Administration Notes</label>
+            <input type="text" placeholder="e.g. Administered with morning feed, patient accepted well." value={adminForm.notes} onChange={(e) => setAdminForm({ ...adminForm, notes: e.target.value })} style={inputStyle} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsAdministrationModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#0D9488", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Logging..." : "Log Administration"}</button>
           </div>
         </form>
       </Modal>
@@ -450,8 +795,8 @@ const MedicalRecords = () => {
       <Modal isOpen={isCertModalOpen} onClose={() => setIsCertModalOpen(false)} title="Issue Medical Clearance Certificate">
         <form onSubmit={handleIssueCert} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Dog *</label>
-            <select required value={certForm.dogId} onChange={(e) => setCertForm({ ...certForm, dogId: e.target.value })} style={inputStyle}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Patient Dog *</label>
+            <select required value={certDogId} onChange={(e) => setCertDogId(e.target.value)} style={inputStyle}>
               <option value="">Select dog...</option>
               {dogs.map((d) => (
                 <option key={String(d.id)} value={String(d.id)}>{dogLabel(d)}</option>
@@ -460,11 +805,15 @@ const MedicalRecords = () => {
           </div>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Clearance Type</label>
-            <select value={certForm.clearanceType} onChange={(e) => setCertForm({ ...certForm, clearanceType: e.target.value })} style={inputStyle}>
-              <option value="health_clearance">Health Clearance</option>
-              <option value="adoption_clearance">Adoption Clearance</option>
+            <select value={certForm.clearance_type} onChange={(e) => setCertForm({ ...certForm, clearance_type: e.target.value })} style={inputStyle}>
+              <option value="adoption_surgery">Adoption & Surgery Clearance</option>
+              <option value="health_clearance">Health & Quarantine Clearance</option>
               <option value="travel_clearance">Travel / Export Clearance</option>
             </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Decision Notes</label>
+            <textarea placeholder="e.g. Healthy, cleared for adoption." value={certForm.decision_notes} onChange={(e) => setCertForm({ ...certForm, decision_notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsCertModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
@@ -498,7 +847,6 @@ const MedicalRecords = () => {
       >
         {selectedDogProfile && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {/* Header Badge & Basic Info */}
             <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
@@ -513,7 +861,6 @@ const MedicalRecords = () => {
               </span>
             </div>
 
-            {/* Health Status & Clinical Summary */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Primary Diagnosis</div>
@@ -544,7 +891,6 @@ const MedicalRecords = () => {
               </div>
             </div>
 
-            {/* Chronological Medical Timeline */}
             <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "16px" }}>
               <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
                 <FaClipboardList color="#2563EB" /> Chronological Medical History &amp; Audit Trail

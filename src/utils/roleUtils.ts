@@ -375,7 +375,8 @@ export interface RoleMenuItem {
     | "volunteers"
     | "lostfound"
     | "vehicles"
-    | "notifications";
+    | "notifications"
+    | "cms";
 }
 
 /**
@@ -405,6 +406,15 @@ export const MODULE_VIEW_PERMISSIONS: Record<string, string> = {
   "/vehicles": "view_vehicles",
   "/reports": "view_reports",
   "/roles-permissions": "view_roles",
+  "/cms": "view_cms",
+  "/cms/pages": "view_cms",
+  "/cms/about": "view_cms",
+  "/cms/success-stories": "view_cms",
+  "/cms/articles": "view_cms",
+  "/cms/faq": "view_cms",
+  "/cms/contact": "view_cms",
+  "/cms/legal": "view_cms",
+  "/cms/alerts": "view_cms",
   "/audit-logs": "view_audit_logs",
   "/certificates": "view_certificates",
   "/notifications": "view_notifications",
@@ -424,6 +434,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "User Management", path: "/users", iconType: "users" },
         { name: "Roles & Permissions", path: "/roles-permissions", iconType: "users" },
+        { name: "Website Management (CMS)", path: "/cms", iconType: "cms" },
         { name: "Rescue Management", path: "/rescues", iconType: "rescues" },
         { name: "Rescue Requests", path: "/rescue-requests", iconType: "ambulance" },
         { name: "Rescue Dispatch", path: "/rescue-dispatch", iconType: "vehicles" },

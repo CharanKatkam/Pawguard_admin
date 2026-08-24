@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Broadcast after login/logout so mounted contexts (e.g. PermissionProvider)
  *  can re-read the authenticated role without a full page reload. */
@@ -22,15 +23,23 @@ export function subscribeToDataChange(listener: Listener): () => void {
 }
 
 /** Call after any successful Create/Update/Delete to keep every
- *  mounted dashboard/list in sync with the database. */
+ *  mounted dashboard/list in sync. Debounced by 500ms so rapid
+ *  mutations coalesce into a single refetch signal. */
 export function notifyDataChanged(): void {
-  listeners.forEach((listener) => {
-    try {
-      listener();
-    } catch {
-      /* never let one subscriber break the others */
-    }
-  });
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+  }
+
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        /* never let one subscriber break the others */
+      }
+    });
+  }, 500);
 }
 
 /** Hook that refetches whenever `notifyDataChanged()` is called anywhere.

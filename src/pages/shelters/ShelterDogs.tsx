@@ -360,7 +360,7 @@ const ShelterDogs = () => {
       setError(null);
 
       const [facilitiesRes, dogsRes] = await Promise.all([
-        shelterService.getShelters({ page: 1, page_size: 100 }),
+        shelterService.getShelters({ page: 1, page_size: 20 }),
         petService.getPets({ page, page_size: 20 }),
       ]);
 

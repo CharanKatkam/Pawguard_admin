@@ -1,68 +1,146 @@
-import donationsService, { type DonationCreate } from "./donationsService";
+import api from "../api/axios";
+import donationsService, { type DonationCreatePayload, type DonationFilters } from "./donationsService";
 
-export interface TransactionPayload {
-  txId?: string;
-  entity: string;
-  category: string;
-  amount: string | number;
-  date?: string;
-  status?: string;
-  type?: "donation" | "expense" | "income" | "transfer" | "refund";
-  [key: string]: unknown;
+export interface FinancialTransactionCreatePayload {
+  transaction_type: "income" | "expense" | "transfer" | "reconciliation" | "refund";
+  transaction_date: string;
+  amount: number;
+  currency?: string;
+  description?: string | null;
+  reference_type?: string | null;
+  reference_id?: string | null;
+  donation_id?: string | null;
+  debit_account_id: string;
+  credit_account_id: string;
+}
+
+export interface FinanceExpenseCreatePayload {
+  title: string;
+  description?: string | null;
+  amount: number;
+  currency?: string;
+  category: "medical_supplies" | "food_feeding" | "facility_rent" | "utilities" | "staff_payroll" | "rescue_operations" | "vehicle_fuel" | "other" | string;
+  vendor_name: string;
+  vendor_contact?: string | null;
+  vendor_gstin?: string | null;
+  expense_date: string;
+  payment_method: "bank_transfer" | "cash" | "cheque" | "card" | "online" | string;
+  payment_reference?: string | null;
+  invoice_number?: string | null;
+  account_id?: string | null;
+  notes?: string | null;
+}
+
+export interface TaxReceipt80GRequestPayload {
+  donation_id: string;
+}
+
+export interface RefundRequestPayload {
+  donation_id: string;
+  reason: string;
+  refund_amount?: number | null;
 }
 
 export const financeService = {
-  // Safe backend-backed list call delegating to GET /donations without 500 errors
-  getFinanceRecords: async (params?: Record<string, unknown>) => {
-    const res = await donationsService.getDonations(params as any).catch(() => ({ data: [], total: 0 }));
-    return res;
+  // GET /dashboards/finance
+  getFinanceDashboard: async () => {
+    const response = await api.get("/dashboards/finance");
+    return response.data;
   },
 
-  // Safe backend-backed summary call delegating to GET /admin/dashboard/donation-summary without 500 errors
-  getFinanceSummary: async () => {
-    const summary = await donationsService.getDonationSummary().catch(() => null);
-    return summary || {};
+  // GET /admin/dashboard/finance-stats
+  getFinanceStats: async () => {
+    const response = await api.get("/admin/dashboard/finance-stats");
+    return response.data;
   },
 
-  // Create record delegating to POST /donations
-  createTransaction: async (data: TransactionPayload) => {
-    const payload: DonationCreate = {
-      amount: Number(data.amount),
-      donor_name: data.entity || "Donor",
-      purpose: data.category || (data.description as string) || "General Contribution",
-      notes: (data.description as string) || undefined,
-      donation_type: data.type === "refund" ? "one_time" : "one_time",
-    };
-    return donationsService.createDonation(payload);
+  // GET /finance/summary
+  getFinanceSummary: async (params?: { period_start?: string; period_end?: string }) => {
+    const response = await api.get("/finance/summary", { params });
+    return response.data;
   },
 
-  logExpense: async (data: TransactionPayload) => {
-    return financeService.createTransaction({ ...data, type: "expense" });
+  // GET /finance/pnl
+  getPnlStatement: async (params: { period_start: string; period_end: string }) => {
+    const response = await api.get("/finance/pnl", { params });
+    return response.data;
   },
 
-  updateTransaction: async (txId: string, data: Partial<TransactionPayload>) => {
-    const status = String(data.status || "completed").toLowerCase();
-    return donationsService.updateDonationStatus(txId, status as any);
+  // GET /finance/transactions - List ledger transactions
+  getTransactions: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/finance/transactions", { params });
+    return response.data;
   },
 
-  deleteTransaction: async () => {
-    return { success: true };
+  // POST /finance/transactions - Create General Ledger Transaction
+  createTransaction: async (data: FinancialTransactionCreatePayload) => {
+    const response = await api.post("/finance/transactions", data);
+    return response.data;
   },
 
-  getAccounts: async () => {
-    return { data: [] };
+  // GET /finance/expenses - List Expenses
+  getExpenses: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/finance/expenses", { params });
+    return response.data;
   },
 
-  createAccount: async (data: Record<string, unknown>) => {
-    return data;
+  // POST /finance/expenses - Create Expense
+  createExpense: async (data: FinanceExpenseCreatePayload) => {
+    const response = await api.post("/finance/expenses", data);
+    return response.data;
   },
 
-  getDonations: async (params?: Record<string, unknown>) => {
-    return donationsService.getDonations(params as any);
+  // POST /finance/expenses/{id}/approve
+  approveExpense: async (expenseId: string) => {
+    const response = await api.post(`/finance/expenses/${expenseId}/approve`);
+    return response.data;
   },
 
-  recordDonation: async (data: Record<string, unknown>) => {
-    return donationsService.createDonation(data as any);
+  // POST /finance/expenses/{id}/reject
+  rejectExpense: async (expenseId: string, reason: string) => {
+    const response = await api.post(`/finance/expenses/${expenseId}/reject`, null, {
+      params: { reason },
+    });
+    return response.data;
+  },
+
+  // POST /finance/expenses/{id}/pay
+  payExpense: async (expenseId: string) => {
+    const response = await api.post(`/finance/expenses/${expenseId}/pay`);
+    return response.data;
+  },
+
+  // POST /finance/refunds - Process refund
+  processRefund: async (data: RefundRequestPayload) => {
+    const response = await api.post("/finance/refunds", data);
+    return response.data;
+  },
+
+  // POST /finance/80g-certificate - Issue 80G Certificate
+  generate80GCertificate: async (donationId: string) => {
+    const response = await api.post("/finance/80g-certificate", { donation_id: donationId });
+    return response.data;
+  },
+
+  // POST /finance/reconcile/donations
+  reconcileDonations: async (donationIds?: string[]) => {
+    const response = await api.post("/finance/reconcile/donations", donationIds ? { donation_ids: donationIds } : {});
+    return response.data;
+  },
+
+  // GET /finance/reports/pdf
+  getFinanceReportPdfUrl: async (params: { period_start: string; period_end: string }) => {
+    const response = await api.get("/finance/reports/pdf", { params });
+    return response.data;
+  },
+
+  // Backwards-compatible aliases
+  getFinanceRecords: async (params?: DonationFilters) => {
+    return donationsService.getDonations(params);
+  },
+
+  recordDonation: async (data: DonationCreatePayload) => {
+    return donationsService.createDonation(data);
   },
 
   reconcileTransaction: async (txId: string) => {

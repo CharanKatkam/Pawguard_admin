@@ -32,6 +32,16 @@ import LostAndFound from "./pages/lostfound/LostAndFound";
 import VehicleManagement from "./pages/vehicles/VehicleManagement";
 import Notifications from "./pages/notifications/Notifications";
 
+import CmsLayout from "./pages/cms/CmsLayout";
+import CmsPagesView from "./pages/cms/CmsPagesView";
+import CmsAboutView from "./pages/cms/CmsAboutView";
+import CmsSuccessStoriesView from "./pages/cms/CmsSuccessStoriesView";
+import CmsArticlesView from "./pages/cms/CmsArticlesView";
+import CmsFaqView from "./pages/cms/CmsFaqView";
+import CmsContactView from "./pages/cms/CmsContactView";
+import CmsLegalView from "./pages/cms/CmsLegalView";
+import CmsAlertsView from "./pages/cms/CmsAlertsView";
+
 import SuperAdminDashboard from "./pages/dashboard/roles/SuperAdminDashboard";
 import RescueCentreAdminDashboard from "./pages/dashboard/roles/RescueCentreAdminDashboard";
 import RescueCoordinatorDashboard from "./pages/dashboard/roles/RescueCoordinatorDashboard";
@@ -344,6 +354,27 @@ function App() {
               }
             >
               <Route path="/roles-permissions" element={<RolesPermissions />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  permission="view_cms"
+                  allowedRoles={["super_admin"]}
+                />
+              }
+            >
+              <Route path="/cms" element={<CmsLayout />}>
+                <Route index element={<CmsPagesView />} />
+                <Route path="pages" element={<CmsPagesView />} />
+                <Route path="about" element={<CmsAboutView />} />
+                <Route path="success-stories" element={<CmsSuccessStoriesView />} />
+                <Route path="articles" element={<CmsArticlesView />} />
+                <Route path="faq" element={<CmsFaqView />} />
+                <Route path="contact" element={<CmsContactView />} />
+                <Route path="legal" element={<CmsLegalView />} />
+                <Route path="alerts" element={<CmsAlertsView />} />
+              </Route>
             </Route>
 
             <Route

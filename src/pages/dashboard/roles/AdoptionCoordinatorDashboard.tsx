@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
-import DataTable from "../../../components/common/DataTable";
+import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaHeart, FaClipboardCheck, FaUserCheck, FaFileContract } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
@@ -52,7 +52,7 @@ const AdoptionCoordinatorDashboard = () => {
     { title: "Adoptable Dogs", value: loading ? "..." : String(dashboardData?.adoptable_dogs ?? dashboardData?.adoptableDogs ?? "0"), trend: "Ready", color: "#6366F1", icon: <FaFileContract />, onClick: () => navigate("/pets") },
   ];
 
-  const columns = [
+  const columns: Column<any>[] = [
     { key: "appId", title: "App ID" },
     { key: "applicant", title: "Applicant Name" },
     { key: "pet", title: "Pet Interested" },

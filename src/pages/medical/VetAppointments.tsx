@@ -90,7 +90,7 @@ const VetAppointments = () => {
       const res = await vetService.getClinics({
         search: search.trim() || undefined,
         page: 1,
-        page_size: 100,
+        page_size: 20,
       });
       setClinics(Array.isArray(res?.data) ? res.data : []);
     } catch (err) {
@@ -104,7 +104,7 @@ const VetAppointments = () => {
     try {
       setAppointmentsLoading(true);
       setAppointmentsError(null);
-      const res = await vetService.getAppointments({ page: 1, page_size: 100 });
+      const res = await vetService.getAppointments({ page: 1, page_size: 20 });
       setAppointments(Array.isArray(res?.data) ? res.data : []);
     } catch (err) {
       setAppointmentsError(toErrorMessage(err, "Failed to load appointments."));

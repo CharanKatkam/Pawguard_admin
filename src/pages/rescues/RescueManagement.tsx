@@ -497,17 +497,7 @@ const RescueManagement = () => {
 
   // Roster of Rescue Personnel (Coordinators & Agents)
   const agentRoster: AgentRosterItem[] = useMemo(() => {
-    // Standard default personnel preserved if not returned by backend
-    const defaultPersonnel: Record<string, unknown>[] = [
-      { id: "agent-001", full_name: "Shiv", email: "shiv@pawguard.org", phone: "+91 98765 43210", roles: ["rescue_agent"], service_area: "Kurnool Central", shift: "Morning (08:00 - 16:00)" },
-      { id: "agent-002", full_name: "Sana", email: "sana@pawguard.org", phone: "+91 98765 43211", roles: ["rescue_agent"], service_area: "Kurnool North", shift: "Evening (16:00 - 00:00)" },
-      { id: "agent-003", full_name: "Officer 33 Rescue Coordinator", email: "officer33@pawguard.org", phone: "+91 98765 43212", roles: ["rescue_coordinator"], service_area: "Regional Command", shift: "Day Shift" },
-      { id: "agent-004", full_name: "Officer 18 Rescue Coordinator", email: "officer18@pawguard.org", phone: "+91 98765 43213", roles: ["rescue_coordinator"], service_area: "Regional Command", shift: "Night Shift" },
-      { id: "agent-005", full_name: "Priya Verma", email: "priya.verma@pawguard.org", phone: "+91 98765 43214", roles: ["rescue_agent"], service_area: "Kurnool South", shift: "Flexible" },
-    ];
-
-    const allUsersList = users.length > 0 ? users : defaultPersonnel;
-    const filteredUsers = allUsersList.filter((u) => {
+    const filteredUsers = users.filter((u) => {
       const r = normalizeRole(u as any);
       return r === "rescue_agent" || r === "rescue_coordinator" || r === "super_admin" || r === "rescue_centre_admin";
     });
@@ -547,9 +537,6 @@ const RescueManagement = () => {
       const isBusy = activeAssigned.length > 0;
       const currentActiveCase = activeAssigned[0] || null;
 
-      // Assign matching vehicle
-      const defaultVehicle = idx === 0 ? "PGV-001" : idx === 1 ? "PGV-002" : idx === 4 ? "PGV-003" : "PGV-004";
-
       return {
         id: uId,
         agent_code: `RA-00${idx + 1}`,
@@ -561,8 +548,8 @@ const RescueManagement = () => {
         service_area: toSafeStr(u.service_area || "Kurnool Rescue Sector"),
         availability: isBusy ? "Busy" : ("Available" as const),
         active_cases_count: activeAssigned.length,
-        completed_rescues_count: completedAssigned.length + (idx * 5 + 3), // Real + historical base
-        assigned_vehicle: currentActiveCase?.dispatch_vehicle && currentActiveCase.dispatch_vehicle !== "-" ? currentActiveCase.dispatch_vehicle : defaultVehicle,
+        completed_rescues_count: completedAssigned.length,
+        assigned_vehicle: currentActiveCase?.dispatch_vehicle && currentActiveCase.dispatch_vehicle !== "-" ? currentActiveCase.dispatch_vehicle : "Unassigned",
         avatar_url: typeof u.avatar_url === "string" ? u.avatar_url : undefined,
         shift: toSafeStr(u.shift || "Field Operations Shift"),
         experience_years: 3 + (idx % 4),
@@ -576,16 +563,7 @@ const RescueManagement = () => {
 
   // Fleet of Rescue Vehicles
   const vehicleFleet: VehicleFleetItem[] = useMemo(() => {
-    const defaultFleet: Record<string, unknown>[] = [
-      { id: "veh-001", vehicle_number: "PGV-001", plate: "AP 21 EX 1001", model: "Force Traveler Rescue Van", type: "Rescue Van", capacity: 4, assigned_driver: "Shiv", fuel_level: "85%", location: "Kurnool Central Base" },
-      { id: "veh-002", vehicle_number: "PGV-002", plate: "AP 21 EX 1002", model: "Tata Winger Intensive Ambulance", type: "Ambulance", capacity: 2, assigned_driver: "Sana", fuel_level: "60%", location: "Kurnool North Station" },
-      { id: "veh-003", vehicle_number: "PGV-003", plate: "AP 21 EX 1003", model: "Mahindra Bolero Emergency Rescue", type: "Ambulance", capacity: 3, assigned_driver: "Priya Verma", fuel_level: "90%", location: "Kurnool South Hub" },
-      { id: "veh-004", vehicle_number: "PGV-004", plate: "AP 21 EX 1004", model: "Eicher Heavy Transport Unit", type: "Transport Truck", capacity: 8, assigned_driver: "Unassigned", fuel_level: "40%", location: "Shelter Depot" },
-    ];
-
-    const rawFleet = vehicles.length > 0 ? vehicles : defaultFleet;
-
-    return rawFleet.map((v, idx) => {
+    return vehicles.map((v, idx) => {
       const vCode = toSafeStr(v.vehicle_number || v.plate || `PGV-00${idx + 1}`);
       const vId = toSafeStr(v.id || vCode);
 
