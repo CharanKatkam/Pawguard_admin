@@ -91,7 +91,7 @@ api.interceptors.response.use(
 
         try {
           // Attempt session renewal via backend-controlled HttpOnly cookie refresh
-          await api.post("/auth/refresh");
+          await api.post("/auth/refresh", {});
           processQueue(null);
           return api(originalRequest);
         } catch (refreshErr) {

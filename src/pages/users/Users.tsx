@@ -23,6 +23,7 @@ import {
   FaBoxes,
   FaCoins,
   FaTruck,
+  FaClipboardList,
 } from "react-icons/fa";
 import userService, { type UserPayload, extractPermissionCodes } from "../../services/userService";
 import authService from "../../services/auth/authService";
@@ -31,6 +32,14 @@ import { notifyDataChanged } from "../../utils/dataSync";
 import { normalizeRole, isInternalRole, getCurrentUserRole } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 import { describePermission } from "../../utils/permissionsCatalog";
+
+// Application details integration imports
+import UserApplicationDetailModal, { type UnifiedUserApplication } from "../../components/users/UserApplicationDetailModal";
+import volunteerService from "../../services/volunteerService";
+import fosterService from "../../services/fosterService";
+import adoptionService from "../../services/adoptionService";
+import lostFoundService from "../../services/lostFoundService";
+import rescueService from "../../services/rescueService";
 
 interface UserTableRow {
   id: string;
@@ -51,9 +60,22 @@ interface UserTableRow {
   updatedAt: string;
   updated_at?: string;
   direct_permissions?: string[];
-  status: "Active" | "Inactive";
+  status: string;
+  appStatus?: string;
+  rejection_reason?: string | null;
   [key: string]: unknown;
 }
+
+const getUserApprovalStatus = (user?: Partial<UserTableRow> | null): "pending" | "approved" | "rejected" => {
+  if (!user) return "pending";
+  const s = String(user.appStatus || user.status || "").toLowerCase().trim();
+  if (s === "approved" || s === "active") return "approved";
+  if (s === "rejected" || s === "declined") return "rejected";
+  if (s === "pending" || s === "applied" || s === "unverified" || s === "in_review") return "pending";
+  if (user.is_verified === true) return "approved";
+  if (user.is_verified === false && s !== "approved" && s !== "active" && s !== "rejected") return "pending";
+  return "pending";
+};
 
 const formatDate = (isoString?: string): string => formatDateTime(isoString);
 
@@ -150,6 +172,255 @@ const parseRoleNames = (value: string): string[] =>
     .map((role) => role.trim())
     .filter(Boolean);
 
+const fetchApplicationsForUser = async (user: UserTableRow): Promise<UnifiedUserApplication[]> => {
+  if (!user) return [];
+  const uId = String(user.id || "").toLowerCase();
+  const uEmail = String(user.email || "").toLowerCase();
+  const uPhone = String(user.phone || "").toLowerCase();
+  const uName = String(user.full_name || user.name || "").toLowerCase();
+
+  const results: UnifiedUserApplication[] = [];
+
+  // 1. Volunteer Applications
+  try {
+    const volRes = await volunteerService.getApplications();
+    const volList = Array.isArray(volRes) ? volRes : Array.isArray(volRes?.data) ? volRes.data : [];
+    volList.forEach((v: any) => {
+      const vUserId = String(v.user_id || "").toLowerCase();
+      const vEmail = String(v.email || v.applicant_email || "").toLowerCase();
+      if ((uId && vUserId === uId) || (uEmail && vEmail === uEmail)) {
+        const rawStatus = String(v.status || "applied").toLowerCase();
+        let statusKey = "pending";
+        let statusLabel = "Pending Approval";
+        if (rawStatus === "onboarded" || rawStatus === "active" || rawStatus === "approved") {
+          statusKey = "approved";
+          statusLabel = "Approved";
+        } else if (rawStatus === "rejected") {
+          statusKey = "rejected";
+          statusLabel = "Rejected";
+        }
+        results.push({
+          id: String(v.id || v.application_id || `VOL-${Math.random()}`),
+          type: "volunteer",
+          title: `Volunteer Application — ${v.preferred_role || "General Volunteer"}`,
+          subtitle: `Role Preference: ${v.preferred_role || "General"} | Emergency Contact: ${v.emergency_contact_name || "—"}`,
+          status: statusKey,
+          statusLabel,
+          submittedAt: String(v.created_at || v.submitted_at || new Date().toISOString()),
+          updatedAt: v.updated_at ? String(v.updated_at) : undefined,
+          rawRecord: v,
+          rejectionReason: v.rejection_reason || v.notes || null,
+          applicantName: v.full_name || v.name || user.full_name || user.name,
+          applicantEmail: v.email || user.email,
+          applicantPhone: v.phone || user.phone,
+        });
+      }
+    });
+  } catch {
+    // Ignore individual fetch failure
+  }
+
+  // 2. Foster Applications
+  try {
+    const fosterRes = await fosterService.getFosterProfiles();
+    const fosterList = Array.isArray(fosterRes) ? fosterRes : Array.isArray(fosterRes?.data) ? fosterRes.data : [];
+    fosterList.forEach((f: any) => {
+      const fUserId = String(f.user_id || f.user?.id || "").toLowerCase();
+      const fEmail = String(f.email || f.user?.email || "").toLowerCase();
+      if ((uId && fUserId === uId) || (uEmail && fEmail === uEmail)) {
+        const rawStatus = String(f.status || "applied").toLowerCase();
+        let statusKey = "pending";
+        let statusLabel = "Pending Approval";
+        if (rawStatus === "approved") {
+          statusKey = "approved";
+          statusLabel = "Approved";
+        } else if (rawStatus === "rejected") {
+          statusKey = "rejected";
+          statusLabel = "Rejected";
+        }
+        results.push({
+          id: String(f.id || `FOST-${Math.random()}`),
+          type: "foster",
+          title: "Foster Family Application",
+          subtitle: `Max Capacity: ${f.max_capacity ?? 1} dogs | Preferences: ${f.preferences || "Any"}`,
+          status: statusKey,
+          statusLabel,
+          submittedAt: String(f.created_at || new Date().toISOString()),
+          updatedAt: f.updated_at ? String(f.updated_at) : undefined,
+          rawRecord: f,
+          rejectionReason: f.vetting_notes || f.notes || null,
+          applicantName: f.full_name || f.user?.full_name || user.full_name || user.name,
+          applicantEmail: f.email || f.user?.email || user.email,
+          applicantPhone: f.phone || f.user?.phone || user.phone,
+        });
+      }
+    });
+  } catch {
+    // Ignore individual fetch failure
+  }
+
+  // 3. Adoption Applications
+  try {
+    const adoptRes = await adoptionService.getAdoptions();
+    const adoptList = Array.isArray(adoptRes) ? adoptRes : Array.isArray(adoptRes?.data) ? adoptRes.data : [];
+    adoptList.forEach((a: any) => {
+      const aAdopterId = String(a.adopter_id || a.adopter?.id || "").toLowerCase();
+      const aEmail = String(a.applicantEmail || a.adopter_email || a.adopter?.email || "").toLowerCase();
+      if ((uId && aAdopterId === uId) || (uEmail && aEmail === uEmail)) {
+        const rawStatus = String(a.status || "submitted").toLowerCase();
+        let statusKey = "pending";
+        let statusLabel = "Pending Review";
+        if (rawStatus === "approved") {
+          statusKey = "approved";
+          statusLabel = "Approved";
+        } else if (rawStatus === "completed") {
+          statusKey = "completed";
+          statusLabel = "Completed";
+        } else if (rawStatus === "rejected") {
+          statusKey = "rejected";
+          statusLabel = "Rejected";
+        }
+        results.push({
+          id: String(a.id || a.applicationId || `ADOPT-${Math.random()}`),
+          type: "adoption",
+          title: `Adoption Application — ${a.petName || a.dog_name || "Pet"}`,
+          subtitle: `Pet: ${a.petName || "Canine"} (${a.petBreed || "Dog"}) | Status: ${rawStatus}`,
+          status: statusKey,
+          statusLabel,
+          submittedAt: String(a.created_at || a.date || new Date().toISOString()),
+          updatedAt: a.updated_at ? String(a.updated_at) : undefined,
+          completedAt: a.completed_at ? String(a.completed_at) : undefined,
+          rawRecord: a,
+          rejectionReason: a.vetting_officer_notes || null,
+          applicantName: a.applicantName || user.full_name || user.name,
+          applicantEmail: a.applicantEmail || user.email,
+          applicantPhone: a.applicantPhone || user.phone,
+        });
+      }
+    });
+  } catch {
+    // Ignore individual fetch failure
+  }
+
+  // 4. Lost / Found Pet Reports
+  try {
+    const [lostRes, foundRes] = await Promise.all([
+      lostFoundService.getLostReports().catch(() => ({ data: [] })),
+      lostFoundService.getFoundReports().catch(() => ({ data: [] })),
+    ]);
+
+    const lostList = Array.isArray((lostRes as any)?.data) ? (lostRes as any).data : Array.isArray(lostRes) ? lostRes : [];
+    const foundList = Array.isArray((foundRes as any)?.data) ? (foundRes as any).data : Array.isArray(foundRes) ? foundRes : [];
+
+    lostList.forEach((l: any) => {
+      const lUserId = String(l.user_id || l.user?.id || "").toLowerCase();
+      const lEmail = String(l.user?.email || "").toLowerCase();
+      if ((uId && lUserId === uId) || (uEmail && lEmail === uEmail)) {
+        const rawStatus = String(l.status || "active").toLowerCase();
+        let statusKey = "pending";
+        let statusLabel = "Active Report";
+        if (rawStatus === "resolved") {
+          statusKey = "approved";
+          statusLabel = "Resolved";
+        }
+        results.push({
+          id: String(l.id || `LOST-${Math.random()}`),
+          type: "lost_found",
+          title: `Lost Pet Report — ${l.pet_name || "Dog"}`,
+          subtitle: `Breed: ${l.breed || "Dog"} | Location: ${l.location_address || "Field"}`,
+          status: statusKey,
+          statusLabel,
+          submittedAt: String(l.created_at || l.lost_at || new Date().toISOString()),
+          updatedAt: l.updated_at ? String(l.updated_at) : undefined,
+          rawRecord: l,
+          applicantName: l.user?.full_name || user.full_name || user.name,
+          applicantEmail: l.user?.email || user.email,
+          applicantPhone: l.user?.phone || user.phone,
+          address: l.location_address,
+        });
+      }
+    });
+
+    foundList.forEach((f: any) => {
+      const fUserId = String(f.user_id || f.user?.id || "").toLowerCase();
+      const fEmail = String(f.user?.email || "").toLowerCase();
+      if ((uId && fUserId === uId) || (uEmail && fEmail === uEmail)) {
+        const rawStatus = String(f.status || "active").toLowerCase();
+        let statusKey = "pending";
+        let statusLabel = "Active Report";
+        if (rawStatus === "resolved") {
+          statusKey = "approved";
+          statusLabel = "Resolved";
+        }
+        results.push({
+          id: String(f.id || `FOUND-${Math.random()}`),
+          type: "lost_found",
+          title: `Found Pet Report — ${f.breed_observed || "Canine"}`,
+          subtitle: `Color: ${f.color_observed || "Observed"} | Location: ${f.location_address || "Field"}`,
+          status: statusKey,
+          statusLabel,
+          submittedAt: String(f.created_at || f.found_at || new Date().toISOString()),
+          updatedAt: f.updated_at ? String(f.updated_at) : undefined,
+          rawRecord: f,
+          applicantName: f.user?.full_name || user.full_name || user.name,
+          applicantEmail: f.user?.email || user.email,
+          applicantPhone: f.user?.phone || user.phone,
+          address: f.location_address,
+        });
+      }
+    });
+  } catch {
+    // Ignore individual fetch failure
+  }
+
+  // 5. Rescue Requests
+  try {
+    const rescueRes = await rescueService.getRescueRequests();
+    const rescueList = Array.isArray(rescueRes) ? rescueRes : Array.isArray(rescueRes?.data) ? rescueRes.data : [];
+    rescueList.forEach((r: any) => {
+      const rUserId = String(r.user_id || "").toLowerCase();
+      const rPhone = String(r.reporter_phone || "").toLowerCase();
+      const rName = String(r.reporter_name || "").toLowerCase();
+      if (
+        (uId && rUserId === uId) ||
+        (uPhone && rPhone === uPhone) ||
+        (uName && rName && rName === uName)
+      ) {
+        const rawStatus = String(r.status || "reported").toLowerCase();
+        let statusKey = "pending";
+        let statusLabel = "Pending Dispatch";
+        if (rawStatus === "verified" || rawStatus === "approved" || rawStatus === "resolved") {
+          statusKey = rawStatus === "resolved" ? "completed" : "approved";
+          statusLabel = rawStatus === "resolved" ? "Resolved" : "Verified / Approved";
+        } else if (rawStatus === "failed" || rawStatus === "rejected") {
+          statusKey = "rejected";
+          statusLabel = "Rejected";
+        }
+        results.push({
+          id: String(r.id || `RESC-${Math.random()}`),
+          type: "rescue",
+          title: `Rescue Emergency Request — ${r.dog_name || "Dog Incident"}`,
+          subtitle: `Location: ${r.location || "Field"} | Severity: ${r.urgency_level || r.severity || "Normal"}`,
+          status: statusKey,
+          statusLabel,
+          submittedAt: String(r.created_at || new Date().toISOString()),
+          updatedAt: r.updated_at ? String(r.updated_at) : undefined,
+          rawRecord: r,
+          rejectionReason: r.rejection_rationale || r.failure_reason || null,
+          applicantName: r.reporter_name || user.full_name || user.name,
+          applicantPhone: r.reporter_phone || user.phone,
+          address: r.location,
+        });
+      }
+    });
+  } catch {
+    // Ignore individual fetch failure
+  }
+
+  results.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  return results;
+};
+
 const Users = () => {
   const navigate = useNavigate();
   const [users, setUsers] = useState<UserTableRow[]>([]);
@@ -178,6 +449,14 @@ const Users = () => {
   const [selectedUserProfile, setSelectedUserProfile] = useState<UserTableRow | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
+
+
+
+  // User Applications and Requests state
+  const [userApplications, setUserApplications] = useState<UnifiedUserApplication[]>([]);
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
+  const [selectedApplicationDetail, setSelectedApplicationDetail] = useState<UnifiedUserApplication | null>(null);
+  const [isAppDetailModalOpen, setIsAppDetailModalOpen] = useState(false);
 
   // Password Reset State inside Profile Modal
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -211,6 +490,10 @@ const Users = () => {
     setSelectedUserProfile(null);
     setIsProfileModalOpen(true);
     setProfileLoading(true);
+    setUserApplications([]);
+    setApplicationsLoading(true);
+
+    let targetProfile: UserTableRow;
 
     try {
       const userRes = await userService.getUserById(userRow.id);
@@ -232,6 +515,12 @@ const Users = () => {
         ? [String(userPayload.role)]
         : userRow.roles;
 
+      const rawStatusStr = String(userPayload.status || userRow.appStatus || userRow.status || "").toLowerCase().trim();
+      const computedAppStatus: "pending" | "approved" | "rejected" =
+        (rawStatusStr === "approved" || rawStatusStr === "active" || userPayload.is_verified === true)
+          ? "approved"
+          : (rawStatusStr === "rejected" || rawStatusStr === "declined" ? "rejected" : "pending");
+
       const fullObj: UserTableRow = {
         id: String(userPayload.id || userRow.id),
         name: String(userPayload.full_name || userPayload.name || userRow.name || "Not provided"),
@@ -252,11 +541,20 @@ const Users = () => {
         updated_at: (userPayload.updated_at as string) || userRow.updatedAt,
         direct_permissions: perms,
         status: (userPayload.is_active ?? userRow.isActive) ? "Active" : "Inactive",
+        appStatus: computedAppStatus,
+        rejection_reason: (userPayload.rejection_reason as string) || (userRow.rejection_reason as string) || null,
       };
 
+      targetProfile = fullObj;
       setSelectedUserProfile(fullObj);
     } catch {
-      setSelectedUserProfile({
+      const rawStatusStr = String(userRow.appStatus || userRow.status || "").toLowerCase().trim();
+      const computedAppStatus: "pending" | "approved" | "rejected" =
+        (rawStatusStr === "approved" || rawStatusStr === "active" || userRow.isVerified || userRow.is_verified)
+          ? "approved"
+          : (rawStatusStr === "rejected" || rawStatusStr === "declined" ? "rejected" : "pending");
+
+      const fullObj: UserTableRow = {
         ...userRow,
         phone: userRow.phone ?? null,
         is_active: userRow.isActive,
@@ -265,9 +563,23 @@ const Users = () => {
         created_at: userRow.createdAt,
         updated_at: userRow.updatedAt,
         direct_permissions: [],
-      });
+        appStatus: computedAppStatus,
+        rejection_reason: userRow.rejection_reason || null,
+      };
+      targetProfile = fullObj;
+      setSelectedUserProfile(fullObj);
     } finally {
       setProfileLoading(false);
+    }
+
+    // Load applications asynchronously
+    try {
+      const apps = await fetchApplicationsForUser(targetProfile);
+      setUserApplications(apps);
+    } catch {
+      setUserApplications([]);
+    } finally {
+      setApplicationsLoading(false);
     }
   };
 
@@ -401,6 +713,13 @@ const Users = () => {
           : user.role
           ? [user.role]
           : [];
+
+        const rawStatusStr = String(user.status || "").toLowerCase().trim();
+        const computedAppStatus: "pending" | "approved" | "rejected" =
+          (rawStatusStr === "approved" || rawStatusStr === "active" || user.is_verified === true)
+            ? "approved"
+            : (rawStatusStr === "rejected" || rawStatusStr === "declined" ? "rejected" : "pending");
+
         return {
           id: user.id || "-",
           name: user.full_name || user.name || "Not provided",
@@ -421,6 +740,8 @@ const Users = () => {
           updated_at: user.updated_at || "",
           direct_permissions: user.direct_permissions || [],
           status: user.is_active !== undefined ? (user.is_active ? "Active" : "Inactive") : (user.status === "Active" ? "Active" : "Inactive"),
+          appStatus: computedAppStatus,
+          rejection_reason: user.rejection_reason || null,
         };
       });
 
@@ -995,7 +1316,7 @@ const Users = () => {
                 <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
                   {selectedUserProfile.full_name || selectedUserProfile.name || "Not provided"}
                 </h3>
-                <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                   <span
                     style={{
                       background: "#EFF6FF",
@@ -1020,9 +1341,34 @@ const Users = () => {
                   >
                     {(selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "Active" : "Inactive"}
                   </span>
+                  {(() => {
+                    const statusKey = getUserApprovalStatus(selectedUserProfile);
+                    const badgeStyle =
+                      statusKey === "approved"
+                        ? { bg: "#DCFCE7", color: "#166534", label: "Approved" }
+                        : statusKey === "rejected"
+                        ? { bg: "#FEE2E2", color: "#991B1B", label: "Rejected" }
+                        : { bg: "#FEF3C7", color: "#B45309", label: "Pending Approval" };
+                    return (
+                      <span
+                        style={{
+                          background: badgeStyle.bg,
+                          color: badgeStyle.color,
+                          padding: "2px 10px",
+                          borderRadius: "999px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {badgeStyle.label}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
+
+
 
             {/* Profile Details Grid */}
             <div>
@@ -1119,6 +1465,115 @@ const Users = () => {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* APPLICATIONS & REQUESTS Section */}
+            <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "12px", padding: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+                <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <FaClipboardList size={14} color="#2563EB" /> APPLICATIONS &amp; REQUESTS ({userApplications.length})
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => selectedUserProfile && void handleOpenUserProfile(selectedUserProfile)}
+                  disabled={applicationsLoading}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #CBD5E1",
+                    background: "#F8FAFC",
+                    color: "#475569",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {applicationsLoading ? "Refreshing..." : "Refresh List"}
+                </button>
+              </div>
+
+              {applicationsLoading ? (
+                <div style={{ padding: "20px 0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
+                  Searching volunteer, foster, adoption, lost/found, and rescue databases...
+                </div>
+              ) : userApplications.length === 0 ? (
+                <div style={{ padding: "24px 16px", textAlign: "center", background: "#F8FAFC", borderRadius: "8px", border: "1px dashed #CBD5E1", color: "#64748B", fontSize: "13px" }}>
+                  No applications or requests have been submitted by this user.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {userApplications.map((app) => {
+                    const isPending = app.status === "pending";
+                    const isApproved = app.status === "approved";
+                    const isCompleted = app.status === "completed";
+                    return (
+                      <div
+                        key={app.id}
+                        style={{
+                          background: "#F8FAFC",
+                          border: "1px solid #E2E8F0",
+                          borderRadius: "10px",
+                          padding: "14px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: "12px",
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", background: "#E2E8F0", color: "#334155", padding: "2px 8px", borderRadius: "4px" }}>
+                              {app.type.replace("_", " ")}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                fontWeight: 700,
+                                padding: "2px 10px",
+                                borderRadius: "999px",
+                                background: isPending ? "#FEF3C7" : isApproved ? "#DCFCE7" : isCompleted ? "#DBEAFE" : "#FEE2E2",
+                                color: isPending ? "#B45309" : isApproved ? "#15803D" : isCompleted ? "#1E40AF" : "#B91C1C",
+                              }}
+                            >
+                              {app.statusLabel}
+                            </span>
+                          </div>
+                          <h5 style={{ margin: "6px 0 2px", fontSize: "14px", fontWeight: 700, color: "#0F172A" }}>
+                            {app.title}
+                          </h5>
+                          {app.subtitle && <div style={{ fontSize: "12px", color: "#475569" }}>{app.subtitle}</div>}
+                          <div style={{ fontSize: "11px", color: "#64748B", marginTop: "4px" }}>
+                            Submitted: {formatDateTime(app.submittedAt)}
+                            {app.updatedAt && <span> &bull; Last Updated: {formatDateTime(app.updatedAt)}</span>}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedApplicationDetail(app);
+                            setIsAppDetailModalOpen(true);
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: "8px",
+                            background: "#2563EB",
+                            color: "#FFFFFF",
+                            border: "none",
+                            fontSize: "13px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+                          }}
+                        >
+                          View Application
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Account Operations Section */}
@@ -1529,6 +1984,20 @@ const Users = () => {
           </div>
         </div>
       </Modal>
+
+      {/* User Application Detail Modal */}
+      <UserApplicationDetailModal
+        isOpen={isAppDetailModalOpen}
+        onClose={() => setIsAppDetailModalOpen(false)}
+        application={selectedApplicationDetail}
+        userProfile={selectedUserProfile}
+        onApplicationUpdated={() => {
+          if (selectedUserProfile) {
+            void handleOpenUserProfile(selectedUserProfile);
+          }
+          void fetchUsers();
+        }}
+      />
     </div>
   );
 };

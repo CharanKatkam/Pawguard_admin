@@ -35,7 +35,7 @@ const getMe = async () => {
 };
 
 const refreshSession = async () => {
-  const response = await axios.post("/auth/refresh");
+  const response = await axios.post("/auth/refresh", {});
   return response.data;
 };
 

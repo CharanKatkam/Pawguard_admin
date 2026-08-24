@@ -17,6 +17,7 @@ export interface UserPayload {
   role?: string;
   department?: string;
   status?: string;
+  rejection_reason?: string | null;
   password?: string;
   direct_permissions?: string[];
 }
@@ -119,6 +120,9 @@ export const userService = {
     if (fullName !== undefined) payload.full_name = fullName;
     if (data.phone !== undefined) payload.phone = data.phone;
     if (data.is_active !== undefined) payload.is_active = data.is_active;
+    if (data.is_verified !== undefined) payload.is_verified = data.is_verified;
+    if (data.status !== undefined) payload.status = data.status;
+    if (data.rejection_reason !== undefined) payload.rejection_reason = data.rejection_reason;
     const roleNames =
       data.role_names !== undefined
         ? data.role_names
@@ -137,6 +141,61 @@ export const userService = {
       targetRoles: ["super_admin"],
     });
     return response.data;
+  },
+
+  /** Super Admin Accept / Approve User Workflow */
+  approveUser: async (userId: string, email?: string) => {
+    let resData: unknown;
+    try {
+      const response = await api.post(`/admin/users/${userId}/approve`);
+      resData = response.data;
+    } catch {
+      // Fallback: persist approval decision through existing backend PUT endpoint
+      const response = await api.put(`/admin/users/${userId}`, {
+        status: "approved",
+        is_verified: true,
+        is_active: true,
+      });
+      resData = response.data;
+    }
+
+    await publishActionEvent({
+      module: "user",
+      action: "approve",
+      title: "User Application Approved",
+      message: `User account ${email || userId} approved by Super Admin.`,
+      targetRoles: ["super_admin"],
+    });
+
+    return resData;
+  },
+
+  /** Super Admin Reject User Workflow */
+  rejectUser: async (userId: string, reason?: string, email?: string) => {
+    let resData: unknown;
+    try {
+      const response = await api.post(`/admin/users/${userId}/reject`, { reason });
+      resData = response.data;
+    } catch {
+      // Fallback: persist rejection decision through existing backend PUT endpoint
+      const response = await api.put(`/admin/users/${userId}`, {
+        status: "rejected",
+        is_verified: false,
+        is_active: false,
+        rejection_reason: reason,
+      });
+      resData = response.data;
+    }
+
+    await publishActionEvent({
+      module: "user",
+      action: "reject",
+      title: "User Application Rejected",
+      message: `User account ${email || userId} rejected by Super Admin.${reason ? ` Reason: ${reason}` : ""}`,
+      targetRoles: ["super_admin"],
+    });
+
+    return resData;
   },
 
   deleteUser: async (userId: string) => {
