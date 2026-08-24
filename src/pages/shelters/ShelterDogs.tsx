@@ -26,9 +26,11 @@ import shelterService from "../../services/shelterService";
 import vetService from "../../services/vetService";
 import medicalService from "../../services/medicalService";
 import userService from "../../services/userService";
+import { getCurrentUserRole } from "../../utils/roleUtils";
 import { useDataSync, notifyDataChanged } from "../../utils/dataSync";
 import { publishActionEvent } from "../../utils/eventSystem";
 import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
+import { getDogPhotoUrl } from "../pets/Pets";
 
 const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
@@ -261,6 +263,13 @@ const ShelterDogs = () => {
   const handleCompleteClearance = async (dog: any) => {
     const id = dogId(dog);
     if (!id) return;
+
+    // Enforce business rule #2: ONLY Veterinarian or Super Admin can issue medical clearance
+    const userRole = getCurrentUserRole();
+    if (userRole !== "veterinarian" && userRole !== "super_admin") {
+      addToast("Only a Veterinarian can issue medical clearance. Request a medical checkup to assign a veterinarian.", "error");
+      return;
+    }
 
     try {
       setIsCompletingClearance(true);
@@ -851,6 +860,24 @@ const ShelterDogs = () => {
 
   const dogColumns = [
     {
+      key: "photo_url",
+      title: "Photo",
+      render: (_val: any, row: any) => {
+        const url = getDogPhotoUrl(row);
+        return url ? (
+          <img
+            src={url}
+            alt={row.name || "Dog"}
+            style={{ width: "40px", height: "40px", borderRadius: "8px", objectFit: "cover", border: "1px solid #E2E8F0" }}
+          />
+        ) : (
+          <div style={{ width: "40px", height: "40px", borderRadius: "8px", background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}>
+            🐶
+          </div>
+        );
+      },
+    },
+    {
       key: "name",
       title: "Dog Name & Reg #",
       render: (_val: any, row: any) => (
@@ -1032,6 +1059,7 @@ const ShelterDogs = () => {
           onPageChange={setPage}
           searchValue={search}
           onSearchChange={(term) => { setSearch(term); setPage(1); }}
+          onRowClick={(row) => { setSelectedDog(row); setIsViewMasterModalOpen(true); }}
           renderRowActions={(row: any) => (
             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
               <button
@@ -1110,9 +1138,17 @@ const ShelterDogs = () => {
         {selectedDog && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "flex", gap: "16px", alignItems: "center", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-              <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#DBEAFE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
-                🐶
-              </div>
+              {getDogPhotoUrl(selectedDog) ? (
+                <img
+                  src={getDogPhotoUrl(selectedDog)}
+                  alt={selectedDog.name || "Dog"}
+                  style={{ width: "64px", height: "64px", borderRadius: "12px", objectFit: "cover", border: "2px solid #2563EB" }}
+                />
+              ) : (
+                <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#DBEAFE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
+                  🐶
+                </div>
+              )}
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>{selectedDog.name}</div>
                 <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>Reg Number: {selectedDog.registration_number}</div>

@@ -9,6 +9,8 @@ export interface DogPayload {
   status?: string;
   description?: string;
   is_adoptable?: boolean;
+  is_public_visible?: boolean;
+  photo_url?: string;
   registration_number?: string;
   [key: string]: unknown;
 }

@@ -49,7 +49,7 @@ const GeneralPublicDashboard = () => {
 
   useDataSync(fetchDashboard);
 
-  const dogsList = adoptableDogs.length > 0
+  const rawDogsList = adoptableDogs.length > 0
     ? adoptableDogs
     : Array.isArray(dashboardData?.dogs)
     ? dashboardData.dogs
@@ -58,6 +58,8 @@ const GeneralPublicDashboard = () => {
     : Array.isArray(dashboardData?.items)
     ? dashboardData.items
     : [];
+
+  const dogsList = rawDogsList.filter((dog: any) => dog.is_public_visible !== false);
 
   const adoptableCount = Number(
     dashboardData?.adoptable_dogs ??

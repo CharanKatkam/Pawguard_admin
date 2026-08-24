@@ -11,27 +11,77 @@ import {
   FaAmbulance,
   FaHeart,
   FaPlus,
-  FaEdit,
   FaTrash,
   FaQrcode,
   FaDownload,
   FaPrint,
   FaEye,
+  FaCamera,
   FaStethoscope,
   FaSearch,
   FaCheckCircle,
   FaSync,
   FaHistory,
 } from "react-icons/fa";
+import dogService from "../../services/dogService";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
+import medicalService from "../../services/medicalService";
+import { getCurrentUserRole } from "../../utils/roleUtils";
+import { hasPermission } from "../../utils/rbac";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { publishActionEvent } from "../../utils/eventSystem";
 import { generateQrDataUrl, generateQrBlob } from "../../utils/qrGenerator";
 import DogLifecycleTimelineModal from "../../components/pets/DogLifecycleTimelineModal";
 
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
 const GENDERS = ["male", "female", "unknown"];
 const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
+
+export const getDogPhotoUrl = (dog: any): string => {
+  if (!dog) return "";
+  if (typeof dog.photo_url === "string" && dog.photo_url.trim()) return dog.photo_url.trim();
+  if (typeof dog.image_url === "string" && dog.image_url.trim()) return dog.image_url.trim();
+  if (typeof dog.avatar_url === "string" && dog.avatar_url.trim()) return dog.avatar_url.trim();
+  if (Array.isArray(dog.image_urls) && dog.image_urls.length > 0 && typeof dog.image_urls[0] === "string" && dog.image_urls[0].trim()) {
+    return dog.image_urls[0].trim();
+  }
+  if (Array.isArray(dog.photo_gallery_urls) && dog.photo_gallery_urls.length > 0 && typeof dog.photo_gallery_urls[0] === "string" && dog.photo_gallery_urls[0].trim()) {
+    return dog.photo_gallery_urls[0].trim();
+  }
+  if (Array.isArray(dog.photos) && dog.photos.length > 0) {
+    const p = dog.photos[0];
+    if (typeof p === "string" && p.trim()) return p.trim();
+    if (p && typeof p.url === "string" && p.url.trim()) return p.url.trim();
+  }
+  const dId = dog?.id || dog?.dog_id || dog?.registration_number;
+  if (dId) {
+    const cached = localStorage.getItem(`pawguard_dog_photo_${dId}`) || sessionStorage.getItem(`pawguard_dog_photo_${dId}`);
+    if (cached) return cached;
+  }
+  return "";
+};
+
+export const isDogMedicallyCleared = (dog: any, clearancesList?: any[]): boolean => {
+  if (!dog) return false;
+  if (dog.vet_clearance === true || dog.is_fit_for_adoption === true) return true;
+  if (dog.vet_clearance === false) return false;
+  const vStatus = String(dog.vet_clearance_status || "").toLowerCase();
+  if (vStatus === "approved" || vStatus === "cleared" || vStatus === "fit") return true;
+  if (vStatus === "pending" || vStatus === "rejected" || vStatus === "denied") return false;
+  const mStatus = String(dog.medical_status || "").toLowerCase();
+  if (mStatus.includes("clear") || mStatus.includes("fit") || mStatus.includes("healthy") || mStatus.includes("passed")) return true;
+  if (mStatus.includes("quarantine") || mStatus.includes("treatment") || mStatus.includes("surgery") || mStatus.includes("pending")) return false;
+  if (Array.isArray(clearancesList) && clearancesList.length > 0) {
+    const dId = String(dog.id || dog.dog_id || dog.registration_number || "").toLowerCase();
+    const match = clearancesList.find((c: any) => {
+      const cDogId = String(c.dog_id || c.pet_id || "").toLowerCase();
+      return cDogId === dId && (String(c.status).toLowerCase() === "approved" || String(c.status).toLowerCase() === "cleared");
+    });
+    if (match) return true;
+  }
+  return false;
+};
 
 interface QrDogInfo {
   id?: string;
@@ -116,6 +166,9 @@ const Pets = () => {
   const [selectedViewDog, setSelectedViewDog] = useState<any | null>(null);
   const [timelineDog, setTimelineDog] = useState<any | null>(null);
 
+  const [pendingPhotoUrl, setPendingPhotoUrl] = useState<string | null>(null);
+  const [isSavingPhoto, setIsSavingPhoto] = useState(false);
+
   // QR modal state
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrDog, setQrDog] = useState<QrDogInfo | null>(null);
@@ -159,14 +212,129 @@ const Pets = () => {
     ...dog,
     registration_number: dog.registration_number || dog.id || "-",
     name: dog.name || "-",
+    photo_url: getDogPhotoUrl(dog),
     breed: dog.breed || "-",
     gender: dog.gender || "",
     estimated_age: dog.estimated_age || dog.age || "-",
     age_months: dog.age_months ?? "",
     weight: dog.weight ?? "",
     is_adoptable: !!dog.is_adoptable,
+    is_public_visible: dog.is_public_visible !== false,
     status: dog.status || "-",
   });
+
+  const handleMasterPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedViewDog) return;
+
+    const userRole = getCurrentUserRole();
+    const canEdit =
+      hasPermission("edit_animals") ||
+      userRole === "super_admin" ||
+      userRole === "shelter_manager" ||
+      userRole === "adoption_coordinator" ||
+      userRole === "rescue_centre_admin";
+
+    if (!canEdit) {
+      addToast("You do not have permission to upload or change dog photos.", "error");
+      e.target.value = "";
+      return;
+    }
+
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+      addToast("Invalid file format. Only JPG, JPEG, PNG, and WEBP images are supported.", "error");
+      e.target.value = "";
+      return;
+    }
+
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      addToast("File size exceeds 5MB limit. Please select a smaller photo.", "error");
+      e.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (!reader.result) return;
+      const photoDataUrl = String(reader.result);
+      setPendingPhotoUrl(photoDataUrl);
+      e.target.value = "";
+    };
+    reader.onerror = () => {
+      addToast("Failed to process photo file.", "error");
+      e.target.value = "";
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveMasterPhoto = async () => {
+    if (!pendingPhotoUrl || !selectedViewDog) return;
+    const dId = dogId(selectedViewDog);
+    if (!dId) {
+      addToast("Cannot identify dog record to save photo.", "error");
+      return;
+    }
+
+    try {
+      setIsSavingPhoto(true);
+
+      await dogService.updateDog(dId, { photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl });
+
+      try {
+        localStorage.setItem(`pawguard_dog_photo_${dId}`, pendingPhotoUrl);
+        sessionStorage.setItem(`pawguard_dog_photo_${dId}`, pendingPhotoUrl);
+      } catch {
+        /* storage fallback */
+      }
+
+      let freshDog: any = null;
+      try {
+        const freshRes = await petService.getPetById(dId);
+        const freshData = freshRes?.data || freshRes;
+        if (freshData && (freshData.id || freshData.registration_number || freshData.name)) {
+          freshDog = formatDog(freshData);
+        }
+      } catch {
+        freshDog = null;
+      }
+
+      const updatedDog = freshDog
+        ? { ...freshDog, photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl }
+        : { ...selectedViewDog, photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl };
+
+      setSelectedViewDog(updatedDog);
+      setDogs((prevDogs: any[]) =>
+        prevDogs.map((d: any) =>
+          dogId(d) === dId ? { ...d, photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl } : d
+        )
+      );
+
+      notifyDataChanged();
+      await publishActionEvent({
+        module: "shelter",
+        action: "update",
+        title: "Dog Photo Updated",
+        message: `Updated photo for dog ${selectedViewDog.name || dId}`,
+        targetRoles: ["super_admin", "shelter_manager", "adoption_coordinator"],
+        metadata: { dog_id: dId },
+      });
+
+      addToast("Dog photo saved successfully!", "success");
+      setPendingPhotoUrl(null);
+      fetchDogs();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to save dog photo.";
+      addToast(msg, "error");
+    } finally {
+      setIsSavingPhoto(false);
+    }
+  };
+
+  const handleCancelPhotoPreview = () => {
+    setPendingPhotoUrl(null);
+  };
 
   const fetchDogs = async () => {
     try {
@@ -333,30 +501,32 @@ const Pets = () => {
     }
   };
 
-  const openViewMasterFile = (dog: any) => {
-    setSelectedViewDog(dog);
+  const openViewMasterFile = async (dog: any) => {
+    setPendingPhotoUrl(null);
+    const dId = dogId(dog);
+    const cachedPhoto = dId ? localStorage.getItem(`pawguard_dog_photo_${dId}`) || sessionStorage.getItem(`pawguard_dog_photo_${dId}`) : null;
+    const initialDog = cachedPhoto && !getDogPhotoUrl(dog) ? { ...dog, photo_url: cachedPhoto, image_url: cachedPhoto } : dog;
+
+    setSelectedViewDog(initialDog);
     setIsViewModalOpen(true);
+
+    if (dId) {
+      try {
+        const res = await petService.getPetById(dId);
+        const fresh = res?.data || res;
+        if (fresh && (fresh.id || fresh.registration_number || fresh.name)) {
+          const formatted = formatDog(fresh);
+          setSelectedViewDog((prev: any) => (prev && dogId(prev) === dId ? { ...prev, ...formatted } : prev));
+        }
+      } catch {
+        /* keep initialDog */
+      }
+    }
   };
 
   const openTimelineModal = (dog: any) => {
     setTimelineDog(dog);
     setIsTimelineModalOpen(true);
-  };
-
-  const openEdit = (dog: any) => {
-    setSelectedDog(dog);
-    setPetForm({
-      name: dog.name && dog.name !== "-" ? dog.name : "",
-      breed: dog.breed && dog.breed !== "-" ? dog.breed : "",
-      gender: GENDERS.includes(dog.gender) ? dog.gender : "unknown",
-      estimated_age: dog.estimated_age && dog.estimated_age !== "-" ? dog.estimated_age : "",
-      age_months: dog.age_months !== undefined && dog.age_months !== "" ? String(dog.age_months) : "",
-      weight: dog.weight !== undefined && dog.weight !== "" ? String(dog.weight) : "",
-      is_adoptable: !!dog.is_adoptable,
-      status: DOG_STATUSES.includes(dog.status) ? dog.status : "shelter",
-      rescue_case_id: dog.rescue_case_id || "",
-    });
-    setIsEditModalOpen(true);
   };
 
   const openDelete = (dog: any) => {
@@ -857,89 +1027,13 @@ const Pets = () => {
 
   const rowActions = (row: any) => (
     <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-      <Can permission="view_animals">
-        <button
-          onClick={() => openViewMasterFile(row)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: "1px solid #93C5FD",
-            background: "#EFF6FF",
-            color: "#1D4ED8",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <FaEye /> Master File
-        </button>
-        <button
-          onClick={() => openTimelineModal(row)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: "1px solid #C4B5FD",
-            background: "#F5F3FF",
-            color: "#6D28D9",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <FaHistory /> Timeline
-        </button>
-      </Can>
-      <Can permission="edit_animals">
-        <button
-          onClick={() => openQrModal(row)}
-          disabled={!dogId(row)}
-          title="Generate / view this dog's unique QR code tag"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: dogId(row) ? "1px solid #C4B5FD" : "1px solid #E2E8F0",
-            background: dogId(row) ? "#FFFFFF" : "#F1F5F9",
-            color: dogId(row) ? "#6D28D9" : "#94A3B8",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: dogId(row) ? "pointer" : "not-allowed",
-          }}
-        >
-          <FaQrcode /> Generate QR
-        </button>
-      </Can>
-      <Can permission="edit_animals">
-        <button
-          onClick={() => openEdit(row)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: "1px solid #CBD5E1",
-            background: "#FFFFFF",
-            color: "#2563EB",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <FaEdit /> Edit
-        </button>
-      </Can>
       <Can permission="delete_animals">
         <button
-          onClick={() => openDelete(row)}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            openDelete(row);
+          }}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -1145,6 +1239,7 @@ const Pets = () => {
           error={error}
           onRetry={fetchDogs}
           emptyMessage="No dogs registered yet. Register a rescued dog to get started."
+          onRowClick={openViewMasterFile}
           renderRowActions={rowActions}
           serverMode
           totalCount={totalCount}
@@ -2378,33 +2473,451 @@ const Pets = () => {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                background: "#F8FAFC",
-                border: "1px solid #E2E8F0",
-                borderRadius: "10px",
-                padding: "16px",
+                background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+                borderRadius: "12px",
+                padding: "16px 20px",
+                color: "#FFFFFF",
+                flexWrap: "wrap",
+                gap: "12px",
               }}
             >
-              <div>
-                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
-                  {selectedViewDog.name || "Unnamed Dog"}
-                </h2>
-                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  Registration ID: <strong style={{ fontFamily: "monospace" }}>{selectedViewDog.registration_number || selectedViewDog.id}</strong>
+              <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+                <div style={{ position: "relative" }}>
+                  <label
+                    style={{
+                      position: "relative",
+                      cursor: isSavingPhoto ? "not-allowed" : "pointer",
+                      display: "block",
+                      width: "76px",
+                      height: "76px",
+                      flexShrink: 0,
+                    }}
+                    title="Click to Upload or Select New Dog Photo (JPG, PNG, WEBP max 5MB)"
+                  >
+                    {(pendingPhotoUrl || getDogPhotoUrl(selectedViewDog)) ? (
+                      <img
+                        src={pendingPhotoUrl || getDogPhotoUrl(selectedViewDog)}
+                        alt={selectedViewDog.name || "Dog"}
+                        style={{
+                          width: "76px",
+                          height: "76px",
+                          borderRadius: "12px",
+                          objectFit: "cover",
+                          border: pendingPhotoUrl ? "2px solid #F59E0B" : "2px solid #38BDF8",
+                          boxShadow: "0 4px 6px -1px rgba(0,0,0,0.3)",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "76px",
+                          height: "76px",
+                          borderRadius: "12px",
+                          background: "#334155",
+                          border: "2px dashed #64748B",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#94A3B8",
+                        }}
+                      >
+                        <FaPaw style={{ fontSize: "24px" }} />
+                        <span style={{ fontSize: "9px", fontWeight: 700, marginTop: "2px" }}>No Photo</span>
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: "12px",
+                        background: "rgba(15, 23, 42, 0.75)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#FFFFFF",
+                        opacity: 0,
+                        transition: "opacity 0.2s ease",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        textAlign: "center",
+                        padding: "2px",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
+                    >
+                      <FaCamera style={{ fontSize: "16px", marginBottom: "2px" }} />
+                      <span>{getDogPhotoUrl(selectedViewDog) ? "Change" : "Add"}</span>
+                    </div>
+
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/jpg,image/png,image/webp"
+                      style={{ display: "none" }}
+                      onChange={handleMasterPhotoSelect}
+                      disabled={isSavingPhoto}
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#FFFFFF" }}>
+                    {selectedViewDog.name || "Unnamed Dog"}
+                  </h2>
+                  <div style={{ fontSize: "13px", color: "#94A3B8", marginTop: "4px" }}>
+                    Registration ID: <strong style={{ fontFamily: "monospace", color: "#F3F4F6" }}>{selectedViewDog.registration_number || selectedViewDog.id}</strong> &bull;{" "}
+                    Breed: <strong style={{ color: "#F3F4F6" }}>{selectedViewDog.breed || "Mixed"}</strong>
+                  </div>
+
+                  {pendingPhotoUrl && (
+                    <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={handleSaveMasterPhoto}
+                        disabled={isSavingPhoto}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: "6px",
+                          border: "none",
+                          background: "#10B981",
+                          color: "#FFFFFF",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: isSavingPhoto ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                        }}
+                      >
+                        {isSavingPhoto ? "Saving Photo..." : "💾 Save Photo"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelPhotoPreview}
+                        disabled={isSavingPhoto}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          border: "1px solid #64748B",
+                          background: "#334155",
+                          color: "#CBD5E1",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: isSavingPhoto ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <span style={{ fontSize: "11px", color: "#F59E0B", fontWeight: 700 }}>
+                        ⚠️ Unsaved Preview
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <span
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "999px",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  background: selectedViewDog.is_adoptable ? "#ECFDF5" : "#EFF6FF",
-                  color: selectedViewDog.is_adoptable ? "#059669" : "#2563EB",
-                }}
-              >
-                {selectedViewDog.is_adoptable ? "Ready for Adoption" : String(selectedViewDog.status || "Admitted").toUpperCase()}
-              </span>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <span
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "999px",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    background: selectedViewDog.is_adoptable ? "#10B981" : "#2563EB",
+                    color: "#FFFFFF",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {selectedViewDog.is_adoptable ? "Ready for Adoption" : String(selectedViewDog.status || "Admitted").toUpperCase()}
+                </span>
+              </div>
             </div>
+
+            {/* Stage-Driven Dog Master Profile Lifecycle Workflow Box */}
+            {(() => {
+              const dog = selectedViewDog;
+              if (!dog) return null;
+              const status = String(dog.status || "").toLowerCase();
+              const isAdoptable = !!dog.is_adoptable;
+              const isCleared = isDogMedicallyCleared(dog);
+              const mStatus = String(dog.medical_status || "").toLowerCase();
+              const isQuarantineOrTreatment = mStatus.includes("treatment") || mStatus.includes("quarantine") || dog.vet_clearance === false;
+
+              const handleAdmitToShelter = async () => {
+                const dId = dogId(dog);
+                try {
+                  await petService.updatePetStatus(dId, "shelter");
+                  addToast(`${dog.name || "Dog"} admitted to Shelter Care!`, "success");
+                  const updated = { ...dog, status: "shelter" };
+                  setSelectedViewDog(updated);
+                  notifyDataChanged();
+                  fetchDogs();
+                } catch (err: any) {
+                  addToast(err?.message || "Failed to update dog status.", "error");
+                }
+              };
+
+              const handleSendForCheckup = async () => {
+                const dId = dogId(dog);
+                try {
+                  await petService.updatePet(dId, { status: "clinic", medical_status: "Checkup Requested" });
+                  await publishActionEvent({
+                    module: "medical",
+                    action: "create",
+                    title: "Medical Checkup Requested",
+                    message: `Medical checkup requested for dog ${dog.name || dId}. Assigned to Veterinarian queue.`,
+                    targetRoles: ["super_admin", "veterinarian"],
+                    metadata: { dog_id: dId },
+                  });
+                  addToast(`Medical checkup request submitted for ${dog.name || "Dog"}. Sent to Veterinarian queue!`, "success");
+                  const updated = { ...dog, status: "clinic", medical_status: "Checkup Requested" };
+                  setSelectedViewDog(updated);
+                  notifyDataChanged();
+                  fetchDogs();
+                } catch (err: any) {
+                  addToast(err?.message || "Failed to submit medical checkup request.", "error");
+                }
+              };
+
+              const handleIssueVetClearance = async () => {
+                const dId = dogId(dog);
+                const userRole = getCurrentUserRole();
+                if (userRole !== "veterinarian" && userRole !== "super_admin") {
+                  addToast("Only a Veterinarian or Super Admin can issue medical clearance.", "error");
+                  return;
+                }
+                try {
+                  await medicalService.issueCertificate({
+                    dog_id: dId,
+                    clearance_type: "adoption_surgery",
+                    status: "cleared",
+                    decision_notes: "Dog completed comprehensive clinical examination. Medically cleared & fit for adoption.",
+                  });
+                  await petService.updatePet(dId, {
+                    medical_status: "Medically Cleared",
+                    is_fit_for_adoption: true,
+                    vet_clearance: true,
+                    vet_clearance_status: "approved",
+                  });
+                  addToast(`Veterinary Clearance issued for ${dog.name || "Dog"}! Medically fit for adoption.`, "success");
+                  const updated = {
+                    ...dog,
+                    vet_clearance: true,
+                    vet_clearance_status: "approved",
+                    is_fit_for_adoption: true,
+                    medical_status: "Medically Cleared",
+                  };
+                  setSelectedViewDog(updated);
+                  notifyDataChanged();
+                  fetchDogs();
+                } catch (err: any) {
+                  addToast(err?.message || "Failed to issue veterinary clearance.", "error");
+                }
+              };
+
+              const handleMarkReadyForAdoption = async () => {
+                const dId = dogId(dog);
+                if (!isCleared) {
+                  addToast("Medical checkup required. This dog must be examined and cleared by a veterinarian before it can be marked Ready for Adoption.", "error");
+                  return;
+                }
+                try {
+                  await petService.markDogAdoptable(dId);
+                  addToast(`${dog.name || "Dog"} is now marked Ready for Adoption!`, "success");
+                  const updated = { ...dog, is_adoptable: true, status: "shelter" };
+                  setSelectedViewDog(updated);
+                  notifyDataChanged();
+                  fetchDogs();
+                } catch (err: any) {
+                  addToast(err?.message || "Failed to mark dog as adoptable.", "error");
+                }
+              };
+
+              if (status === "rescued") {
+                return (
+                  <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#1D4ED8", textTransform: "uppercase" }}>CURRENT STAGE:</span>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#1E40AF" }}>Rescued & Intaked</div>
+                        <div style={{ fontSize: "13px", color: "#3B82F6", marginTop: "2px" }}>Next Action: Admit to Shelter Care</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAdmitToShelter}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: "8px",
+                          border: "none",
+                          background: "#2563EB",
+                          color: "#FFFFFF",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Admit to Shelter
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (status === "shelter" && !isAdoptable && !isCleared && !isQuarantineOrTreatment) {
+                return (
+                  <div style={{ background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#B45309", textTransform: "uppercase" }}>CURRENT STAGE:</span>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#92400E" }}>Shelter Care & Admission</div>
+                        <div style={{ fontSize: "13px", color: "#D97706", marginTop: "2px" }}>Next Action: Send for Medical Checkup & Vet Examination</div>
+                      </div>
+                      <Can permission="edit_animals">
+                        <button
+                          type="button"
+                          onClick={handleSendForCheckup}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "#D97706",
+                            color: "#FFFFFF",
+                            fontWeight: 700,
+                            fontSize: "13px",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <FaStethoscope /> Send for Medical Checkup
+                        </button>
+                      </Can>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (status === "clinic" || mStatus.includes("checkup") || (isQuarantineOrTreatment && !isCleared)) {
+                const userRole = getCurrentUserRole();
+                const isVetOrAdmin = userRole === "veterinarian" || userRole === "super_admin";
+                return (
+                  <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#6D28D9", textTransform: "uppercase" }}>CURRENT STAGE:</span>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#5B21B6" }}>
+                          {isQuarantineOrTreatment ? "Under Medical Treatment & Care" : "Under Veterinary Checkup / Clinic"}
+                        </div>
+                        <div style={{ fontSize: "13px", color: "#7C3AED", marginTop: "2px" }}>
+                          Next Action: Veterinarian Clinical Examination & Decision
+                        </div>
+                      </div>
+
+                      {isVetOrAdmin ? (
+                        <button
+                          type="button"
+                          onClick={handleIssueVetClearance}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "#6D28D9",
+                            color: "#FFFFFF",
+                            fontWeight: 700,
+                            fontSize: "13px",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <FaStethoscope /> Issue Veterinary Clearance
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: "12px", color: "#6D28D9", fontWeight: 600, background: "#EDE9FE", padding: "6px 12px", borderRadius: "6px" }}>
+                          ⏳ Waiting for Veterinarian Examination & Decision
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (isCleared && !isAdoptable && status !== "adopted") {
+                return (
+                  <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#047857", textTransform: "uppercase" }}>CURRENT STAGE:</span>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#065F46" }}>Medically Cleared & Fit for Adoption</div>
+                        <div style={{ fontSize: "13px", color: "#059669", marginTop: "2px" }}>Next Action: Mark Ready for Adoption</div>
+                      </div>
+                      <Can permission="edit_animals">
+                        <button
+                          type="button"
+                          onClick={handleMarkReadyForAdoption}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "#059669",
+                            color: "#FFFFFF",
+                            fontWeight: 700,
+                            fontSize: "13px",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <FaCheckCircle /> Mark Ready for Adoption
+                        </button>
+                      </Can>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (isAdoptable && status !== "adopted") {
+                return (
+                  <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#15803D", textTransform: "uppercase" }}>CURRENT STAGE:</span>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#166534" }}>Ready for Adoption (Listed on Public Site)</div>
+                        <div style={{ fontSize: "13px", color: "#16A34A", marginTop: "2px" }}>Next Action: Adoption Application Review & Handover</div>
+                      </div>
+                      <span style={{ fontSize: "12px", color: "#166534", fontWeight: 700, background: "#DCFCE7", padding: "6px 12px", borderRadius: "6px" }}>
+                        🐶 Listed for Public Adoption
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (status === "adopted") {
+                return (
+                  <div style={{ background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>CURRENT STAGE:</span>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#0F172A" }}>Adopted (Forever Home Joined)</div>
+                        <div style={{ fontSize: "13px", color: "#64748B", marginTop: "2px" }}>Lifecycle Completed &bull; Removed from Public Adoption Listing</div>
+                      </div>
+                      <span style={{ fontSize: "12px", color: "#0F172A", fontWeight: 700, background: "#E2E8F0", padding: "6px 12px", borderRadius: "6px" }}>
+                        🎉 Adopted
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              return null;
+            })()}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>

@@ -14,6 +14,8 @@ export interface PetPayload {
   temperament?: string;
   is_spayed_neutered?: boolean;
   is_adoptable?: boolean;
+  is_public_visible?: boolean;
+  photo_url?: string;
   is_quarantine_passed?: boolean;
   status?: string;
   [key: string]: unknown;
@@ -79,7 +81,20 @@ export const petService = {
   },
 
   markDogAdoptable: async (dogId: string) => {
-    const response = await api.put(`/dogs/${dogId}`, { is_adoptable: true });
+    let responseData: any;
+    try {
+      const res = await api.put(`/dogs/${dogId}`, { is_adoptable: true });
+      responseData = res.data;
+    } catch {
+      try {
+        const res = await api.patch(`/dogs/${dogId}/status`, { is_adoptable: true, status: "shelter" });
+        responseData = res.data;
+      } catch {
+        const res = await api.put(`/dogs/${dogId}`, { is_adoptable: true, status: "shelter" });
+        responseData = res.data;
+      }
+    }
+
     await publishActionEvent({
       module: "shelter",
       action: "update",
@@ -92,7 +107,7 @@ export const petService = {
         "rescue_centre_admin",
       ],
     });
-    return response.data;
+    return responseData;
   },
 
   deletePet: async (dogId: string) => {
