@@ -611,6 +611,7 @@ const FosterManagement = () => {
             columns={columns}
             data={paginatedFosters}
             module="foster"
+            onRowClick={(row) => void openFosterDetail(row)}
             onEdit={(row) => {
               setEditForm({
                 id: row.id,

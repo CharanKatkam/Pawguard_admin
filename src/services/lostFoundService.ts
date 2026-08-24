@@ -224,15 +224,65 @@ export const lostFoundService = {
     return response.data;
   },
 
-  broadcastLostPetAlert: async (reportId: string) => {
+  broadcastLostPetAlert: async (reportId: string, reportDetails?: Record<string, any> | Partial<LostReport>) => {
+    let report = reportDetails as any;
+    if (!report || !report.pet_name) {
+      try {
+        report = await lostFoundService.getLostReportById(reportId);
+      } catch {
+        /* best effort fallback */
+      }
+    }
+
+    const petName = report?.pet_name || "Pet";
+    const breed = report?.breed || "dog";
+    const color = report?.color || "";
+    const location = report?.location_address || "nearby location";
+
     const response = await api.post(`/lost-found/lost/${reportId}/broadcast`);
+
+    // Broadcast alert to ALL signed-in users on public website & admin portal
+    try {
+      await api.post("/notifications/send", {
+        title: `🚨 LOST PET ALERT: ${petName}`,
+        body: `ALERT: ${petName}${color ? ` (${color} ${breed})` : ` (${breed})`} was reported lost near ${location}. Please check details and help locate this pet!`,
+        notification_type: "emergency",
+        action_url: `/lost-found/lost/${reportId}`,
+        is_broadcast: true,
+        send_email: false,
+        target_roles: [
+          "general_public",
+          "volunteer",
+          "foster_family",
+          "adopter",
+          "user",
+          "public",
+          "super_admin",
+          "rescue_centre_admin",
+          "rescue_coordinator",
+          "rescue_agent",
+          "veterinarian",
+          "shelter_manager",
+          "adoption_coordinator",
+          "foster_coordinator",
+          "volunteer_coordinator",
+          "inventory_manager",
+          "finance_user",
+        ],
+      });
+    } catch {
+      /* fallback below */
+    }
+
     await publishActionEvent({
       module: "lost_found",
       action: "create",
-      title: "Lost Pet Alert Broadcast",
-      message: `Lost pet alert ${reportId} broadcast across community channels.`,
+      title: `Lost Pet Alert Broadcast: ${petName}`,
+      message: `Lost pet alert for ${petName} (${breed}) lost near ${location} broadcast to all signed-in users.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "shelter_manager", "adoption_coordinator"],
+      actionUrl: `/lost-found/lost/${reportId}`,
     });
+
     return response.data;
   },
 

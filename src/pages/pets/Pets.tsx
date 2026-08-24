@@ -27,6 +27,7 @@ import dogService from "../../services/dogService";
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
 import medicalService from "../../services/medicalService";
+import storageService from "../../services/storageService";
 import { getCurrentUserRole } from "../../utils/roleUtils";
 import { hasPermission } from "../../utils/rbac";
 import { notifyDataChanged } from "../../utils/dataSync";
@@ -167,6 +168,7 @@ const Pets = () => {
   const [timelineDog, setTimelineDog] = useState<any | null>(null);
 
   const [pendingPhotoUrl, setPendingPhotoUrl] = useState<string | null>(null);
+  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
   const [isSavingPhoto, setIsSavingPhoto] = useState(false);
 
   // QR modal state
@@ -255,6 +257,8 @@ const Pets = () => {
       return;
     }
 
+    setPendingPhotoFile(file);
+
     const reader = new FileReader();
     reader.onload = () => {
       if (!reader.result) return;
@@ -280,11 +284,29 @@ const Pets = () => {
     try {
       setIsSavingPhoto(true);
 
-      await dogService.updateDog(dId, { photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl });
+      let persistentStorageUrl = pendingPhotoUrl;
 
+      // 1. If a raw File was selected, upload it to persistent Supabase Storage via backend presigned URL
+      if (pendingPhotoFile) {
+        persistentStorageUrl = await storageService.uploadFile(pendingPhotoFile, {
+          folder: "dogs",
+          entity_type: "dog_profile",
+          entity_id: dId,
+        });
+      }
+
+      // 2. Persist the storage URL to the backend dog master record
+      await dogService.updateDog(dId, {
+        image_urls: [persistentStorageUrl],
+        photo_gallery_urls: [persistentStorageUrl],
+        photo_url: persistentStorageUrl,
+        image_url: persistentStorageUrl,
+      });
+
+      // Clear legacy base64 localStorage fallback so UI uses backend storage URL
       try {
-        localStorage.setItem(`pawguard_dog_photo_${dId}`, pendingPhotoUrl);
-        sessionStorage.setItem(`pawguard_dog_photo_${dId}`, pendingPhotoUrl);
+        localStorage.removeItem(`pawguard_dog_photo_${dId}`);
+        sessionStorage.removeItem(`pawguard_dog_photo_${dId}`);
       } catch {
         /* storage fallback */
       }
@@ -301,13 +323,13 @@ const Pets = () => {
       }
 
       const updatedDog = freshDog
-        ? { ...freshDog, photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl }
-        : { ...selectedViewDog, photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl };
+        ? { ...freshDog, photo_url: persistentStorageUrl, image_url: persistentStorageUrl, image_urls: [persistentStorageUrl], photo_gallery_urls: [persistentStorageUrl] }
+        : { ...selectedViewDog, photo_url: persistentStorageUrl, image_url: persistentStorageUrl, image_urls: [persistentStorageUrl], photo_gallery_urls: [persistentStorageUrl] };
 
       setSelectedViewDog(updatedDog);
       setDogs((prevDogs: any[]) =>
         prevDogs.map((d: any) =>
-          dogId(d) === dId ? { ...d, photo_url: pendingPhotoUrl, image_url: pendingPhotoUrl } : d
+          dogId(d) === dId ? { ...d, photo_url: persistentStorageUrl, image_url: persistentStorageUrl, image_urls: [persistentStorageUrl], photo_gallery_urls: [persistentStorageUrl] } : d
         )
       );
 
@@ -321,8 +343,9 @@ const Pets = () => {
         metadata: { dog_id: dId },
       });
 
-      addToast("Dog photo saved successfully!", "success");
+      addToast("Dog photo uploaded and saved successfully!", "success");
       setPendingPhotoUrl(null);
+      setPendingPhotoFile(null);
       fetchDogs();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to save dog photo.";
@@ -334,6 +357,7 @@ const Pets = () => {
 
   const handleCancelPhotoPreview = () => {
     setPendingPhotoUrl(null);
+    setPendingPhotoFile(null);
   };
 
   const fetchDogs = async () => {

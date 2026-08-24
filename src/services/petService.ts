@@ -16,6 +16,8 @@ export interface PetPayload {
   is_adoptable?: boolean;
   is_public_visible?: boolean;
   photo_url?: string;
+  image_urls?: string[];
+  photo_gallery_urls?: string[];
   is_quarantine_passed?: boolean;
   status?: string;
   [key: string]: unknown;

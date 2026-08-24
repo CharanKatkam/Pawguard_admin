@@ -540,6 +540,7 @@ const Adoptions = () => {
             columns={columns}
             data={paginatedAdoptions}
             module="adoptions"
+            onRowClick={(row) => void openInspectModal(row)}
             onDelete={(row) => {
               setSelectedAdoption(row);
               setIsDeleteModalOpen(true);

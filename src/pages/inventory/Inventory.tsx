@@ -514,6 +514,7 @@ const Inventory = () => {
           columns={columns}
           data={paginatedInventory}
           module="inventory"
+          onRowClick={(row: InventoryRow) => void handleFetchMovements(row)}
           renderRowActions={(row: InventoryRow) => (
             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
               <button

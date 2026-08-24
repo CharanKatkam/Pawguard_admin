@@ -814,7 +814,7 @@ const LostAndFound = () => {
     if (!selectedReport) return;
     try {
       setBroadcasting(true);
-      const res = await lostFoundService.broadcastLostPetAlert(selectedReport.id);
+      const res = await lostFoundService.broadcastLostPetAlert(selectedReport.id, selectedReport);
       const message =
         (res && typeof res === "object"
           ? (res as { message?: unknown }).message
@@ -1606,6 +1606,7 @@ const LostAndFound = () => {
           pageSize={PAGE_SIZE}
           searchValue={search}
           onSearchChange={setSearch}
+          onRowClick={(row: RegistryReport) => openDetails(row)}
           renderRowActions={(row: RegistryReport) => {
             const rowKind = (row as RegistryReport & { _kind?: unknown })._kind;
             const kind = rowKind === "found" || rowKind === "lost" ? rowKind : (activeTab === "found" ? "found" : "lost");

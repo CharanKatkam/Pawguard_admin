@@ -11,6 +11,8 @@ export interface DogPayload {
   is_adoptable?: boolean;
   is_public_visible?: boolean;
   photo_url?: string;
+  image_urls?: string[];
+  photo_gallery_urls?: string[];
   registration_number?: string;
   [key: string]: unknown;
 }

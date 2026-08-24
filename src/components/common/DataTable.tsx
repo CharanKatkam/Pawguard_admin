@@ -171,9 +171,23 @@ function DataTable<T = any>({
     );
   };
 
-  const handleRowClick = (row: T) => {
+  const handleRowClick = (e: React.MouseEvent, row: T) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      target.closest(
+        "button, input, select, textarea, a, svg, label, [role='button'], .no-row-click"
+      )
+    ) {
+      return;
+    }
     if (onRowClick) {
       onRowClick(row);
+    } else if (_onView) {
+      _onView(row);
+    } else {
+      setSelectedRow(row as unknown as Record<string, any>);
+      setModalMode("view");
     }
   };
 
@@ -422,11 +436,11 @@ function DataTable<T = any>({
                 return (
                 <tr
                   key={idx}
-                  onClick={onRowClick ? () => handleRowClick(row) : undefined}
+                  onClick={(e) => handleRowClick(e, row)}
                   style={{
                     borderBottom: "1px solid #F1F5F9",
                     transition: "background 0.15s ease",
-                    cursor: onRowClick ? "pointer" : "default",
+                    cursor: "pointer",
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#F8FAFC")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "#FFFFFF")}
@@ -472,6 +486,7 @@ function DataTable<T = any>({
                   })}
                   {showRowActions && (
                     <td
+                      onClick={(e) => e.stopPropagation()}
                       style={{
                         padding: "14px 16px",
                         textAlign: "right",
