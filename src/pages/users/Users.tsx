@@ -1266,9 +1266,6 @@ const Users = () => {
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
               {getTableTitle()}
             </h3>
-            <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-              Showing {filteredUsers.length} account(s)
-            </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>

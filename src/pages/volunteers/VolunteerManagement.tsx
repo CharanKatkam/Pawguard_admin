@@ -14,7 +14,6 @@ import {
   FaAward,
   FaFilter,
   FaSync,
-  FaSearch,
   FaEye,
   FaExclamationCircle,
   FaBan,
@@ -1192,42 +1191,7 @@ const VolunteerManagement = () => {
                 Review submitted applications. Admin action required for pending submissions.
               </p>
             </div>
-
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <FaFilter size={12} color="#64748B" />
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
-                >
-                  {STATUS_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ position: "relative" }}>
-                <FaSearch style={{ position: "absolute", left: "10px", top: "11px", color: "#94A3B8" }} size={12} />
-                <input
-                  type="text"
-                  placeholder="Search applicant name, email, skills..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ padding: "8px 12px 8px 30px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", width: "230px" }}
-                />
-              </div>
-
-              <button
-                onClick={() => void fetchApplications()}
-                disabled={volLoading}
-                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F8FAFC", fontSize: "13px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
-              >
-                <FaSync style={{ animation: volLoading ? "spin 1s linear infinite" : "none" }} /> Refresh
-              </button>
-            </div>
           </div>
-
           {volError && (
             <div style={{ marginBottom: "16px", padding: "12px 16px", borderRadius: "8px", background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", fontSize: "13px", fontWeight: 600 }}>
               ⚠️ {volError}
@@ -1237,7 +1201,38 @@ const VolunteerManagement = () => {
           {volLoading ? (
             <p style={{ color: "#64748B", padding: "20px 0" }}>Loading volunteer applications from backend...</p>
           ) : (
-            <DataTable columns={appColumns} data={filteredApplications} module="volunteers" />
+            <DataTable
+              columns={appColumns}
+              data={filteredApplications}
+              module="volunteers"
+              serverMode={true}
+              totalCount={filteredApplications.length}
+              searchValue={searchQuery}
+              onSearchChange={setSearchQuery}
+              leftHeaderControls={
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <FaFilter size={12} color="#64748B" />
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+                    >
+                      {STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => void fetchApplications()}
+                    disabled={volLoading}
+                    style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F8FAFC", fontSize: "13px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaSync style={{ animation: volLoading ? "spin 1s linear infinite" : "none" }} /> Refresh
+                  </button>
+                </>
+              }
+            />
           )}
         </div>
       )}

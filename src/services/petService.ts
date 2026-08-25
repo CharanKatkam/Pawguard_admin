@@ -30,6 +30,47 @@ export const petService = {
     return response.data;
   },
 
+  // GET /dogs — fetch complete dataset across all pages for global KPI calculations
+  getAllDogs: async (params?: Record<string, unknown>) => {
+    const pageSize = 100;
+    const collected: any[] = [];
+    try {
+      const firstRes = await api.get("/dogs", { params: { ...params, page: 1, page_size: pageSize } });
+      const firstBody = firstRes.data;
+      const firstList = Array.isArray(firstBody?.data) ? firstBody.data : Array.isArray(firstBody) ? firstBody : [];
+      collected.push(...firstList);
+
+      const totalRecords = firstBody?.meta?.total ?? firstBody?.data?.meta?.total ?? collected.length;
+      const actualPageSize = firstBody?.meta?.page_size ?? (firstList.length > 0 ? firstList.length : pageSize);
+      const totalPages = firstBody?.meta?.total_pages ?? Math.ceil(totalRecords / Math.max(1, actualPageSize));
+
+      for (let p = 2; p <= totalPages; p++) {
+        try {
+          const pageRes = await api.get("/dogs", { params: { ...params, page: p, page_size: pageSize } });
+          const pageBody = pageRes.data;
+          const pageList = Array.isArray(pageBody?.data) ? pageBody.data : Array.isArray(pageBody) ? pageBody : [];
+          collected.push(...pageList);
+        } catch (pErr) {
+          console.warn(`Failed to fetch page ${p} of dogs:`, pErr);
+        }
+      }
+
+      return {
+        success: true,
+        data: collected,
+        meta: { total: Math.max(totalRecords, collected.length) },
+      };
+    } catch (err) {
+      console.warn("Failed to fetch all dogs in getAllDogs:", err);
+      try {
+        const fallbackRes = await api.get("/dogs", { params });
+        return fallbackRes.data;
+      } catch {
+        return { success: false, data: [], meta: { total: 0 } };
+      }
+    }
+  },
+
   getPetById: async (dogId: string) => {
     const response = await api.get(`/dogs/${dogId}`);
     return response.data;

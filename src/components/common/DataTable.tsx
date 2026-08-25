@@ -45,6 +45,8 @@ export interface DataTableProps<T = any> {
   hideSearch?: boolean;
   /** Custom controls to render on the left side of the table header row. */
   leftHeaderControls?: React.ReactNode;
+  /** Option to hide the pagination footer bar. */
+  hidePagination?: boolean;
   /** Custom max width for the table search box (e.g. "480px"). */
   searchMaxWidth?: string;
 }
@@ -70,6 +72,7 @@ function DataTable<T = any>({
   searchValue,
   onSearchChange,
   hideSearch = false,
+  hidePagination = false,
   leftHeaderControls,
   searchMaxWidth,
 }: DataTableProps<T>): React.ReactElement {
@@ -251,49 +254,44 @@ function DataTable<T = any>({
             flexWrap: "wrap",
           }}
         >
-          {leftHeaderControls ? (
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-              {leftHeaderControls}
-            </div>
-          ) : !hideSearch ? (
-            <div style={{ position: "relative", width: "100%", maxWidth: searchMaxWidth || "320px", flex: "1 1 200px" }}>
-              <FaSearch
-                style={{
-                  position: "absolute",
-                  left: "12px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "#94A3B8",
-                  fontSize: "14px",
-                }}
-              />
-              <input
-                type="text"
-                placeholder="Search records..."
-                value={serverMode ? (searchValue ?? "") : searchTerm}
-                onChange={(e) => {
-                  if (serverMode) {
-                    if (onSearchChange) onSearchChange(e.target.value);
-                  } else {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  padding: searchMaxWidth ? "10px 14px 10px 38px" : "9px 12px 9px 36px",
-                  borderRadius: "8px",
-                  border: "1px solid #CBD5E1",
-                  fontSize: searchMaxWidth ? "14px" : "13px",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-          ) : null}
-
-          <div style={{ fontSize: "13px", color: "#64748B", marginLeft: "auto" }}>
-            Showing <strong>{pageData.length}</strong> of <strong>{totalRecords}</strong> entries
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", flex: "1 1 auto" }}>
+            {!hideSearch && (
+              <div style={{ position: "relative", width: "100%", maxWidth: searchMaxWidth || "320px", flex: "1 1 200px" }}>
+                <FaSearch
+                  style={{
+                    position: "absolute",
+                    left: "12px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "#94A3B8",
+                    fontSize: "14px",
+                  }}
+                />
+                <input
+                  type="text"
+                  placeholder="Search records..."
+                  value={serverMode ? (searchValue ?? "") : searchTerm}
+                  onChange={(e) => {
+                    if (serverMode) {
+                      if (onSearchChange) onSearchChange(e.target.value);
+                    } else {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: searchMaxWidth ? "10px 14px 10px 38px" : "9px 12px 9px 36px",
+                    borderRadius: "8px",
+                    border: "1px solid #CBD5E1",
+                    fontSize: searchMaxWidth ? "14px" : "13px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            )}
+            {leftHeaderControls}
           </div>
         </div>
       )}
@@ -511,69 +509,71 @@ function DataTable<T = any>({
       </div>
 
       {/* Pagination Footer */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginTop: "16px",
-          flexWrap: "wrap",
-          gap: "12px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#64748B" }}>
-          <span>
-            Showing <strong>{totalRecords > 0 ? (activePage - 1) * pageSize + 1 : 0}</strong> to{" "}
-            <strong>{Math.min(activePage * pageSize, totalRecords)}</strong> of <strong>{totalRecords}</strong> records
-          </span>
-          <span style={{ color: "#CBD5E1" }}>•</span>
-          <span>
-            Page <strong>{activePage}</strong> of <strong>{totalPages}</strong>
-          </span>
-        </div>
+      {!hidePagination && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "16px",
+            flexWrap: "wrap",
+            gap: "12px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#64748B" }}>
+            <span>
+              Showing <strong>{totalRecords > 0 ? (activePage - 1) * pageSize + 1 : 0}</strong> to{" "}
+              <strong>{Math.min(activePage * pageSize, totalRecords)}</strong> of <strong>{totalRecords}</strong> records
+            </span>
+            <span style={{ color: "#CBD5E1" }}>•</span>
+            <span>
+              Page <strong>{activePage}</strong> of <strong>{totalPages}</strong>
+            </span>
+          </div>
 
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            onClick={() => goToPage(Math.max(1, activePage - 1))}
-            disabled={activePage === 1}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "6px 12px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              background: activePage === 1 ? "#F1F5F9" : "#FFFFFF",
-              color: activePage === 1 ? "#94A3B8" : "#0F172A",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: activePage === 1 ? "not-allowed" : "pointer",
-            }}
-          >
-            <FaChevronLeft size={11} /> Previous
-          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={() => goToPage(Math.max(1, activePage - 1))}
+              disabled={activePage === 1}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: activePage === 1 ? "#F1F5F9" : "#FFFFFF",
+                color: activePage === 1 ? "#94A3B8" : "#0F172A",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: activePage === 1 ? "not-allowed" : "pointer",
+              }}
+            >
+              <FaChevronLeft size={11} /> Previous
+            </button>
 
-          <button
-            onClick={() => goToPage(Math.min(totalPages, activePage + 1))}
-            disabled={activePage === totalPages}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "6px 12px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              background: activePage === totalPages ? "#F1F5F9" : "#FFFFFF",
-              color: activePage === totalPages ? "#94A3B8" : "#0F172A",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: activePage === totalPages ? "not-allowed" : "pointer",
-            }}
-          >
-            Next <FaChevronRight size={11} />
-          </button>
+            <button
+              onClick={() => goToPage(Math.min(totalPages, activePage + 1))}
+              disabled={activePage === totalPages}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                background: activePage === totalPages ? "#F1F5F9" : "#FFFFFF",
+                color: activePage === totalPages ? "#94A3B8" : "#0F172A",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: activePage === totalPages ? "not-allowed" : "pointer",
+              }}
+            >
+              Next <FaChevronRight size={11} />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* View / Edit Modal */}
       {selectedRow && modalMode && (

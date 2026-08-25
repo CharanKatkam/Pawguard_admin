@@ -16,7 +16,6 @@ import {
   FaClipboardList,
   FaEdit,
   FaMinusCircle,
-  FaSearch,
   FaHistory,
 } from "react-icons/fa";
 import inventoryService, {
@@ -461,59 +460,61 @@ const Inventory = () => {
           <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
             Stock Catalog &amp; Supplies Directory
           </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", minWidth: "240px" }}>
-              <FaSearch style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
-              <input
-                type="text"
-                placeholder="Search item, category, SKU..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ ...inputStyle, paddingLeft: "36px" }}
-              />
-            </div>
-            <select
-              value={categoryFilter}
-              onChange={(e) => {
-                setCategoryFilter(e.target.value);
-                setPage(1);
-              }}
-              style={{ ...inputStyle, width: "auto" }}
-            >
-              <option value="all">All Categories</option>
-              <option value="pharmaceutical">Pharmaceuticals</option>
-              <option value="vaccine">Vaccines</option>
-              <option value="food">Food &amp; Nutrition</option>
-              <option value="consumable">Consumables</option>
-              <option value="gear">Gear &amp; Equipment</option>
-              <option value="office">Office Supplies</option>
-            </select>
-            <select
-              value={stockStatusFilter}
-              onChange={(e) => {
-                setStockStatusFilter(e.target.value);
-                setPage(1);
-              }}
-              style={{ ...inputStyle, width: "auto" }}
-            >
-              <option value="all">All Stock Statuses</option>
-              <option value="low_stock">Low Stock Alerts</option>
-              <option value="in_stock">In Stock</option>
-            </select>
-            <button
-              onClick={() => setIsReqListModalOpen(true)}
-              style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <FaClipboardList color="#F59E0B" /> Requisitions ({requisitions.length})
-            </button>
-            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
-          </div>
+          {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
         </div>
 
         <DataTable
           columns={columns}
           data={paginatedInventory}
           module="inventory"
+          serverMode={true}
+          totalCount={filteredInventory.length}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          searchValue={searchQuery}
+          onSearchChange={(val) => {
+            setSearchQuery(val);
+            setPage(1);
+          }}
+          leftHeaderControls={
+            <>
+              <select
+                value={categoryFilter}
+                onChange={(e) => {
+                  setCategoryFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ ...inputStyle, width: "auto" }}
+              >
+                <option value="all">All Categories</option>
+                <option value="pharmaceutical">Pharmaceuticals</option>
+                <option value="vaccine">Vaccines</option>
+                <option value="food">Food &amp; Nutrition</option>
+                <option value="consumable">Consumables</option>
+                <option value="gear">Gear &amp; Equipment</option>
+                <option value="office">Office Supplies</option>
+              </select>
+              <select
+                value={stockStatusFilter}
+                onChange={(e) => {
+                  setStockStatusFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ ...inputStyle, width: "auto" }}
+              >
+                <option value="all">All Stock Statuses</option>
+                <option value="low_stock">Low Stock Alerts</option>
+                <option value="in_stock">In Stock</option>
+              </select>
+              <button
+                onClick={() => setIsReqListModalOpen(true)}
+                style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <FaClipboardList color="#F59E0B" /> Requisitions ({requisitions.length})
+              </button>
+            </>
+          }
           onRowClick={(row: InventoryRow) => void handleFetchMovements(row)}
           renderRowActions={(row: InventoryRow) => (
             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
@@ -558,28 +559,6 @@ const Inventory = () => {
             </div>
           )}
         />
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #E2E8F0" }}>
-          <span style={{ fontSize: "13px", color: "#64748B" }}>
-            Showing {filteredInventory.length > 0 ? (page - 1) * pageSize + 1 : 0} to {Math.min(page * pageSize, filteredInventory.length)} of {filteredInventory.length} items
-          </span>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page <= 1 ? "#F1F5F9" : "#FFF", cursor: page <= 1 ? "not-allowed" : "pointer" }}
-            >
-              Previous
-            </button>
-            <button
-              disabled={page * pageSize >= filteredInventory.length}
-              onClick={() => setPage((p) => p + 1)}
-              style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page * pageSize >= filteredInventory.length ? "#F1F5F9" : "#FFF", cursor: page * pageSize >= filteredInventory.length ? "not-allowed" : "pointer" }}
-            >
-              Next
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Catalog New Item Modal */}

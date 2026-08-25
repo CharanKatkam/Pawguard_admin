@@ -17,7 +17,6 @@ import {
   FaCalendarAlt,
   FaEdit,
   FaEye,
-  FaSearch,
   FaBan,
   FaClipboardList,
   FaShieldAlt,
@@ -913,132 +912,6 @@ const VehicleManagement = () => {
         </div>
       </div>
 
-      {/* SEARCH & MULTI-FILTER TOOLBAR */}
-      <div
-        style={{
-          background: "#FFFFFF",
-          padding: "16px",
-          borderRadius: "12px",
-          border: "1px solid #E2E8F0",
-          marginBottom: "20px",
-          display: "flex",
-          gap: "12px",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", flex: 1 }}>
-          {/* Search Box */}
-          <div style={{ position: "relative", minWidth: "240px", flex: 1 }}>
-            <FaSearch style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
-            <input
-              type="text"
-              placeholder="Search code, plate, model, driver, location..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "8px 12px 8px 36px",
-                borderRadius: "8px",
-                border: "1px solid #CBD5E1",
-                fontSize: "13px",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              fontSize: "13px",
-              outline: "none",
-              background: "#FFF",
-              fontWeight: 500,
-            }}
-          >
-            <option value="all">All Statuses</option>
-            <option value="Available">Available</option>
-            <option value="Assigned">Assigned</option>
-            <option value="On Rescue">On Rescue</option>
-            <option value="Maintenance">Maintenance</option>
-            <option value="Out of Service">Out of Service</option>
-            <option value="expiring_insurance">Insurance Expiring (30d)</option>
-            <option value="expiring_registration">Registration Expiring (30d)</option>
-          </select>
-
-          {/* Type Filter */}
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              fontSize: "13px",
-              outline: "none",
-              background: "#FFF",
-              fontWeight: 500,
-            }}
-          >
-            <option value="all">All Vehicle Types</option>
-            <option value="Ambulance">Ambulance</option>
-            <option value="Rescue Van">Rescue Van</option>
-            <option value="Transport Truck">Transport Truck</option>
-            <option value="Utility Vehicle">Utility Vehicle</option>
-          </select>
-
-          {/* Driver Filter */}
-          <select
-            value={driverFilter}
-            onChange={(e) => setDriverFilter(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              fontSize: "13px",
-              outline: "none",
-              background: "#FFF",
-              fontWeight: 500,
-            }}
-          >
-            <option value="all">All Drivers</option>
-            <option value="assigned">Driver Assigned</option>
-            <option value="unassigned">Unassigned</option>
-          </select>
-        </div>
-
-        {/* Clear Filters */}
-        {(searchQuery || statusFilter !== "all" || typeFilter !== "all" || driverFilter !== "all") && (
-          <button
-            onClick={() => {
-              setSearchQuery("");
-              setStatusFilter("all");
-              setTypeFilter("all");
-              setDriverFilter("all");
-            }}
-            style={{
-              padding: "8px 14px",
-              borderRadius: "8px",
-              border: "1px solid #CBD5E1",
-              background: "#F1F5F9",
-              color: "#475569",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Clear Filters
-          </button>
-        )}
-      </div>
-
       {/* VEHICLES DATA TABLE */}
       <DataTable
         data={filteredVehicles}
@@ -1048,6 +921,97 @@ const VehicleManagement = () => {
         onRetry={fetchFleetData}
         emptyMessage="No vehicles match the selected criteria."
         module="vehicles"
+        serverMode={true}
+        totalCount={filteredVehicles.length}
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        leftHeaderControls={
+          <>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                fontSize: "13px",
+                outline: "none",
+                background: "#FFF",
+                fontWeight: 500,
+              }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="Available">Available</option>
+              <option value="Assigned">Assigned</option>
+              <option value="On Rescue">On Rescue</option>
+              <option value="Maintenance">Maintenance</option>
+              <option value="Out of Service">Out of Service</option>
+              <option value="expiring_insurance">Insurance Expiring (30d)</option>
+              <option value="expiring_registration">Registration Expiring (30d)</option>
+            </select>
+
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                fontSize: "13px",
+                outline: "none",
+                background: "#FFF",
+                fontWeight: 500,
+              }}
+            >
+              <option value="all">All Vehicle Types</option>
+              <option value="Ambulance">Ambulance</option>
+              <option value="Rescue Van">Rescue Van</option>
+              <option value="Transport Truck">Transport Truck</option>
+              <option value="Utility Vehicle">Utility Vehicle</option>
+            </select>
+
+            <select
+              value={driverFilter}
+              onChange={(e) => setDriverFilter(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid #CBD5E1",
+                fontSize: "13px",
+                outline: "none",
+                background: "#FFF",
+                fontWeight: 500,
+              }}
+            >
+              <option value="all">All Drivers</option>
+              <option value="assigned">Driver Assigned</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
+
+            {(searchQuery || statusFilter !== "all" || typeFilter !== "all" || driverFilter !== "all") && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("all");
+                  setTypeFilter("all");
+                  setDriverFilter("all");
+                }}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  background: "#F1F5F9",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
+          </>
+        }
         onRowClick={(row: FormattedVehicle) => handleOpenDetails(row)}
       />
 

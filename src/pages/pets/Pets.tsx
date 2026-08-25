@@ -144,6 +144,8 @@ const triggerDownload = (url: string, filename: string) => {
 const Pets = () => {
   const [dogs, setDogs] = useState<any[]>([]);
   const [allDogs, setAllDogs] = useState<any[]>([]);
+  const [globalTotalCount, setGlobalTotalCount] = useState<number | null>(null);
+  const [loadingAll, setLoadingAll] = useState(true);
   const [rescueCases, setRescueCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -347,6 +349,7 @@ const Pets = () => {
       setPendingPhotoUrl(null);
       setPendingPhotoFile(null);
       fetchDogs();
+      fetchAllDogs();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to save dog photo.";
       addToast(msg, "error");
@@ -381,7 +384,6 @@ const Pets = () => {
       }
       const total = response?.meta?.total ?? response?.data?.meta?.total ?? dogList.length;
       setTotalCount(total);
-
       setDogs(dogList);
     } catch (err: any) {
       setError(
@@ -396,10 +398,19 @@ const Pets = () => {
 
   const fetchAllDogs = async () => {
     try {
-      const response = await petService.getPets({ page: 1, page_size: 20 });
-      setAllDogs(unwrapList(response).map(formatDog));
-    } catch {
-      setAllDogs([]);
+      setLoadingAll(true);
+      const response = await petService.getAllDogs();
+      const rawList = unwrapList(response);
+      const formatted = rawList.map(formatDog);
+      setAllDogs(formatted);
+      const totalMeta = response?.meta?.total ?? response?.data?.meta?.total ?? formatted.length;
+      if (typeof totalMeta === "number" && totalMeta >= 0) {
+        setGlobalTotalCount(totalMeta);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch global dogs list for summary cards:", err);
+    } finally {
+      setLoadingAll(false);
     }
   };
 
@@ -423,11 +434,7 @@ const Pets = () => {
   }, [search, page, statusFilter, adoptableOnly]);
 
   useEffect(() => {
-    const t = setTimeout(() => fetchAllDogs(), 300);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => {
+    fetchAllDogs();
     fetchRescueCases();
   }, []);
 
@@ -462,6 +469,7 @@ const Pets = () => {
       setIsRegisterModalOpen(false);
       setPetForm({ ...emptyPetForm });
       fetchDogs();
+      fetchAllDogs();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to register pet.";
@@ -485,6 +493,7 @@ const Pets = () => {
       setIsStatusModalOpen(false);
       setStatusUpdateForm({ dogId: "", status: "shelter" });
       fetchDogs();
+      fetchAllDogs();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update status.";
@@ -518,6 +527,7 @@ const Pets = () => {
       addToast(`${dog.name} is now marked Ready for Adoption!`, "success");
       setIsAdoptableModalOpen(false);
       fetchDogs();
+      fetchAllDogs();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update status.";
@@ -946,6 +956,7 @@ const Pets = () => {
       setIsEditModalOpen(false);
       setSelectedDog(null);
       fetchDogs();
+      fetchAllDogs();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to update record.";
@@ -968,6 +979,7 @@ const Pets = () => {
       setIsDeleteModalOpen(false);
       setSelectedDog(null);
       fetchDogs();
+      fetchAllDogs();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to delete pet.";
@@ -977,15 +989,18 @@ const Pets = () => {
     }
   };
 
+  const totalRegisteredCount = (globalTotalCount && globalTotalCount > allDogs.length) ? globalTotalCount : allDogs.length;
   const inShelterCount = allDogs.filter((dog) =>
-    IN_SHELTER_STATUSES.includes(String(dog.status).toLowerCase())
+    IN_SHELTER_STATUSES.includes(String(dog.status || "").toLowerCase())
   ).length;
-  const adoptableCount = allDogs.filter((dog) => dog.is_adoptable).length;
+  const adoptableCount = allDogs.filter((dog) => Boolean(dog.is_adoptable)).length;
+
+  const isCardsLoading = loadingAll && allDogs.length === 0 && (globalTotalCount === null || globalTotalCount === 0);
 
   const stats = [
     {
       title: "Total Registered Dogs",
-      value: loading ? "..." : totalCount,
+      value: isCardsLoading ? "..." : totalRegisteredCount,
       trend: "Registered Dogs",
       color: "#2563EB",
       icon: <FaPaw />,
@@ -999,7 +1014,7 @@ const Pets = () => {
     },
     {
       title: "Dogs in Shelter",
-      value: loading ? "..." : inShelterCount,
+      value: isCardsLoading ? "..." : inShelterCount,
       trend: "Currently Sheltered",
       color: "#EF4444",
       icon: <FaAmbulance />,
@@ -1013,7 +1028,7 @@ const Pets = () => {
     },
     {
       title: "Adoptable Dogs",
-      value: loading ? "..." : adoptableCount,
+      value: isCardsLoading ? "..." : adoptableCount,
       trend: "Ready for Adoption",
       color: "#10B981",
       icon: <FaHeart />,
@@ -1185,74 +1200,10 @@ const Pets = () => {
       </div>
 
       <div id="dogs-table-card" className="soft-card" style={{ padding: "20px" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "16px",
-            flexWrap: "wrap",
-            gap: "12px",
-          }}
-        >
-          <div>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Registered Dogs
-            </h3>
-            {(statusFilter || adoptableOnly) && (
-              <div style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600, marginTop: "2px" }}>
-                Active Filter: {adoptableOnly ? "Adoptable Dogs Only" : `Status: ${statusFilter.toUpperCase()}`}{" "}
-                <button
-                  onClick={() => {
-                    setStatusFilter("");
-                    setAdoptableOnly(false);
-                    setPage(1);
-                  }}
-                  style={{ background: "none", border: "none", color: "#DC2626", cursor: "pointer", fontSize: "12px", textDecoration: "underline", marginLeft: "6px" }}
-                >
-                  Clear Filter
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setAdoptableOnly(false);
-                setPage(1);
-              }}
-              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
-            >
-              <option value="">All Statuses</option>
-              <option value="shelter">In Shelter</option>
-              <option value="clinic">In Clinic</option>
-              <option value="rescued">Rescued</option>
-              <option value="fostered">Fostered</option>
-              <option value="adopted">Adopted</option>
-            </select>
-
-            <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "#334155", cursor: "pointer", fontWeight: 600 }}>
-              <input
-                type="checkbox"
-                checked={adoptableOnly}
-                onChange={(e) => {
-                  setAdoptableOnly(e.target.checked);
-                  if (e.target.checked) setStatusFilter("");
-                  setPage(1);
-                }}
-              />
-              Adoptable Only
-            </label>
-
-            {loading && (
-              <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
-                Loading dogs...
-              </span>
-            )}
-          </div>
+        <div style={{ marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+            Registered Dogs
+          </h3>
         </div>
 
         <DataTable
@@ -1274,6 +1225,61 @@ const Pets = () => {
             setSearch(term);
             setPage(1);
           }}
+          leftHeaderControls={
+            <>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setAdoptableOnly(false);
+                  setPage(1);
+                }}
+                style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
+              >
+                <option value="">All Statuses</option>
+                <option value="shelter">In Shelter</option>
+                <option value="clinic">In Clinic</option>
+                <option value="rescued">Rescued</option>
+                <option value="fostered">Fostered</option>
+                <option value="adopted">Adopted</option>
+              </select>
+
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "#334155", cursor: "pointer", fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={adoptableOnly}
+                  onChange={(e) => {
+                    setAdoptableOnly(e.target.checked);
+                    if (e.target.checked) setStatusFilter("");
+                    setPage(1);
+                  }}
+                />
+                Adoptable Only
+              </label>
+
+              {(statusFilter || adoptableOnly) && (
+                <div style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600 }}>
+                  Active Filter: {adoptableOnly ? "Adoptable Dogs Only" : `Status: ${statusFilter.toUpperCase()}`}{" "}
+                  <button
+                    onClick={() => {
+                      setStatusFilter("");
+                      setAdoptableOnly(false);
+                      setPage(1);
+                    }}
+                    style={{ background: "none", border: "none", color: "#DC2626", cursor: "pointer", fontSize: "12px", textDecoration: "underline", marginLeft: "6px" }}
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              )}
+
+              {loading && (
+                <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>
+                  Loading dogs...
+                </span>
+              )}
+            </>
+          }
         />
       </div>
 

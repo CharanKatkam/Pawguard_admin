@@ -12,7 +12,6 @@ import {
   FaPlus,
   FaEye,
   FaHome,
-  FaSearch,
   FaDog,
   FaStar,
   FaCheckDouble,
@@ -503,17 +502,24 @@ const Adoptions = () => {
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
               Adoption Applications Directory
             </h3>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-              <div style={{ position: "relative", minWidth: "240px" }}>
-                <FaSearch style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94A3B8" }} />
-                <input
-                  type="text"
-                  placeholder="Search applicant, pet, email..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ ...inputStyle, paddingLeft: "36px" }}
-                />
-              </div>
+            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
+          </div>
+
+          <DataTable
+            columns={columns}
+            data={paginatedAdoptions}
+            module="adoptions"
+            serverMode={true}
+            totalCount={filteredAdoptions.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={(newPage) => setPage(newPage)}
+            searchValue={searchQuery}
+            onSearchChange={(val) => {
+              setSearchQuery(val);
+              setPage(1);
+            }}
+            leftHeaderControls={
               <select
                 value={statusFilter}
                 onChange={(e) => {
@@ -532,14 +538,7 @@ const Adoptions = () => {
                 <option value="completed">Completed</option>
                 <option value="rejected">Rejected</option>
               </select>
-              {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
-            </div>
-          </div>
-
-          <DataTable
-            columns={columns}
-            data={paginatedAdoptions}
-            module="adoptions"
+            }
             onRowClick={(row) => void openInspectModal(row)}
             onDelete={(row) => {
               setSelectedAdoption(row);
@@ -593,28 +592,6 @@ const Adoptions = () => {
               </div>
             )}
           />
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #E2E8F0" }}>
-            <span style={{ fontSize: "13px", color: "#64748B" }}>
-              Showing {filteredAdoptions.length > 0 ? (page - 1) * pageSize + 1 : 0} to {Math.min(page * pageSize, filteredAdoptions.length)} of {filteredAdoptions.length} records
-            </span>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page <= 1 ? "#F1F5F9" : "#FFF", cursor: page <= 1 ? "not-allowed" : "pointer" }}
-              >
-                Previous
-              </button>
-              <button
-                disabled={page * pageSize >= filteredAdoptions.length}
-                onClick={() => setPage((p) => p + 1)}
-                style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page * pageSize >= filteredAdoptions.length ? "#F1F5F9" : "#FFF", cursor: page * pageSize >= filteredAdoptions.length ? "not-allowed" : "pointer" }}
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

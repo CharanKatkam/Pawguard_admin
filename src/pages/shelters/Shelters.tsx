@@ -868,71 +868,6 @@ export const Shelters = () => {
       {/* TAB 1: Facilities Directory */}
       {activeTab === "facilities" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Controls Bar */}
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ flex: 1, minWidth: "240px", position: "relative" }}>
-              <FaSearch style={{ position: "absolute", left: "12px", top: "11px", color: "#94A3B8" }} />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search shelters by name or address..."
-                style={{
-                  width: "100%",
-                  padding: "8px 12px 8px 36px",
-                  borderRadius: "6px",
-                  border: "1px solid #CBD5E1",
-                  fontSize: "13px",
-                }}
-              />
-            </div>
-
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
-              }}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="maintenance">Maintenance</option>
-            </select>
-
-            <select
-              value={typeFilter}
-              onChange={(e) => {
-                setTypeFilter(e.target.value);
-                setPage(1);
-              }}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="">All Facility Types</option>
-              <option value="shelter">Shelter</option>
-              <option value="clinic">Clinic</option>
-              <option value="foster_home">Foster Home</option>
-              <option value="partner">Partner</option>
-            </select>
-
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value={10}>10 per page</option>
-              <option value={20}>20 per page</option>
-              <option value={50}>50 per page</option>
-            </select>
-          </div>
-
           {error && (
             <div style={{ padding: "14px", background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: "6px", color: "#991B1B", fontSize: "13px" }}>
               {error}
@@ -945,49 +880,62 @@ export const Shelters = () => {
             data={shelters}
             loading={loading}
             emptyMessage="No shelter facilities found in the system."
-          />
+            serverMode={true}
+            totalCount={totalCount}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            searchValue={search}
+            onSearchChange={(s) => {
+              setSearch(s);
+              setPage(1);
+            }}
+            leftHeaderControls={
+              <>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="maintenance">Maintenance</option>
+                </select>
 
-          {/* Pagination Footer */}
-          {totalCount > pageSize && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-              <div style={{ fontSize: "13px", color: "#64748B" }}>
-                Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount} shelters
-              </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  disabled={page === 1}
-                  onClick={() => setPage(page - 1)}
-                  style={{
-                    padding: "6px 12px",
-                    background: page === 1 ? "#F1F5F9" : "#2563EB",
-                    color: page === 1 ? "#94A3B8" : "#FFF",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: page === 1 ? "not-allowed" : "pointer",
+                <select
+                  value={typeFilter}
+                  onChange={(e) => {
+                    setTypeFilter(e.target.value);
+                    setPage(1);
                   }}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
                 >
-                  Previous
-                </button>
-                <span style={{ display: "flex", alignItems: "center", fontSize: "13px", fontWeight: 600 }}>
-                  Page {page} of {Math.ceil(totalCount / pageSize)}
-                </span>
-                <button
-                  disabled={page * pageSize >= totalCount}
-                  onClick={() => setPage(page + 1)}
-                  style={{
-                    padding: "6px 12px",
-                    background: page * pageSize >= totalCount ? "#F1F5F9" : "#2563EB",
-                    color: page * pageSize >= totalCount ? "#94A3B8" : "#FFF",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: page * pageSize >= totalCount ? "not-allowed" : "pointer",
+                  <option value="">All Facility Types</option>
+                  <option value="shelter">Shelter</option>
+                  <option value="clinic">Clinic</option>
+                  <option value="foster_home">Foster Home</option>
+                  <option value="partner">Partner</option>
+                </select>
+
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
                   }}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
                 >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+                  <option value={10}>10 per page</option>
+                  <option value={20}>20 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
+              </>
+            }
+          />
         </div>
       )}
 
