@@ -607,7 +607,7 @@ const RescueDispatch = () => {
           }}
         >
           <FaPlus size={14} />
-          <span>+ New Dispatch</span>
+          <span>New Dispatch</span>
         </button>
       </div>
 

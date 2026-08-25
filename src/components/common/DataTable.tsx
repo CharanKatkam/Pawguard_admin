@@ -111,9 +111,8 @@ function DataTable<T = any>({
 
   // Pagination
   const activePage = serverMode ? (controlledPage ?? 1) : currentPage;
-  const totalPages = serverMode
-    ? Math.max(1, Math.ceil((totalCount || 0) / pageSize))
-    : Math.max(1, Math.ceil(filteredData.length / pageSize));
+  const totalRecords = serverMode ? (totalCount || 0) : filteredData.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
   const pageData = useMemo(() => {
     if (serverMode) return data;
     const start = (currentPage - 1) * pageSize;
@@ -241,61 +240,63 @@ function DataTable<T = any>({
   return (
     <div style={{ width: "100%", overflow: "visible" }}>
       {/* Search Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "12px",
-          gap: "12px",
-          flexWrap: "wrap",
-        }}
-      >
-        {leftHeaderControls ? (
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-            {leftHeaderControls}
-          </div>
-        ) : !hideSearch ? (
-          <div style={{ position: "relative", width: "100%", maxWidth: searchMaxWidth || "320px", flex: "1 1 200px" }}>
-            <FaSearch
-              style={{
-                position: "absolute",
-                left: "12px",
-                top: "50%",
-                transform: "translateY(-50%)",
-                color: "#94A3B8",
-                fontSize: "14px",
-              }}
-            />
-            <input
-              type="text"
-              placeholder="Search records..."
-              value={serverMode ? (searchValue ?? "") : searchTerm}
-              onChange={(e) => {
-                if (serverMode) {
-                  if (onSearchChange) onSearchChange(e.target.value);
-                } else {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }
-              }}
-              style={{
-                width: "100%",
-                padding: searchMaxWidth ? "10px 14px 10px 38px" : "9px 12px 9px 36px",
-                borderRadius: "8px",
-                border: "1px solid #CBD5E1",
-                fontSize: searchMaxWidth ? "14px" : "13px",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-        ) : null}
+      {(leftHeaderControls || !hideSearch) && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "12px",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          {leftHeaderControls ? (
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+              {leftHeaderControls}
+            </div>
+          ) : !hideSearch ? (
+            <div style={{ position: "relative", width: "100%", maxWidth: searchMaxWidth || "320px", flex: "1 1 200px" }}>
+              <FaSearch
+                style={{
+                  position: "absolute",
+                  left: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "#94A3B8",
+                  fontSize: "14px",
+                }}
+              />
+              <input
+                type="text"
+                placeholder="Search records..."
+                value={serverMode ? (searchValue ?? "") : searchTerm}
+                onChange={(e) => {
+                  if (serverMode) {
+                    if (onSearchChange) onSearchChange(e.target.value);
+                  } else {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  padding: searchMaxWidth ? "10px 14px 10px 38px" : "9px 12px 9px 36px",
+                  borderRadius: "8px",
+                  border: "1px solid #CBD5E1",
+                  fontSize: searchMaxWidth ? "14px" : "13px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+          ) : null}
 
-        <div style={{ fontSize: "13px", color: "#64748B", marginLeft: "auto" }}>
-          Showing <strong>{pageData.length}</strong> of <strong>{serverMode ? totalCount : filteredData.length}</strong> entries
+          <div style={{ fontSize: "13px", color: "#64748B", marginLeft: "auto" }}>
+            Showing <strong>{pageData.length}</strong> of <strong>{totalRecords}</strong> entries
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Responsive Table Wrapper */}
       <div style={{ overflowX: "auto", width: "100%", maxWidth: "100%", WebkitOverflowScrolling: "touch" }}>
@@ -520,9 +521,16 @@ function DataTable<T = any>({
           gap: "12px",
         }}
       >
-        <span style={{ fontSize: "13px", color: "#64748B" }}>
-          Page <strong>{activePage}</strong> of <strong>{totalPages}</strong>
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#64748B" }}>
+          <span>
+            Showing <strong>{totalRecords > 0 ? (activePage - 1) * pageSize + 1 : 0}</strong> to{" "}
+            <strong>{Math.min(activePage * pageSize, totalRecords)}</strong> of <strong>{totalRecords}</strong> records
+          </span>
+          <span style={{ color: "#CBD5E1" }}>•</span>
+          <span>
+            Page <strong>{activePage}</strong> of <strong>{totalPages}</strong>
+          </span>
+        </div>
 
         <div style={{ display: "flex", gap: "8px" }}>
           <button

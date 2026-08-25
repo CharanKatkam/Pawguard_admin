@@ -130,67 +130,81 @@ const MedicalRecords = () => {
   });
   const [certDogId, setCertDogId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchCertificates = useCallback(async (dogList: Record<string, unknown>[] = dogs) => {
-    if (dogList.length === 0) {
-      setCertificatesIssued(0);
-      return;
-    }
-    const results = await Promise.allSettled(
-      dogList.map((d) => medicalService.getDogClearances(String(d.id || d.dog_id || "")))
-    );
-    const approved = results.reduce((acc, r) => {
-      if (r.status !== "fulfilled") return acc;
-      const list = Array.isArray(r.value) ? r.value : Array.isArray(r.value?.data) ? r.value.data : [];
-      return (
-        acc +
-        list.filter((c: Record<string, unknown>) => String(c.status).toLowerCase() === "approved").length
-      );
-    }, 0);
-    setCertificatesIssued(approved);
-  }, [dogs]);
-
-  const fetchDogs = useCallback(async () => {
-    try {
-      const response = await dogService.getAllDogs();
-      const list = Array.isArray(response?.data) ? (response.data as Record<string, unknown>[]) : [];
-      setDogs(list);
-      fetchCertificates(list);
-    } catch {
-      setDogs([]);
-      setCertificatesIssued(0);
-    }
-  }, [fetchCertificates]);
-
-  const fetchRecords = useCallback(async () => {
+  const loadAllData = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await medicalService.getMedicalRecords();
-      if (response && Array.isArray(response.data)) {
-        const rows = response.data.map((r: Record<string, unknown>) => {
-          const dog = dogs.find((d) => d.id === r.petId || d.id === r.pet_id);
-          return dog && !String(r.petName || "").includes(" ") ? { ...r, petName: dog.name } : r;
-        });
-        const sortedRows = [...rows].sort((a: any, b: any) => {
-          const timeA = new Date(a.date || a.created_at || a.recorded_at || 0).getTime();
-          const timeB = new Date(b.date || b.created_at || b.recorded_at || 0).getTime();
-          return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
-        });
-        setMedicalRecords(sortedRows);
+      setError(null);
+
+      const [recordsRes, dogsRes] = await Promise.allSettled([
+        medicalService.getMedicalRecords(),
+        dogService.getAllDogs(),
+      ]);
+
+      let dogList: Record<string, unknown>[] = [];
+      if (dogsRes.status === "fulfilled" && dogsRes.value) {
+        const dRes = dogsRes.value;
+        dogList = Array.isArray(dRes) ? dRes : Array.isArray(dRes?.data) ? (dRes.data as Record<string, unknown>[]) : [];
+        setDogs(dogList);
+      } else {
+        setDogs([]);
       }
-    } catch {
-      addToast("Failed to load medical records.", "error");
+
+      let fetchedRecords: Record<string, unknown>[] = [];
+      if (recordsRes.status === "fulfilled" && recordsRes.value) {
+        const rRes = recordsRes.value;
+        fetchedRecords = Array.isArray(rRes) ? rRes : Array.isArray(rRes?.data) ? (rRes.data as Record<string, unknown>[]) : [];
+      } else {
+        const errObj = recordsRes.status === "rejected" ? (recordsRes.reason as { response?: { data?: { detail?: string } }; message?: string }) : null;
+        const msg = errObj?.response?.data?.detail || errObj?.message || "Failed to load medical records.";
+        setError(msg);
+      }
+
+      const mappedRows = fetchedRecords.map((r: Record<string, unknown>) => {
+        const petId = r.petId || r.pet_id || r.dog_id;
+        const dog = dogList.find((d) => String(d.id || d.dog_id) === String(petId));
+        return dog && (!r.petName || !String(r.petName || "").includes(" "))
+          ? { ...r, petName: dog.name }
+          : r;
+      });
+
+      const sortedRows = [...mappedRows].sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+        const timeA = new Date((a.date || a.created_at || a.recorded_at || 0) as string | number).getTime();
+        const timeB = new Date((b.date || b.created_at || b.recorded_at || 0) as string | number).getTime();
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
+      setMedicalRecords(sortedRows);
+
+      if (dogList.length > 0) {
+        Promise.allSettled(
+          dogList.map((d) => medicalService.getDogClearances(String(d.id || d.dog_id || "")))
+        ).then((results) => {
+          const approved = results.reduce((acc, res) => {
+            if (res.status !== "fulfilled") return acc;
+            const list = Array.isArray(res.value) ? res.value : Array.isArray(res.value?.data) ? res.value.data : [];
+            return (
+              acc +
+              list.filter((c: Record<string, unknown>) => String(c.status).toLowerCase() === "approved").length
+            );
+          }, 0);
+          setCertificatesIssued(approved);
+        });
+      } else {
+        setCertificatesIssued(0);
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setError(e?.response?.data?.detail || e?.message || "Failed to load medical data.");
     } finally {
       setLoading(false);
     }
-  }, [addToast, dogs]);
+  }, []);
 
   useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchRecords();
-      fetchDogs();
-    });
-  }, [fetchDogs, fetchRecords]);
+    loadAllData();
+  }, [loadAllData]);
 
   const dogLabel = (d: Record<string, unknown> | undefined) =>
     d?.name ? `${String(d.name)}${d.breed ? ` (${String(d.breed)})` : ""}` : d?.id ? String(d.id) : "";
@@ -242,7 +256,7 @@ const MedicalRecords = () => {
         visible_injuries: "",
         triage_diagnosis: "",
       });
-      fetchRecords();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -265,7 +279,7 @@ const MedicalRecords = () => {
       addToast("Vaccination logged successfully!", "success");
       setIsVaccineModalOpen(false);
       setVaccineForm({ dog_id: "", vaccine_name: "", next_due_at: "", lot_number: "" });
-      fetchRecords();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -288,7 +302,7 @@ const MedicalRecords = () => {
       addToast(`Treatment "${surgeryForm.treatment_type}" recorded!`, "success");
       setIsSurgeryModalOpen(false);
       setSurgeryForm({ dog_id: "", treatment_type: "", description: "", anesthesia_log: "", post_op_notes: "" });
-      fetchRecords();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -318,7 +332,7 @@ const MedicalRecords = () => {
         start_at: new Date().toISOString().split("T")[0],
         end_at: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
       });
-      fetchRecords();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -349,7 +363,7 @@ const MedicalRecords = () => {
         administered_by_id: "",
         notes: "",
       });
-      fetchRecords();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -373,8 +387,7 @@ const MedicalRecords = () => {
       setIsCertModalOpen(false);
       setCertForm({ clearance_type: "adoption_surgery", status: "approved", decision_notes: "Healthy, cleared for adoption.", expires_at: "" });
       setCertDogId("");
-      fetchRecords();
-      fetchCertificates();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -393,7 +406,7 @@ const MedicalRecords = () => {
       addToast(`Deleted record ${String(selectedRecord.recordId)}`, "success");
       setIsDeleteModalOpen(false);
       setSelectedRecord(null);
-      fetchRecords();
+      loadAllData();
       notifyDataChanged();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -530,14 +543,23 @@ const MedicalRecords = () => {
               <option value="treatments">Treatments &amp; Surgeries</option>
               <option value="prescriptions">Prescriptions</option>
             </select>
-            {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading...</span>}
           </div>
         </div>
 
         <DataTable
           columns={columns}
           data={paginatedRecords}
+          loading={loading}
+          error={error}
+          onRetry={loadAllData}
+          emptyMessage="No medical records found."
           module="medical"
+          serverMode={true}
+          totalCount={filteredRecords.length}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={(newPage) => setPage(newPage)}
+          hideSearch={true}
           onDelete={(row) => {
             setSelectedRecord(row);
             setIsDeleteModalOpen(true);
@@ -565,29 +587,6 @@ const MedicalRecords = () => {
             </div>
           )}
         />
-
-        {/* Server-side style Pagination Controls */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #E2E8F0" }}>
-          <span style={{ fontSize: "13px", color: "#64748B" }}>
-            Showing {filteredRecords.length > 0 ? (page - 1) * pageSize + 1 : 0} to {Math.min(page * pageSize, filteredRecords.length)} of {filteredRecords.length} records
-          </span>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page <= 1 ? "#F1F5F9" : "#FFF", cursor: page <= 1 ? "not-allowed" : "pointer" }}
-            >
-              Previous
-            </button>
-            <button
-              disabled={page * pageSize >= filteredRecords.length}
-              onClick={() => setPage((p) => p + 1)}
-              style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: page * pageSize >= filteredRecords.length ? "#F1F5F9" : "#FFF", cursor: page * pageSize >= filteredRecords.length ? "not-allowed" : "pointer" }}
-            >
-              Next
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Record Examination Modal */}

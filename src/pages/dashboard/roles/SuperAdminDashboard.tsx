@@ -66,18 +66,35 @@ const SuperAdminDashboard = () => {
   const displayName = user?.name || "Administrator";
   const roleTitle = getRoleTitle(getCurrentUserRole() ?? "super_admin");
 
+  const safeNumber = (val: unknown): number => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === "number") return isNaN(val) ? 0 : val;
+    if (typeof val === "object") {
+      const obj = val as Record<string, unknown>;
+      const inner = obj.count ?? obj.total ?? obj.total_count ?? obj.length;
+      if (typeof inner === "number") return isNaN(inner) ? 0 : inner;
+      if (typeof inner === "string") {
+        const n = Number(inner);
+        return isNaN(n) ? 0 : n;
+      }
+      return 0;
+    }
+    const n = Number(val);
+    return isNaN(n) ? 0 : n;
+  };
+
   // 1. Total Users
-  const totalUsers = users.length || Number(summary.total_users || summary.users_count || 0);
-  const activeUsersCount = users.filter((u) => u.is_active !== false).length;
+  const totalUsers = users.length > 0 ? users.length : safeNumber(summary.total_users ?? summary.users_count ?? summary.users);
+  const activeUsersCount = users.filter((u) => u.is_active !== false && String(u.status || "").toLowerCase() !== "inactive").length;
 
   // 2. Rescued Dogs
-  const totalDogs = dogs.length || Number(summary.total_dogs || summary.dogs_count || 0);
+  const totalDogs = dogs.length > 0 ? dogs.length : safeNumber(summary.total_dogs ?? summary.dogs_count ?? summary.dogs);
   const rescuedDogsCount = dogs.filter((d) =>
     Boolean(d.rescue_case_id || String(d.status || d.current_status || "").toLowerCase().includes("rescue"))
   ).length;
 
   // 3. Shelters
-  const totalShelters = shelters.length || Number(summary.total_shelters || summary.shelters_count || 0);
+  const totalShelters = shelters.length > 0 ? shelters.length : safeNumber(summary.total_shelters ?? summary.shelters_count ?? summary.shelters);
   const activeSheltersCount = shelters.filter((s) => s.status !== "inactive" && s.is_active !== false).length;
 
   // 4. Active Rescues (matching PawGuard lifecycle: reported -> verified -> dispatched -> located -> rescued -> admitted)
@@ -86,7 +103,7 @@ const SuperAdminDashboard = () => {
       String(r.status || r.stage || r.dispatch_status || "")
     )
   );
-  const activeRescuesCount = rescues.length > 0 ? activeRescuesList.length : Number(summary.active_rescues || 0);
+  const activeRescuesCount = rescues.length > 0 ? activeRescuesList.length : safeNumber(summary.active_rescues ?? summary.rescues_count);
   const awaitingDispatchCount = rescues.filter((r) =>
     /reported|pending|new/i.test(String(r.status || r.stage || ""))
   ).length;
@@ -95,21 +112,23 @@ const SuperAdminDashboard = () => {
   const pendingAdoptionsList = adoptions.filter((a) =>
     /submitted|screening|interview|home_check|vetting|pending|in_review/i.test(String(a.status || ""))
   );
-  const pendingAdoptionsCount = adoptions.length > 0 ? pendingAdoptionsList.length : Number(summary.pending_adoptions || 0);
+  const pendingAdoptionsCount = adoptions.length > 0 ? pendingAdoptionsList.length : safeNumber(summary.pending_adoptions ?? summary.adoptions_count);
   const newAdoptionAppsCount = adoptions.filter((a) => String(a.status || "").toLowerCase() === "submitted").length;
 
   // 6. Active Fosters
   const activeFostersList = fosters.filter((f) =>
     /active|placed|approved|in_progress|pending/i.test(String(f.status || f.placement_status || ""))
   );
-  const activeFostersCount = fosters.length > 0 ? activeFostersList.length : Number(summary.active_foster_placements || 0);
+  const activeFostersCount = fosters.length > 0 ? activeFostersList.length : safeNumber(summary.active_foster_placements ?? summary.fosters_count);
 
   // 7. Volunteers
-  const totalVolunteers = volunteers.length || Number(summary.volunteers_count || summary.volunteers || 0);
+  const totalVolunteers = volunteers.length > 0 ? volunteers.length : safeNumber(summary.volunteers_count ?? summary.volunteers ?? summary.total_volunteers);
   const activeVolunteersCount = volunteers.filter((v) => v.is_active !== false && String(v.status || "").toLowerCase() !== "rejected").length;
 
   // 8. Donations (INR ₹) — aligned with Finance.tsx calculation & financeSummary source
   const numericVal = (val: unknown): number => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === "number") return isNaN(val) ? 0 : val;
     const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));
     return Number.isFinite(n) ? n : 0;
   };
@@ -118,16 +137,16 @@ const SuperAdminDashboard = () => {
   const summarySuccessfulDonations = financeSummary?.successful_donations ?? financeSummary?.successfulDonations;
 
   const transactionIncomeSum = finance
-    .filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase()))
+    .filter((t) => /income|donation|revenue/i.test(String(t.type || t.transaction_type || "").toLowerCase()))
     .reduce((sum, t) => sum + numericVal(t.amount), 0);
 
   const donationIncomeSum = donations
-    .filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted")
+    .filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted" || String(d.status || "").toLowerCase() === "completed")
     .reduce((sum, d) => sum + numericVal(d.amount), 0);
 
   const rawDonationsSum = donations.reduce((sum, d) => sum + numericVal(d.amount), 0);
 
-  const totalDonationAmount = Number(
+  const totalDonationAmount = safeNumber(
     summaryRevenue ??
     (transactionIncomeSum > 0 ? transactionIncomeSum : undefined) ??
     (donationIncomeSum > 0 ? donationIncomeSum : undefined) ??
@@ -137,13 +156,13 @@ const SuperAdminDashboard = () => {
     0
   );
 
-  const successfulCount = Number(
+  const successfulCount = safeNumber(
     summarySuccessfulDonations ??
-    (donations.filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted").length > 0
-      ? donations.filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted").length
+    (donations.filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted" || String(d.status || "").toLowerCase() === "completed").length > 0
+      ? donations.filter((d) => String(d.status || "").toLowerCase() === "success" || String(d.status || "").toLowerCase() === "posted" || String(d.status || "").toLowerCase() === "completed").length
       : undefined) ??
     (donations.length > 0 ? donations.length : undefined) ??
-    finance.filter((t) => /income|donation|revenue/.test(String(t.type || "").toLowerCase())).length ??
+    finance.filter((t) => /income|donation|revenue/i.test(String(t.type || t.transaction_type || "").toLowerCase())).length ??
     0
   );
 

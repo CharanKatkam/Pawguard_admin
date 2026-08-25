@@ -15,7 +15,7 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Request Interceptor: Enforce 300s session inactivity timeout (browser automatically handles HttpOnly cookies)
+// Request Interceptor: Enforce 15-minute session inactivity timeout (browser automatically handles HttpOnly cookies)
 api.interceptors.request.use(
   (config) => {
     const user = getStoredUser();
@@ -24,7 +24,7 @@ api.interceptors.request.use(
         clearAuthData();
         notifyAuthChanged();
         window.location.href = "/";
-        return Promise.reject(new axios.Cancel("Session expired due to 300 seconds of inactivity."));
+        return Promise.reject(new axios.Cancel("Session expired due to 15 minutes of inactivity."));
       }
       updateLastActivity();
     }

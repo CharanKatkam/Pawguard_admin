@@ -6,7 +6,7 @@ import { useToast } from "../context/ToastContext";
 
 /**
  * Custom hook to monitor user inactivity for authenticated Admin sessions.
- * Enforces an exact 300-second (5 minute) inactivity timeout across all tabs.
+ * Enforces an exact 900-second (15 minute) inactivity timeout across all tabs.
  */
 export const useInactivityTimeout = () => {
   const navigate = useNavigate();
@@ -29,12 +29,12 @@ export const useInactivityTimeout = () => {
     const events = ["mousemove", "keydown", "click", "scroll", "touchstart", "pointerdown"];
     events.forEach((ev) => window.addEventListener(ev, handleUserActivity, { passive: true }));
 
-    // Check for 300s inactivity timeout every 1000ms
+    // Check for 15-minute inactivity timeout every 1000ms
     const interval = setInterval(() => {
       if (getStoredUser() && isSessionExpired()) {
         clearAuthData();
         notifyAuthChanged();
-        addToast("Your session has expired due to 5 minutes of inactivity. Please log in again.", "error");
+        addToast("Your session has expired due to 15 minutes of inactivity. Please log in again.", "error");
         navigate("/", { replace: true });
       }
     }, 1000);

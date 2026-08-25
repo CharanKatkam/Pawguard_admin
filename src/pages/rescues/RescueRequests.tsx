@@ -411,7 +411,7 @@ const RescueRequests = () => {
             }}
           >
             <FaPlus size={14} />
-            <span>+ Log Report</span>
+            <span>Log Report</span>
           </button>
         </Can>
       </div>

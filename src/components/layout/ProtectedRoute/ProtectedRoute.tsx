@@ -40,7 +40,7 @@ const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Enforce exact 300-second (5 minute) session inactivity timeout
+  // Enforce exact 900-second (15 minute) session inactivity timeout
   if (isSessionExpired()) {
     clearAuthData();
     notifyAuthChanged();

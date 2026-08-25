@@ -472,7 +472,6 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Shelter Dogs", path: "/shelter-dogs", iconType: "pets" },
         { name: "Staff & Users", path: "/users", iconType: "users" },
         { name: "Medical Records", path: "/medical-records", iconType: "medical" },
-        { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
       ];

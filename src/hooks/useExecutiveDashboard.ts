@@ -2,6 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { subscribeToDataChange } from "../utils/dataSync";
 import { getActivityStream } from "../utils/eventSystem";
 import { dashboardService } from "../services/dashboardService";
+import { userService } from "../services/userService";
+import { dogService } from "../services/dogService";
+import { shelterService } from "../services/shelterService";
+import { rescueService } from "../services/rescueService";
+import { adoptionService } from "../services/adoptionService";
+import { fosterService } from "../services/fosterService";
+import { volunteerService } from "../services/volunteerService";
+import { financeService } from "../services/financeService";
+import donationsService from "../services/donationsService";
 import { formatDateTime } from "../utils/dateUtils";
 import { firstDefined, unwrapList } from "../utils/chartUtils";
 import type { ActivityEntry, AnyRecord, DashboardSummary } from "../types/dashboard";
@@ -103,15 +112,47 @@ export function useExecutiveDashboard() {
     setRefreshing(true);
     setData((prev) => ({ ...prev, loading: prev.lastUpdated === null, error: null }));
 
-    // Lightweight summary startup: fetch aggregate summary & recent activities only
+    // Fetch aggregate summary, live resource collections & recent activities concurrently
     const results = await Promise.allSettled([
-      dashboardService.getSuperAdminDashboard(),
-      dashboardService.getRecentActivities(10),
+      dashboardService.getSuperAdminDashboard().catch(() => ({})),
+      userService.getUsers().catch(() => []),
+      dogService.getAllDogs().catch(() => []),
+      shelterService.getShelters().catch(() => []),
+      rescueService.getRescueCases().catch(() => []),
+      adoptionService.getAdoptions().catch(() => []),
+      fosterService.getFosterPlacements().catch(() => []),
+      volunteerService.getVolunteers().catch(() => []),
+      donationsService.getDonations().catch(() => []),
+      financeService.getFinanceSummary().catch(() => null),
+      dashboardService.getRecentActivities(10).catch(() => []),
     ]);
 
     if (requestId !== requestIdRef.current) return;
 
-    const [summaryRes, activitiesRes] = results;
+    const [
+      summaryRes,
+      usersRes,
+      dogsRes,
+      sheltersRes,
+      rescuesRes,
+      adoptionsRes,
+      fostersRes,
+      volunteersRes,
+      donationsRes,
+      financeSummaryRes,
+      activitiesRes,
+    ] = results;
+
+    const summaryObj = unwrapObject(summaryRes.status === "fulfilled" ? summaryRes.value : {});
+    const usersList = unwrapList(usersRes.status === "fulfilled" ? usersRes.value : []);
+    const dogsList = unwrapList(dogsRes.status === "fulfilled" ? dogsRes.value : []);
+    const sheltersList = unwrapList(sheltersRes.status === "fulfilled" ? sheltersRes.value : []);
+    const rescuesList = unwrapList(rescuesRes.status === "fulfilled" ? rescuesRes.value : []);
+    const adoptionsList = unwrapList(adoptionsRes.status === "fulfilled" ? adoptionsRes.value : []);
+    const fostersList = unwrapList(fostersRes.status === "fulfilled" ? fostersRes.value : []);
+    const volunteersList = unwrapList(volunteersRes.status === "fulfilled" ? volunteersRes.value : []);
+    const donationsList = unwrapList(donationsRes.status === "fulfilled" ? donationsRes.value : []);
+    const financeSummaryObj = (financeSummaryRes.status === "fulfilled" ? financeSummaryRes.value : null) as AnyRecord | null;
 
     const activities = mergeActivities(
       unwrapList(activitiesRes.status === "fulfilled" ? activitiesRes.value : []).map(normalizeActivity).filter((a): a is ActivityEntry => a !== null),
@@ -120,29 +161,31 @@ export function useExecutiveDashboard() {
         .filter((a): a is ActivityEntry => a !== null)
     );
 
-    const hasError = summaryRes.status === "rejected";
-    const summaryObj = unwrapObject(summaryRes.status === "fulfilled" ? summaryRes.value : {});
+    const hasError =
+      summaryRes.status === "rejected" &&
+      usersList.length === 0 &&
+      dogsList.length === 0 &&
+      sheltersList.length === 0;
 
-    setData((prev) => ({
-      ...prev,
+    setData({
       summary: summaryObj,
-      users: [],
-      dogs: [],
-      shelters: [],
-      rescues: [],
-      adoptions: [],
-      fosters: [],
-      volunteers: [],
+      users: usersList,
+      dogs: dogsList,
+      shelters: sheltersList,
+      rescues: rescuesList,
+      adoptions: adoptionsList,
+      fosters: fostersList,
+      volunteers: volunteersList,
       inventory: [],
       medical: [],
       finance: [],
-      donations: [],
-      financeSummary: summaryObj,
+      donations: donationsList,
+      financeSummary: financeSummaryObj || summaryObj,
       activities,
       loading: false,
       error: hasError ? "Dashboard summary data currently unavailable." : null,
       lastUpdated: new Date(),
-    }));
+    });
     setRefreshing(false);
   }, []);
 

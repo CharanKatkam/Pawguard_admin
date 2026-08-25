@@ -273,6 +273,16 @@ function App() {
               }
             >
               <Route path="/medical-records" element={<MedicalRecords />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  permission="view_medical"
+                  allowedRoles={["super_admin", "veterinarian", "shelter_manager"]}
+                />
+              }
+            >
               <Route path="/vet-directory" element={<VetAppointments />} />
             </Route>
 

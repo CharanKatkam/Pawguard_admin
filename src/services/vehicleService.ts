@@ -79,6 +79,9 @@ export const vehicleService = {
       mileage: typeof data.mileage === "number" ? data.mileage : 0,
       primary_driver_id: driverUuid,
 
+      // Scope
+      rescue_centre_id: data.rescue_centre_id || data.rescue_center_id,
+
       // Retain frontend fields for compatibility and client-side UI rendering
       vehicle_number: data.vehicle_number,
       registration_number: data.registration_number || data.license_plate || data.vehicle_number,

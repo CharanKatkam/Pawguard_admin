@@ -14,8 +14,8 @@ export const AUTH_STORAGE_KEYS = {
   lastActivity: "last_activity",
 } as const;
 
-/** Exact 300 seconds (5 minutes) session inactivity timeout. */
-export const SESSION_TIMEOUT_MS = 300 * 1000;
+/** Exact 900 seconds (15 minutes) session inactivity timeout. */
+export const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
  * One-time migration & cleanup to remove any legacy JWT tokens from browser storage.

@@ -23,11 +23,13 @@ import {
   FaShieldAlt,
   FaLifeRing,
   FaFileContract,
+  FaTrash,
 } from "react-icons/fa";
 import vehicleService from "../../services/vehicleService";
 import type { VehiclePayload } from "../../services/vehicleService";
 import rescueService from "../../services/rescueService";
 import { notifyDataChanged } from "../../utils/dataSync";
+import { getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
 
 // --- TYPE-SAFE STRING & NUMBER HELPERS ---
 const toSafeStr = (val: unknown): string => (val !== undefined && val !== null ? String(val) : "");
@@ -213,6 +215,20 @@ const getExpiryStatus = (dateStr: string): { label: string; color: string; bg: s
 };
 
 const VehicleManagement = () => {
+  const currentUser = getCurrentUser();
+  const currentUserRole = getCurrentUserRole();
+  const isRescueCentreAdmin = currentUserRole === "rescue_centre_admin";
+  const isSuperAdmin = currentUserRole === "super_admin";
+  const isAdmin = isSuperAdmin || isRescueCentreAdmin;
+
+  const currentRescueCentreId =
+    (currentUser as any)?.rescue_centre_id ||
+    (currentUser as any)?.rescue_center_id ||
+    (currentUser as any)?.rescue_facility_id ||
+    (currentUser as any)?.facility_id ||
+    (currentUser as any)?.organization_id ||
+    (currentUser as any)?.id;
+
   const [vehicles, setVehicles] = useState<FormattedVehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -229,6 +245,8 @@ const VehicleManagement = () => {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [targetDeleteVehicle, setTargetDeleteVehicle] = useState<FormattedVehicle | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- FORM STATES ---
@@ -275,16 +293,21 @@ const VehicleManagement = () => {
     equipment_stretcher: true,
   });
 
-  // Fetch Vehicles & Live Rescues
+  // Fetch Vehicles & Live Rescues with Rescue Centre Scope
   const fetchFleetData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
+      const queryParams: Record<string, unknown> = {};
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        queryParams.rescue_centre_id = currentRescueCentreId;
+      }
+
       // Fetch live rescues and vehicles concurrently
       const [vehiclesRes, rescuesRes] = await Promise.allSettled([
-        vehicleService.getVehicles(),
-        rescueService.getRescueCases(),
+        vehicleService.getVehicles(queryParams),
+        rescueService.getRescueCases(queryParams),
       ]);
 
       let rescuesList: Record<string, unknown>[] = [];
@@ -302,6 +325,14 @@ const VehicleManagement = () => {
         setError(errObj?.response?.data?.detail || "Failed to load vehicle fleet.");
       }
 
+      // Filter by Rescue Centre Scope if applicable
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        rawVehicles = rawVehicles.filter((item) => {
+          const vCentreId = item.rescue_centre_id || (item as any).rescue_center_id || (item as any).facility_id || (item as any).organization_id;
+          return !vCentreId || String(vCentreId) === String(currentRescueCentreId);
+        });
+      }
+
       const formatted = rawVehicles.map((item) => formatVehicleRow(item, rescuesList));
       setVehicles(formatted);
     } catch (err: unknown) {
@@ -310,7 +341,7 @@ const VehicleManagement = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isRescueCentreAdmin, currentRescueCentreId]);
 
   useEffect(() => {
     fetchFleetData();
@@ -430,6 +461,29 @@ const VehicleManagement = () => {
     setIsEditModalOpen(true);
   };
 
+  const handleOpenDelete = (v: FormattedVehicle) => {
+    setTargetDeleteVehicle(v);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleDeleteVehicleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetDeleteVehicle) return;
+    try {
+      setIsSubmitting(true);
+      await vehicleService.deleteVehicle(targetDeleteVehicle.id);
+      addToast(`Vehicle Unit ${targetDeleteVehicle.vehicle_code} deleted successfully.`, "info");
+      setIsDeleteModalOpen(false);
+      setTargetDeleteVehicle(null);
+      fetchFleetData();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      addToast(getErrorMessage(err, "Failed to delete vehicle unit"), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleCreateVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addForm.vehicle_number) {
@@ -452,6 +506,7 @@ const VehicleManagement = () => {
         capacity: Number(addForm.capacity),
         fuel_level: addForm.fuel_level,
         status: addForm.status,
+        rescue_centre_id: isRescueCentreAdmin && currentRescueCentreId ? currentRescueCentreId : undefined,
         equipment: {
           pet_carriers: addForm.equipment_pet_carriers,
           first_aid_kit: addForm.equipment_first_aid,
@@ -756,6 +811,31 @@ const VehicleManagement = () => {
               <FaEdit size={12} /> Edit
             </button>
           </Can>
+
+          {isAdmin && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDelete(row);
+              }}
+              title="Delete Vehicle Unit"
+              style={{
+                padding: "6px 10px",
+                borderRadius: "6px",
+                background: "#FEF2F2",
+                color: "#DC2626",
+                border: "1px solid #FCA5A5",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <FaTrash size={12} /> Delete
+            </button>
+          )}
         </div>
       ),
     },
@@ -1316,6 +1396,38 @@ const VehicleManagement = () => {
               </button>
               <button type="submit" disabled={isSubmitting} style={{ padding: "9px 18px", borderRadius: "8px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 600, fontSize: "13px" }}>
                 {isSubmitting ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* --- 4. DELETE VEHICLE CONFIRMATION MODAL --- */}
+      {targetDeleteVehicle && isDeleteModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsDeleteModalOpen(false)}
+          title={`Delete Vehicle Unit — ${targetDeleteVehicle.vehicle_code}`}
+          maxWidth="500px"
+        >
+          <form onSubmit={handleDeleteVehicleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+              Are you sure you want to delete vehicle unit <strong>{targetDeleteVehicle.vehicle_code}</strong> ({targetDeleteVehicle.registration_number})? This action cannot be undone.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                style={{ padding: "9px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600, fontSize: "13px" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                style={{ padding: "9px 18px", borderRadius: "8px", background: "#EF4444", color: "#FFF", border: "none", fontWeight: 600, fontSize: "13px", cursor: isSubmitting ? "not-allowed" : "pointer" }}
+              >
+                {isSubmitting ? "Deleting..." : "Confirm Delete"}
               </button>
             </div>
           </form>

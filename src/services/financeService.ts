@@ -54,9 +54,16 @@ export const financeService = {
     return response.data;
   },
 
-  // GET /finance/summary
+  // GET /finance/summary (Requires required query params period_start & period_end)
   getFinanceSummary: async (params?: { period_start?: string; period_end?: string }) => {
-    const response = await api.get("/finance/summary", { params });
+    const now = new Date();
+    const defaultStart = `${now.getFullYear()}-01-01`;
+    const defaultEnd = now.toISOString().split("T")[0];
+    const queryParams = {
+      period_start: params?.period_start || defaultStart,
+      period_end: params?.period_end || defaultEnd,
+    };
+    const response = await api.get("/finance/summary", { params: queryParams });
     return response.data;
   },
 
