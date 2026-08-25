@@ -20,6 +20,8 @@ export interface UserPayload {
   rejection_reason?: string | null;
   password?: string;
   direct_permissions?: string[];
+  rescue_centre_id?: string | null;
+  organization_id?: string | null;
 }
 
 export interface RolePayload {
@@ -98,6 +100,8 @@ export const userService = {
           : [],
     };
     if (data.phone !== undefined) payload.phone = data.phone;
+    if (data.rescue_centre_id !== undefined) payload.rescue_centre_id = data.rescue_centre_id;
+    if (data.organization_id !== undefined) payload.organization_id = data.organization_id;
     const response = await api.post("/admin/users", payload);
     await publishActionEvent({
       module: "user",

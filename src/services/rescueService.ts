@@ -228,6 +228,18 @@ export const rescueService = {
     return response.data;
   },
 
+  updateDispatch: async (dispatchId: string, payload: Record<string, unknown>) => {
+    const response = await api.patch(`/rescue/dispatch/${dispatchId}`, payload);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "Dispatch Updated",
+      message: `Dispatch ${dispatchId} details updated.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
   // POST /rescue/{request_id}/escalate - RescueEscalateCreate (PRR 3.3)
   escalateRescue: async (requestId: string, escalationType: string, notes?: string) => {
     const payload: Record<string, unknown> = { escalation_type: escalationType };

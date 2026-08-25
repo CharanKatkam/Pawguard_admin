@@ -29,7 +29,7 @@ import userService, { type UserPayload, extractPermissionCodes } from "../../ser
 import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole, isInternalRole, getCurrentUserRole } from "../../utils/roleUtils";
+import { normalizeRole, isInternalRole, getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 import { describePermission } from "../../utils/permissionsCatalog";
 
@@ -125,6 +125,16 @@ const ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendRoles: s
   { value: "volunteer_coordinator", label: "Volunteer", backendRoles: ["volunteer_coordinator"] },
   { value: "inventory_manager", label: "Inventory", backendRoles: ["inventory_manager"] },
   { value: "finance_user", label: "Finance", backendRoles: ["finance_user"] },
+];
+
+const RESCUE_PERMITTED_ROLES = ["rescue_centre_admin", "rescue_coordinator", "rescue_agent", "rescue_staff"];
+
+const RESCUE_ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendRoles: string[] }> = [
+  { value: "all", label: "All Rescue Roles", backendRoles: RESCUE_PERMITTED_ROLES },
+  { value: "rescue_centre_admin", label: "Rescue Centre Admin", backendRoles: ["rescue_centre_admin"] },
+  { value: "rescue_coordinator", label: "Rescue Coordinator", backendRoles: ["rescue_coordinator"] },
+  { value: "rescue_agent", label: "Rescue Agent", backendRoles: ["rescue_agent"] },
+  { value: "rescue_staff", label: "Rescue Staff", backendRoles: ["rescue_staff"] },
 ];
 
 /**
@@ -429,9 +439,12 @@ const Users = () => {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
-  // Check current user role for privilege escalation guards
+  // Check current user role and Rescue Centre assignment for scope enforcement
+  const currentUser = getCurrentUser();
   const currentUserRole = getCurrentUserRole();
+  const isRescueCentreAdmin = currentUserRole === "rescue_centre_admin";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const currentRescueCentreId = (currentUser as any)?.rescue_centre_id || (currentUser as any)?.rescue_center_id || (currentUser as any)?.rescue_facility_id || (currentUser as any)?.facility_id || (currentUser as any)?.organization_id || (currentUser as any)?.id;
 
   // Filter state for summary cards: "staff" (default internal accounts) or "public" (non-staff registrations)
   const [activeFilter, setActiveFilter] = useState<"staff" | "public">("staff");
@@ -693,17 +706,49 @@ const Users = () => {
     try {
       setError(null);
 
-      const response = await userService.getUsers({ page_size: 20 });
+      const queryParams: Record<string, unknown> = { page_size: 100 };
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        queryParams.rescue_centre_id = currentRescueCentreId;
+      }
+
+      const response = await userService.getUsers(queryParams);
       const rawBody = response as unknown;
       const rawData = (rawBody as { data?: unknown })?.data;
       const rawItems = (rawData as { items?: unknown })?.items;
-      const userList = Array.isArray(rawBody)
+      let userList = Array.isArray(rawBody)
         ? (rawBody as UserPayload[])
         : Array.isArray(rawData)
         ? (rawData as UserPayload[])
         : Array.isArray(rawItems)
         ? (rawItems as UserPayload[])
         : [];
+
+      // Enforce Rescue Centre scope when accessed by Rescue Centre Admin
+      if (isRescueCentreAdmin) {
+        userList = userList.filter((user: UserPayload) => {
+          const roles = Array.isArray(user.roles)
+            ? user.roles
+            : Array.isArray(user.role_names)
+            ? user.role_names
+            : user.role
+            ? [user.role]
+            : [];
+
+          const hasRescueRole = roles.some((r) => {
+            const norm = normalizeRole(r) || String(r).toLowerCase().trim();
+            return RESCUE_PERMITTED_ROLES.includes(norm);
+          });
+
+          if (!hasRescueRole) return false;
+
+          const uCentreId = user.rescue_centre_id || (user as any).rescue_center_id || (user as any).facility_id || (user as any).organization_id;
+          if (uCentreId && currentRescueCentreId && String(uCentreId) !== String(currentRescueCentreId)) {
+            return false;
+          }
+
+          return true;
+        });
+      }
 
       const formattedUsers = userList.map((user: UserPayload): UserTableRow => {
         const roles = Array.isArray(user.roles)
@@ -757,7 +802,7 @@ const Users = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isRescueCentreAdmin, currentRescueCentreId]);
 
   useEffect(() => {
     fetchUsers();
@@ -775,7 +820,12 @@ const Users = () => {
       addToast("Please fill in required fields (Full Name & Email)", "error");
       return;
     }
-    if (!isSuperAdmin && formData.role === "super_admin") {
+    if (isRescueCentreAdmin) {
+      if (!RESCUE_PERMITTED_ROLES.includes(formData.role)) {
+        addToast("Access Denied: Rescue Centre Admins can only onboard rescue personnel.", "error");
+        return;
+      }
+    } else if (!isSuperAdmin && formData.role === "super_admin") {
       addToast("Access Denied: Only a Super Administrator can assign Super Admin privileges.", "error");
       return;
     }
@@ -787,12 +837,16 @@ const Users = () => {
     try {
       setIsSubmitting(true);
       const password = formData.password || generatePassword();
-      await userService.createUser({
+      const createPayload: UserPayload = {
         full_name: formData.name.trim(),
         email: formData.email.trim(),
         role: formData.role,
         password,
-      });
+      };
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        createPayload.rescue_centre_id = currentRescueCentreId;
+      }
+      await userService.createUser(createPayload);
       addToast(`User ${formData.name} provisioned successfully!`, "success");
       setIsAddModalOpen(false);
       setFormData({ name: "", email: "", role: "rescue_agent", password: "" });
@@ -853,30 +907,99 @@ const Users = () => {
     }
   };
 
+  const activeRoleFilterOptions = isRescueCentreAdmin ? RESCUE_ROLE_FILTER_OPTIONS : ROLE_FILTER_OPTIONS;
+
   const matchesRoleFilter = useCallback(
     (userRoles: string[], filterValue: string): boolean => {
       if (filterValue === "all") return true;
-      const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === filterValue);
+      const option = activeRoleFilterOptions.find((opt) => opt.value === filterValue);
       if (!option || option.backendRoles.length === 0) return true;
       return userRoles.some((role) => option.backendRoles.includes(normalizeRole(role) || role));
     },
-    []
+    [activeRoleFilterOptions]
   );
 
   // Partition users into legitimate internal staff vs public website users
-  const staffUsers = useMemo(
-    () => users.filter((u) => hasAdminPortalAccess(u.roles)),
-    [users]
-  );
+  const staffUsers = useMemo(() => {
+    if (isRescueCentreAdmin) {
+      return users.filter((u) => u.roles.some((r) => RESCUE_PERMITTED_ROLES.includes(normalizeRole(r) || String(r).toLowerCase().trim())));
+    }
+    return users.filter((u) => hasAdminPortalAccess(u.roles));
+  }, [users, isRescueCentreAdmin]);
 
-  const publicUsers = useMemo(
-    () => users.filter((u) => !hasAdminPortalAccess(u.roles)),
-    [users]
-  );
+  const publicUsers = useMemo(() => {
+    if (isRescueCentreAdmin) return [];
+    return users.filter((u) => !hasAdminPortalAccess(u.roles));
+  }, [users, isRescueCentreAdmin]);
 
   // Statistics cards dynamically calculated from backend data
-  const stats = useMemo(
-    () => [
+  const stats = useMemo(() => {
+    if (isRescueCentreAdmin) {
+      return [
+        {
+          title: "Total Rescue Staff",
+          value: loading ? "..." : `${staffUsers.length} Staff`,
+          trend: "Rescue Centre Personnel",
+          color: "#2563EB",
+          icon: <FaUsers />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setRoleFilter("all");
+            setStatusFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
+        },
+        {
+          title: "Active Rescue Staff",
+          value: loading ? "..." : `${staffUsers.filter((u) => u.isActive).length} Active`,
+          trend: "Operational Access Enabled",
+          color: "#059669",
+          icon: <FaCheckCircle />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setStatusFilter("active");
+            setRoleFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && statusFilter === "active",
+        },
+        {
+          title: "Inactive Rescue Staff",
+          value: loading ? "..." : `${staffUsers.filter((u) => !u.isActive).length} Inactive`,
+          trend: "Access Suspended",
+          color: "#EF4444",
+          icon: <FaTimesCircle />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setStatusFilter("inactive");
+            setRoleFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && statusFilter === "inactive",
+        },
+        {
+          title: "Rescue Admins",
+          value: loading ? "..." : `${staffUsers.filter((u) => u.roles.some((r) => normalizeRole(r) === "rescue_centre_admin")).length} Admins`,
+          trend: "Centre Administrators",
+          color: "#7C3AED",
+          icon: <FaUserShield />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setRoleFilter("rescue_centre_admin");
+            setStatusFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && roleFilter === "rescue_centre_admin",
+        },
+      ];
+    }
+
+    return [
       {
         title: "Total Staff Accounts",
         value: loading ? "..." : `${staffUsers.length} Staff`,
@@ -952,9 +1075,8 @@ const Users = () => {
         },
         selected: activeFilter === "public",
       },
-    ],
-    [staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm]
-  );
+    ];
+  }, [staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm, isRescueCentreAdmin]);
 
   // Table rows filtered according to active filter tab, role filter, status filter, and search
   const filteredUsers = useMemo(() => {
@@ -982,6 +1104,16 @@ const Users = () => {
   }, [staffUsers, publicUsers, activeFilter, roleFilter, statusFilter, searchTerm, matchesRoleFilter]);
 
   const getTableTitle = () => {
+    if (isRescueCentreAdmin) {
+      if (roleFilter !== "all") {
+        const option = RESCUE_ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
+        if (option) return `${option.label} Personnel`;
+      }
+      if (statusFilter === "active") return "Active Rescue Centre Personnel";
+      if (statusFilter === "inactive") return "Inactive Rescue Centre Personnel";
+      return "Rescue Centre Personnel & Staff";
+    }
+
     if (activeFilter === "public") return "Public Registered Users (Read-Only Reference)";
     if (roleFilter !== "all") {
       const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
@@ -1051,10 +1183,12 @@ const Users = () => {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>
-          User Management &amp; Personnel
+          {isRescueCentreAdmin ? "Staff & Users" : "User Management & Personnel"}
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
-          Manage PawGuard internal user accounts, staff roles, permissions, and Admin Portal access.
+          {isRescueCentreAdmin
+            ? "Manage Rescue Centre personnel, roles, and access."
+            : "Manage PawGuard internal user accounts, staff roles, permissions, and Admin Portal access."}
         </p>
       </div>
 
@@ -1182,7 +1316,7 @@ const Users = () => {
                   minWidth: "180px",
                 }}
               >
-                {ROLE_FILTER_OPTIONS.map((opt) => (
+                {activeRoleFilterOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -1781,7 +1915,7 @@ const Users = () => {
       </Modal>
 
       {/* Provision New User Modal */}
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Provision User Account">
+      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title={isRescueCentreAdmin ? "Provision Rescue Staff Account" : "Provision User Account"}>
         <form onSubmit={handleCreateUser} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
@@ -1820,17 +1954,28 @@ const Users = () => {
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", background: "#FFFFFF" }}
             >
-              {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
-              <option value="rescue_centre_admin">Rescue Centre Admin</option>
-              <option value="rescue_coordinator">Rescue Coordinator</option>
-              <option value="rescue_agent">Rescue Agent</option>
-              <option value="veterinarian">Veterinarian</option>
-              <option value="shelter_manager">Shelter Manager</option>
-              <option value="adoption_coordinator">Adoption Coordinator</option>
-              <option value="foster_coordinator">Foster Coordinator</option>
-              <option value="volunteer_coordinator">Volunteer Coordinator</option>
-              <option value="inventory_manager">Inventory Manager</option>
-              <option value="finance_user">Finance Officer</option>
+              {isRescueCentreAdmin ? (
+                <>
+                  <option value="rescue_agent">Rescue Agent</option>
+                  <option value="rescue_coordinator">Rescue Coordinator</option>
+                  <option value="rescue_staff">Rescue Staff</option>
+                  <option value="rescue_centre_admin">Rescue Centre Admin</option>
+                </>
+              ) : (
+                <>
+                  {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
+                  <option value="rescue_centre_admin">Rescue Centre Admin</option>
+                  <option value="rescue_coordinator">Rescue Coordinator</option>
+                  <option value="rescue_agent">Rescue Agent</option>
+                  <option value="veterinarian">Veterinarian</option>
+                  <option value="shelter_manager">Shelter Manager</option>
+                  <option value="adoption_coordinator">Adoption Coordinator</option>
+                  <option value="foster_coordinator">Foster Coordinator</option>
+                  <option value="volunteer_coordinator">Volunteer Coordinator</option>
+                  <option value="inventory_manager">Inventory Manager</option>
+                  <option value="finance_user">Finance Officer</option>
+                </>
+              )}
             </select>
           </div>
 
@@ -1884,17 +2029,28 @@ const Users = () => {
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", background: "#FFFFFF" }}
             >
-              {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
-              <option value="rescue_centre_admin">Rescue Centre Admin</option>
-              <option value="rescue_coordinator">Rescue Coordinator</option>
-              <option value="rescue_agent">Rescue Agent</option>
-              <option value="veterinarian">Veterinarian</option>
-              <option value="shelter_manager">Shelter Manager</option>
-              <option value="adoption_coordinator">Adoption Coordinator</option>
-              <option value="foster_coordinator">Foster Coordinator</option>
-              <option value="volunteer_coordinator">Volunteer Coordinator</option>
-              <option value="inventory_manager">Inventory Manager</option>
-              <option value="finance_user">Finance Officer</option>
+              {isRescueCentreAdmin ? (
+                <>
+                  <option value="rescue_agent">Rescue Agent</option>
+                  <option value="rescue_coordinator">Rescue Coordinator</option>
+                  <option value="rescue_staff">Rescue Staff</option>
+                  <option value="rescue_centre_admin">Rescue Centre Admin</option>
+                </>
+              ) : (
+                <>
+                  {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
+                  <option value="rescue_centre_admin">Rescue Centre Admin</option>
+                  <option value="rescue_coordinator">Rescue Coordinator</option>
+                  <option value="rescue_agent">Rescue Agent</option>
+                  <option value="veterinarian">Veterinarian</option>
+                  <option value="shelter_manager">Shelter Manager</option>
+                  <option value="adoption_coordinator">Adoption Coordinator</option>
+                  <option value="foster_coordinator">Foster Coordinator</option>
+                  <option value="volunteer_coordinator">Volunteer Coordinator</option>
+                  <option value="inventory_manager">Inventory Manager</option>
+                  <option value="finance_user">Finance Officer</option>
+                </>
+              )}
             </select>
           </div>
 

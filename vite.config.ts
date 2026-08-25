@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import https from 'node:https'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -13,6 +14,7 @@ export default defineConfig({
         target: 'https://pawguard-backend-mqri.onrender.com',
         changeOrigin: true,
         secure: false,
+        agent: new https.Agent({ family: 4, keepAlive: true }),
       },
     },
   },

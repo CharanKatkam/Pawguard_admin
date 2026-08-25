@@ -416,7 +416,7 @@ const RescueCentreAdminDashboard = () => {
               cursor: "pointer",
             }}
           >
-            <FaSync /> Sync Metrics
+            <FaSync /> Refresh
           </button>
         </div>
       </div>

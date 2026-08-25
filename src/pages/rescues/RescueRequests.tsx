@@ -1,20 +1,29 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
 import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
-import { FaAmbulance, FaCheck, FaTimes, FaClock, FaPlus, FaMapMarkerAlt, FaSearchLocation, FaUserPlus, FaExternalLinkAlt, FaNotesMedical, FaTruck } from "react-icons/fa";
+import {
+  FaAmbulance,
+  FaCheck,
+  FaTimes,
+  FaClock,
+  FaPlus,
+  FaTruck,
+  FaMapMarkerAlt,
+  FaExclamationTriangle,
+  FaPhoneAlt,
+  FaUser,
+  FaInfoCircle,
+} from "react-icons/fa";
 import rescueService from "../../services/rescueService";
-import lostFoundService from "../../services/lostFoundService";
-import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole, getCurrentUserRole } from "../../utils/roleUtils";
+import { getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 
-interface RescueRequestTableRow {
+export interface RescueRequestTableRow {
   id: string;
   ticket_number: string;
   reporter: string;
@@ -36,42 +45,41 @@ interface RescueRequestTableRow {
   [key: string]: unknown;
 }
 
-interface CoordinatorUser {
-  id: string;
-  full_name?: string;
-  email?: string;
-  phone?: string;
-  roles?: string[];
-  [key: string]: unknown;
-}
-
 const RescueRequests = () => {
-  const navigate = useNavigate();
+  const currentUser = getCurrentUser();
   const currentUserRole = getCurrentUserRole();
-  const isAdmin = currentUserRole === "super_admin" || currentUserRole === "rescue_centre_admin";
-  const isCoordinator = currentUserRole === "rescue_coordinator";
+  const isRescueCentreAdmin = currentUserRole === "rescue_centre_admin";
+  const isSuperAdmin = currentUserRole === "super_admin";
+  const isAdmin = isSuperAdmin || isRescueCentreAdmin;
+
+  const currentRescueCentreId =
+    (currentUser as any)?.rescue_centre_id ||
+    (currentUser as any)?.rescue_center_id ||
+    (currentUser as any)?.rescue_facility_id ||
+    (currentUser as any)?.facility_id ||
+    (currentUser as any)?.organization_id ||
+    (currentUser as any)?.id;
 
   const [requests, setRequests] = useState<RescueRequestTableRow[]>([]);
-  const [coordinators, setCoordinators] = useState<CoordinatorUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
 
+  // 3 Dropdown Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const tableSectionRef = useRef<HTMLDivElement>(null);
+  const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [urgencyFilter, setUrgencyFilter] = useState<string>("all");
 
+  // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
   const [targetRejectId, setTargetRejectId] = useState<string | null>(null);
-
   const [selectedRequest, setSelectedRequest] = useState<RescueRequestTableRow | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [assignForm, setAssignForm] = useState({ coordinator_id: "", notes: "" });
-
+  // New Rescue Request Form State
   const [formData, setFormData] = useState({
     reporter_name: "",
     reporter_phone: "",
@@ -82,46 +90,37 @@ const RescueRequests = () => {
     reporter_notes: "",
   });
 
-  const fetchCoordinators = useCallback(async () => {
-    try {
-      const response = await userService.getUsers();
-      const list: CoordinatorUser[] = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
-      setCoordinators(
-        list.filter((u: CoordinatorUser) => normalizeRole(u) === "rescue_coordinator")
-      );
-    } catch {
-      setCoordinators([]);
-    }
-  }, []);
-
+  // Fetch Requests Function with Rescue Centre Scoping
   const fetchRequests = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await rescueService.getRescueRequests();
+
+      const queryParams: Record<string, unknown> = {};
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        queryParams.rescue_centre_id = currentRescueCentreId;
+      }
+
+      const response = await rescueService.getRescueRequests(queryParams);
       const list: Record<string, unknown>[] = Array.isArray(response)
         ? response
         : Array.isArray(response?.data)
         ? response.data
         : [];
 
-      const formatted: RescueRequestTableRow[] = list.map((item: Record<string, unknown>) => {
+      let formatted: RescueRequestTableRow[] = list.map((item: Record<string, unknown>) => {
         const stage = dispatchStage({ status: item.status as string, dispatch: item.dispatch as Record<string, unknown> });
         return {
           id: String(item.id || item.request_id || ""),
           ticket_number: String(item.ticket_number || ""),
-          reporter: String(item.reporter_name || item.reporter || ""),
-          phone: String(item.reporter_phone || item.phone || ""),
-          location: String(item.location_address || item.location || ""),
-          condition: String(item.physical_condition || ""),
-          severity: String(item.severity || ""),
+          reporter: String(item.reporter_name || item.reporter || "Anonymous Reporter"),
+          phone: String(item.reporter_phone || item.phone || "Not provided"),
+          location: String(item.location_address || item.location || "Location not recorded"),
+          condition: String(item.physical_condition || "-"),
+          severity: String(item.severity || item.urgency_level || "medium").toLowerCase(),
           is_urgent: !!item.is_urgent,
-          status: String(item.status || "").toLowerCase(),
-          rejection_rationale: String(item.rejection_rationale || ""),
+          status: String(item.status || "reported").toLowerCase(),
+          rejection_rationale: String(item.rejection_rationale || item.rejection_reason || ""),
           dispatch: (item.dispatch as Record<string, unknown>) || null,
           dispatch_status: stage.label,
           dispatch_bg: stage.bg,
@@ -133,7 +132,18 @@ const RescueRequests = () => {
         };
       });
 
-      const sortedFormatted = [...formatted].sort((a, b) => {
+      // Filter by Rescue Centre Scope if applicable
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        formatted = formatted.filter((req) => {
+          const reqCentreId = req.raw?.rescue_centre_id || req.raw?.rescue_center_id || req.raw?.facility_id || req.raw?.organization_id;
+          if (reqCentreId && String(reqCentreId) !== String(currentRescueCentreId)) {
+            return false;
+          }
+          return true;
+        });
+      }
+
+      const sortedFormatted = formatted.sort((a, b) => {
         const timeA = new Date(a.date).getTime();
         const timeB = new Date(b.date).getTime();
         return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
@@ -141,12 +151,12 @@ const RescueRequests = () => {
 
       setRequests(sortedFormatted);
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      setError(e?.response?.data?.detail || "Failed to load incoming rescue requests.");
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      setError(e?.response?.data?.detail || e?.response?.data?.message || "Failed to load incoming rescue requests.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isRescueCentreAdmin, currentRescueCentreId]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -158,16 +168,24 @@ const RescueRequests = () => {
       setStatusFilter(statusParam.toLowerCase());
     }
     void fetchRequests();
-    void fetchCoordinators();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchRequests]);
 
+  // Create Request Action
   const handleCreateRequest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.location_address || !formData.reporter_name || !formData.reporter_phone) {
+      addToast("Please fill in required fields (Location, Reporter Name & Phone).", "error");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
-      await rescueService.createRescueRequest(formData);
-      addToast("Public rescue report recorded!", "success");
+      const payload: Record<string, unknown> = { ...formData };
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        payload.rescue_centre_id = currentRescueCentreId;
+      }
+      await rescueService.createRescueRequest(payload);
+      addToast("Emergency rescue call logged successfully!", "success");
       setIsAddModalOpen(false);
       setFormData({
         reporter_name: "",
@@ -181,14 +199,15 @@ const RescueRequests = () => {
       fetchRequests();
       notifyDataChanged();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      addToast(e?.response?.data?.detail || "Failed to submit request", "error");
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to log rescue report", "error");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleVerify = async (id: string, reqObj?: Record<string, unknown>) => {
+  // Verify Action
+  const handleVerify = async (id: string, reqObj?: RescueRequestTableRow) => {
     try {
       await rescueService.approveRescueRequest(id, {
         status: "verified",
@@ -205,6 +224,7 @@ const RescueRequests = () => {
     }
   };
 
+  // Open Reject Modal
   const openRejectModal = (req: RescueRequestTableRow) => {
     setTargetRejectId(req.id);
     setSelectedRequest(req);
@@ -212,13 +232,14 @@ const RescueRequests = () => {
     setIsRejectModalOpen(true);
   };
 
+  // Reject Submit Action
   const handleRejectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetRejectId) return;
     try {
       setIsSubmitting(true);
       await rescueService.rejectRescueRequest(targetRejectId, rejectionReason || undefined);
-      addToast("Rescue request rejected and closed.", "info");
+      addToast("Rescue request rejected and marked invalid.", "info");
       setIsRejectModalOpen(false);
       setIsViewModalOpen(false);
       setRejectionReason("");
@@ -233,152 +254,97 @@ const RescueRequests = () => {
     }
   };
 
-  const handleAssignCoordinatorSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRequest) return;
-    if (!assignForm.coordinator_id) {
-      addToast("Select a rescue coordinator to assign.", "error");
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      await rescueService.assignCoordinator(
-        selectedRequest.id,
-        assignForm.coordinator_id,
-        assignForm.notes || undefined
-      );
-      addToast("Rescue coordinator assigned successfully!", "success");
-      setIsAssignModalOpen(false);
-      setIsViewModalOpen(false);
-      setAssignForm({ coordinator_id: "", notes: "" });
-      fetchRequests();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to assign coordinator", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  // Summary Metrics (6 Cards ONLY)
+  const stats = useMemo(() => {
+    const total = requests.length;
+    const awaitingTriage = requests.filter((r) => ["reported", "pending", "new", "awaiting_triage"].includes(r.status)).length;
+    const verified = requests.filter((r) => r.status === "verified").length;
+    const dispatched = requests.filter((r) => r.status === "dispatched" || String(r.dispatch_status).toLowerCase().includes("dispatched")).length;
+    const rescued = requests.filter((r) => ["rescued", "located", "secured", "admitted", "completed"].includes(r.status)).length;
+    const rejected = requests.filter((r) => ["rejected", "invalid", "failed", "declined"].includes(r.status)).length;
 
-  const handleEscalate = async (id: string) => {
-    try {
-      await rescueService.escalateRescue(id, "backup_personnel");
-      addToast("Case escalated to backup personnel.", "success");
-      fetchRequests();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      addToast(e?.response?.data?.detail || "Failed to escalate case", "error");
-    }
-  };
+    return { total, awaitingTriage, verified, dispatched, rescued, rejected };
+  }, [requests]);
 
-  const handleLocated = async (id: string) => {
-    try {
-      await rescueService.markRescueLocated(id);
-      addToast("Dog marked as located.", "success");
-      fetchRequests();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      addToast(e?.response?.data?.detail || "Failed to update case", "error");
-    }
-  };
+  // Combined 3-Dropdown Filter Logic
+  const filteredRequests = useMemo(() => {
+    return requests.filter((r) => {
+      // 1. Status Filter
+      if (statusFilter !== "all") {
+        const st = String(r.status || "").toLowerCase().trim();
+        if (statusFilter === "reported" || statusFilter === "awaiting_triage") {
+          if (!["reported", "pending", "new", "awaiting_triage"].includes(st)) return false;
+        } else if (statusFilter === "verified") {
+          if (st !== "verified") return false;
+        } else if (statusFilter === "dispatched") {
+          if (st !== "dispatched" && !String(r.dispatch_status || "").toLowerCase().includes("dispatched")) return false;
+        } else if (statusFilter === "rescued") {
+          if (!["rescued", "located", "secured", "admitted", "completed"].includes(st)) return false;
+        } else if (statusFilter === "rejected") {
+          if (!["rejected", "invalid", "failed", "declined"].includes(st)) return false;
+        } else {
+          if (st !== statusFilter) return false;
+        }
+      }
 
-  const handleSecured = async (id: string) => {
-    try {
-      await rescueService.markRescueSecured(id);
-      addToast("Dog secured by field team.", "success");
-      fetchRequests();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      addToast(e?.response?.data?.detail || "Failed to update case", "error");
-    }
-  };
+      // 2. Severity Filter
+      if (severityFilter !== "all") {
+        const sev = String(r.severity || "").toLowerCase().trim();
+        if (sev !== severityFilter) return false;
+      }
 
-  const handleAdmitted = async (id: string) => {
-    try {
-      await rescueService.markRescueAdmitted(id);
-      addToast("Dog admitted to the rescue centre.", "success");
-      fetchRequests();
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } } };
-      addToast(e?.response?.data?.detail || "Failed to admit dog", "error");
-    }
-  };
+      // 3. Urgency Filter
+      if (urgencyFilter !== "all") {
+        const isUrgent = Boolean(r.is_urgent);
+        if (urgencyFilter === "urgent" && !isUrgent) return false;
+        if (urgencyFilter === "normal" && isUrgent) return false;
+      }
 
-  const handleLogFoundPetFromRescue = async (req: Record<string, unknown>) => {
-    try {
-      setIsSubmitting(true);
-      const address = String(req.location || req.location_address || "Rescue Location");
-      const lat = req.latitude && req.latitude !== "-" ? Number(req.latitude) : null;
-      const lng = req.longitude && req.longitude !== "-" ? Number(req.longitude) : null;
-      const notes = [
-        req.condition ? `Physical Condition: ${String(req.condition)}` : "",
-        req.reporter_notes ? `Reporter Notes: ${String(req.reporter_notes)}` : "",
-      ].filter(Boolean).join(" | ");
+      return true;
+    });
+  }, [requests, statusFilter, severityFilter, urgencyFilter]);
 
-      const res = await lostFoundService.createFoundReport({
-        species: "dog",
-        breed_observed: "Rescued Dog",
-        color_observed: "Mixed / Unspecified",
-        location_address: address,
-        latitude: lat,
-        longitude: lng,
-        found_at: new Date().toISOString(),
-        marker_description: notes || `Secured via Rescue Request #${String(req.ticket_number || req.id || "")}`,
-      });
-
-      const reportId = (res as { data?: { id?: string }; id?: string })?.data?.id || (res as { id?: string })?.id;
-      addToast(`Found pet report created for rescued dog! (${reportId ? `Report #${String(reportId).slice(0, 8)}` : "Saved"})`, "success");
-      setIsViewModalOpen(false);
-      notifyDataChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string; message?: string } } };
-      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to log found pet report", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
+  // Table Column Definitions
   const columns = [
-    { key: "ticket_number", header: "Ticket No." },
-    { key: "reporter", header: "Reporter Name" },
-    { key: "phone", header: "Phone" },
-    { key: "location", header: "Location" },
+    { key: "ticket_number", title: "Ticket No." },
+    { key: "reporter", title: "Reporter" },
+    { key: "phone", title: "Phone" },
+    { key: "location", title: "Location" },
     {
       key: "severity",
-      header: "Severity",
-      render: (val: string) => (
-        <span style={{ textTransform: "uppercase", fontWeight: 600, fontSize: "12px", color: val === "critical" ? "#DC2626" : val === "high" ? "#EA580C" : val === "medium" ? "#F59E0B" : "#16A34A" }}>
-          {val || "-"}
-        </span>
-      ),
+      title: "Severity",
+      render: (val: string) => {
+        const norm = String(val || "").toLowerCase();
+        const color = norm === "critical" ? "#DC2626" : norm === "high" ? "#EA580C" : norm === "medium" ? "#D97706" : "#16A34A";
+        return (
+          <span style={{ textTransform: "uppercase", fontWeight: 700, fontSize: "12px", color }}>
+            {val || "-"}
+          </span>
+        );
+      },
     },
     {
       key: "is_urgent",
-      header: "Urgent",
-      render: (val: boolean) => (val ? <span style={{ color: "#DC2626", fontWeight: 700 }}>YES</span> : <span style={{ color: "#94A3B8" }}>-</span>),
+      title: "Urgent",
+      render: (val: boolean) => (val ? <span style={{ color: "#DC2626", fontWeight: 800, fontSize: "12px" }}>URGENT</span> : <span style={{ color: "#94A3B8" }}>Normal</span>),
     },
     {
       key: "status",
-      header: "Status",
+      title: "Status",
       render: rescueStatusBadge,
     },
     {
       key: "dispatch_status",
-      header: "Dispatch Status",
+      title: "Dispatch Status",
       render: (val: string, row: Record<string, unknown>) => (
-        <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: String(row.dispatch_bg || ""), color: String(row.dispatch_color || "") }}>
+        <span style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: String(row.dispatch_bg || "#F1F5F9"), color: String(row.dispatch_color || "#475569") }}>
           {val}
         </span>
       ),
     },
     {
       key: "actions",
-      header: "Actions",
+      title: "Actions",
       render: (_val: unknown, row: RescueRequestTableRow) => (
         <div style={{ display: "flex", gap: "6px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
           <button
@@ -387,23 +353,23 @@ const RescueRequests = () => {
               setSelectedRequest(row);
               setIsViewModalOpen(true);
             }}
-            style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+            style={{ padding: "5px 11px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
           >
             View Details
           </button>
-          {["reported", "pending", "new"].includes(row.status) && (isAdmin || isCoordinator) && (
+          {["reported", "pending", "new", "awaiting_triage"].includes(row.status) && isAdmin && (
             <>
               <button
                 type="button"
                 onClick={() => handleVerify(row.id, row)}
-                style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFFFFF", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
               >
                 Verify
               </button>
               <button
                 type="button"
                 onClick={() => openRejectModal(row)}
-                style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#EF4444", color: "#FFFFFF", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#EF4444", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
               >
                 Reject
               </button>
@@ -414,33 +380,15 @@ const RescueRequests = () => {
     },
   ];
 
-  const handleStatCardClick = (status: string) => {
-    setStatusFilter(status);
-    if (tableSectionRef.current) {
-      tableSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-
-  const filteredRequests = requests.filter((r) => {
-    return statusFilter === "all"
-      ? true
-      : statusFilter === "pending"
-      ? ["reported", "pending", "new"].includes(r.status)
-      : statusFilter === "rescued"
-      ? ["rescued", "located", "secured", "admitted", "completed"].includes(r.status)
-      : statusFilter === "rejected"
-      ? ["rejected", "failed", "invalid"].includes(r.status)
-      : r.status === statusFilter;
-  });
-
   return (
-    <div style={{ padding: "24px", maxWidth: "1400px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+    <div>
+      {/* Header Banner */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", padding: "24px", borderRadius: "16px", color: "#FFF" }}>
         <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#0F172A", margin: 0 }}>
+          <h1 style={{ fontSize: "28px", fontWeight: 800, margin: 0 }}>
             Incoming Rescue Requests
           </h1>
-          <p style={{ color: "#64748B", margin: "4px 0 0 0", fontSize: "14px" }}>
+          <p style={{ color: "#94A3B8", margin: "6px 0 0 0", fontSize: "14px" }}>
             Triage and process emergency rescue calls submitted by citizens.
           </p>
         </div>
@@ -455,7 +403,7 @@ const RescueRequests = () => {
               borderRadius: "10px",
               padding: "10px 18px",
               fontSize: "14px",
-              fontWeight: 600,
+              fontWeight: 700,
               display: "flex",
               alignItems: "center",
               gap: "8px",
@@ -463,106 +411,145 @@ const RescueRequests = () => {
             }}
           >
             <FaPlus size={14} />
-            <span>Log Report</span>
+            <span>+ Log Report</span>
           </button>
         </Can>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+      {/* Summary Cards (6 Cards ONLY) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <StatCard
           title="Total Incoming"
-          value={requests.length}
+          value={stats.total}
           icon={<FaAmbulance />}
           color="#2563EB"
-          onClick={() => handleStatCardClick("all")}
+          onClick={() => setStatusFilter("all")}
           selected={statusFilter === "all"}
         />
         <StatCard
-          title="Reported (Triage)"
-          value={requests.filter((r) => r.status === "reported").length}
+          title="Awaiting Triage"
+          value={stats.awaitingTriage}
           icon={<FaClock />}
-          color="#F59E0B"
-          onClick={() => handleStatCardClick("reported")}
+          color="#D97706"
+          onClick={() => setStatusFilter("reported")}
           selected={statusFilter === "reported"}
         />
         <StatCard
           title="Verified"
-          value={requests.filter((r) => r.status === "verified").length}
+          value={stats.verified}
           icon={<FaCheck />}
-          color="#2563EB"
-          onClick={() => handleStatCardClick("verified")}
+          color="#10B981"
+          onClick={() => setStatusFilter("verified")}
           selected={statusFilter === "verified"}
         />
         <StatCard
           title="Dispatched"
-          value={requests.filter((r) => r.status === "dispatched").length}
-          icon={<FaMapMarkerAlt />}
+          value={stats.dispatched}
+          icon={<FaTruck />}
           color="#7C3AED"
-          onClick={() => handleStatCardClick("dispatched")}
+          onClick={() => setStatusFilter("dispatched")}
           selected={statusFilter === "dispatched"}
         />
         <StatCard
           title="Rescued"
-          value={requests.filter((r) => r.status === "rescued").length}
+          value={stats.rescued}
           icon={<FaCheck />}
-          color="#10B981"
-          onClick={() => handleStatCardClick("rescued")}
+          color="#059669"
+          onClick={() => setStatusFilter("rescued")}
           selected={statusFilter === "rescued"}
         />
         <StatCard
           title="Rejected / Invalid"
-          value={requests.filter((r) => r.status === "rejected").length}
+          value={stats.rejected}
           icon={<FaTimes />}
           color="#EF4444"
-          onClick={() => handleStatCardClick("rejected")}
+          onClick={() => setStatusFilter("rejected")}
           selected={statusFilter === "rejected"}
         />
       </div>
 
+      {/* Search & Filters Section */}
+      <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", alignItems: "flex-end" }}>
+        <div>
+          <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF", fontWeight: 500 }}
+          >
+            <option value="all">All Statuses</option>
+            <option value="reported">Awaiting Triage (Reported)</option>
+            <option value="verified">Verified</option>
+            <option value="dispatched">Dispatched</option>
+            <option value="rescued">Rescued</option>
+            <option value="rejected">Rejected / Invalid</option>
+          </select>
+        </div>
 
-      <div ref={tableSectionRef}>
-        {statusFilter !== "all" && (
-          <div
+        <div>
+          <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Severity</label>
+          <select
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value)}
+            style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF", fontWeight: 500 }}
+          >
+            <option value="all">All Severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+
+        <div>
+          <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Urgency</label>
+          <select
+            value={urgencyFilter}
+            onChange={(e) => setUrgencyFilter(e.target.value)}
+            style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px", background: "#FFF", fontWeight: 500 }}
+          >
+            <option value="all">All Urgency</option>
+            <option value="urgent">Urgent</option>
+            <option value="normal">Normal</option>
+          </select>
+        </div>
+
+        {(statusFilter !== "all" || severityFilter !== "all" || urgencyFilter !== "all") && (
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setSeverityFilter("all");
+              setUrgencyFilter("all");
+            }}
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "14px",
-              background: "#EFF6FF",
-              border: "1px solid #BFDBFE",
-              borderRadius: "10px",
-              padding: "10px 16px",
+              padding: "9px 14px",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
+              background: "#F1F5F9",
+              color: "#475569",
+              fontSize: "13px",
+              fontWeight: 600,
+              cursor: "pointer",
+              height: "38px",
             }}
           >
-            <div style={{ fontSize: "13px", fontWeight: 600, color: "#1E40AF" }}>
-              Filtered by Status: <span style={{ textTransform: "uppercase", fontWeight: 700 }}>{statusFilter}</span> ({filteredRequests.length} of {requests.length} requests)
-            </div>
-            <button
-              onClick={() => setStatusFilter("all")}
-              style={{
-                background: "#FFFFFF",
-                border: "1px solid #93C5FD",
-                borderRadius: "6px",
-                padding: "4px 10px",
-                fontSize: "12px",
-                color: "#1D4ED8",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              Show All Requests
-            </button>
-          </div>
+            Reset Filters
+          </button>
         )}
+      </div>
 
+      {/* Requests Table */}
+      <div className="soft-card" style={{ padding: "20px" }}>
         <DataTable
           data={filteredRequests}
           columns={columns}
           loading={loading}
           error={error}
           onRetry={fetchRequests}
-          emptyMessage={statusFilter !== "all" ? `No rescue requests with status "${statusFilter}".` : "No public rescue requests."}
+          emptyMessage="No matching rescue requests found."
           module="rescue_requests"
+          searchMaxWidth="480px"
           onRowClick={(item: RescueRequestTableRow) => {
             setSelectedRequest(item);
             setIsViewModalOpen(true);
@@ -570,26 +557,52 @@ const RescueRequests = () => {
         />
       </div>
 
+      {/* Log Emergency Rescue Call Modal */}
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Log Emergency Rescue Call">
         <form onSubmit={handleCreateRequest} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Location Address *</label>
-            <input type="text" required value={formData.location_address} onChange={(e) => setFormData({ ...formData, location_address: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Location Address *</label>
+            <input
+              type="text"
+              required
+              placeholder="Full location details / landmark..."
+              value={formData.location_address}
+              onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px" }}
+            />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Name *</label>
-              <input type="text" required value={formData.reporter_name} onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Name *</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Rahul Sharma"
+                value={formData.reporter_name}
+                onChange={(e) => setFormData({ ...formData, reporter_name: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px" }}
+              />
             </div>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Phone *</label>
-              <input type="text" required value={formData.reporter_phone} onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Phone *</label>
+              <input
+                type="text"
+                required
+                placeholder="+91 98765 43210"
+                value={formData.reporter_phone}
+                onChange={(e) => setFormData({ ...formData, reporter_phone: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px" }}
+              />
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Physical Condition *</label>
-              <select value={formData.physical_condition} onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Physical Condition *</label>
+              <select
+                value={formData.physical_condition}
+                onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px", background: "#FFF" }}
+              >
                 <option value="visible_healthy">Visible / Healthy</option>
                 <option value="injured_visible">Injured (visible)</option>
                 <option value="fractured_injured">Fractured / Injured</option>
@@ -597,8 +610,12 @@ const RescueRequests = () => {
               </select>
             </div>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 600 }}>Severity</label>
-              <select value={formData.severity} onChange={(e) => setFormData({ ...formData, severity: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Severity</label>
+              <select
+                value={formData.severity}
+                onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px", background: "#FFF" }}
+              >
                 <option value="critical">Critical</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
@@ -606,21 +623,36 @@ const RescueRequests = () => {
               </select>
             </div>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 600 }}>
-            <input type="checkbox" checked={formData.is_urgent} onChange={(e) => setFormData({ ...formData, is_urgent: e.target.checked })} />
-            Urgent case
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={formData.is_urgent}
+              onChange={(e) => setFormData({ ...formData, is_urgent: e.target.checked })}
+            />
+            Mark as Urgent Rescue Case
           </label>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Reporter Notes</label>
-            <textarea value={formData.reporter_notes} onChange={(e) => setFormData({ ...formData, reporter_notes: e.target.value })} style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #CBD5E1" }} />
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Reporter Notes / Details</label>
+            <textarea
+              rows={3}
+              placeholder="Describe animal situation, symptoms, or landmark notes..."
+              value={formData.reporter_notes}
+              onChange={(e) => setFormData({ ...formData, reporter_notes: e.target.value })}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }}
+            />
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "6px", background: "#2563EB", color: "#FFF", border: "none" }}>{isSubmitting ? "Logging..." : "Submit Report"}</button>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+            <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "9px 16px", borderRadius: "8px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700, cursor: "pointer" }}>
+              {isSubmitting ? "Logging..." : "Submit Report"}
+            </button>
           </div>
         </form>
       </Modal>
 
+      {/* View Request Details Modal */}
       <Modal
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}
@@ -629,145 +661,137 @@ const RescueRequests = () => {
         footer={
           selectedRequest ? (
             <>
-              {["reported", "pending", "new"].includes(selectedRequest.status) && (isAdmin || isCoordinator) && (
+              {["reported", "pending", "new", "awaiting_triage"].includes(selectedRequest.status) && isAdmin && (
                 <>
-                  <button onClick={() => { handleVerify(selectedRequest.id, selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Verify</button>
-                  <button onClick={() => { openRejectModal(selectedRequest); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Reject</button>
-                </>
-              )}
-              {selectedRequest.status === "verified" && isAdmin && (
-                <Can permission="edit_rescues">
                   <button
                     onClick={() => {
-                      setAssignForm({ coordinator_id: String(selectedRequest.raw?.coordinator_id || ""), notes: "" });
-                      setIsAssignModalOpen(true);
+                      handleVerify(selectedRequest.id, selectedRequest);
+                      setIsViewModalOpen(false);
                     }}
-                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
                   >
-                    <FaUserPlus size={12} /> Assign Rescue Coordinator
-                  </button>
-                </Can>
-              )}
-              {selectedRequest.status === "verified" && isCoordinator && (
-                <button
-                  onClick={() => {
-                    setIsViewModalOpen(false);
-                    navigate(`/rescue-dispatch?case_id=${encodeURIComponent(selectedRequest.id)}`);
-                  }}
-                  style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaTruck size={12} /> Accept Case & Dispatch Team
-                </button>
-              )}
-              {["verified", "dispatched", "located"].includes(selectedRequest.status) && (
-                <Can permission="edit_rescue_requests">
-                  <button onClick={() => { handleEscalate(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Escalate</button>
-                </Can>
-              )}
-              {selectedRequest.status === "dispatched" && (
-                <Can permission="edit_rescues">
-                  <button onClick={() => { handleLocated(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#0891B2", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Mark Located</button>
-                </Can>
-              )}
-              {selectedRequest.status === "located" && (
-                <Can permission="edit_rescues">
-                  <button onClick={() => { handleSecured(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#F59E0B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Mark Secured</button>
-                </Can>
-              )}
-              {selectedRequest.status === "rescued" && (
-                <Can permission="edit_rescues">
-                  <button onClick={() => { handleAdmitted(selectedRequest.id); setIsViewModalOpen(false); }} style={{ padding: "8px 16px", background: "#059669", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Admit to Centre</button>
-                </Can>
-              )}
-              {["rescued", "admitted"].includes(selectedRequest.status) && (
-                <button
-                  onClick={() => handleLogFoundPetFromRescue(selectedRequest)}
-                  disabled={isSubmitting}
-                  style={{
-                    padding: "8px 16px",
-                    background: "#7C3AED",
-                    color: "#FFF",
-                    borderRadius: "8px",
-                    border: "none",
-                    cursor: isSubmitting ? "wait" : "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    fontWeight: 700,
-                    fontSize: "13px",
-                  }}
-                >
-                  <FaSearchLocation size={12} /> Log as Found Pet for Matching
-                </button>
-              )}
-              {selectedRequest.status === "admitted" && (
-                <>
-                  <button
-                    onClick={() => window.open(`/public-scan/${selectedRequest.raw?.dog_id || selectedRequest.id}`, "_blank")}
-                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                  >
-                    <FaExternalLinkAlt size={12} /> View Dog Profile
+                    Verify
                   </button>
                   <button
-                    onClick={() => window.location.href = "/medical"}
-                    style={{ padding: "8px 16px", background: "#0284C7", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    onClick={() => {
+                      openRejectModal(selectedRequest);
+                      setIsViewModalOpen(false);
+                    }}
+                    style={{ padding: "8px 16px", background: "#EF4444", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
                   >
-                    <FaNotesMedical size={12} /> Medical Workflow
+                    Reject
                   </button>
                 </>
               )}
-              <button onClick={() => setIsViewModalOpen(false)} style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}>Close</button>
+              <button
+                onClick={() => setIsViewModalOpen(false)}
+                style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+              >
+                Close
+              </button>
             </>
           ) : null
         }
       >
         {selectedRequest && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Reporter Name</span><strong>{selectedRequest.reporter}</strong> ({selectedRequest.phone})</div>
-              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Location / Address</span><strong style={{ wordBreak: "break-word" }}>{selectedRequest.location}</strong></div>
-              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Physical Condition</span><strong style={{ textTransform: "capitalize" }}>{String(selectedRequest.condition || "").replace(/_/g, " ")}</strong></div>
+            {/* Information Grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
               <div>
-                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Priority & Severity</span>
-                <strong style={{ textTransform: "uppercase", color: selectedRequest.severity === "critical" ? "#DC2626" : selectedRequest.severity === "high" ? "#EA580C" : selectedRequest.severity === "medium" ? "#F59E0B" : "#16A34A" }}>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Ticket Information</span>
+                <strong>{selectedRequest.ticket_number || selectedRequest.id}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaUser size={10} style={{ marginRight: "4px" }} /> Reporter Information</span>
+                <strong>{selectedRequest.reporter}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaPhoneAlt size={10} style={{ marginRight: "4px" }} /> Contact Phone</span>
+                <strong>{selectedRequest.phone}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaMapMarkerAlt size={10} style={{ marginRight: "4px" }} /> Rescue Location</span>
+                <strong style={{ wordBreak: "break-word" }}>{selectedRequest.location}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Animal / Physical Condition</span>
+                <strong style={{ textTransform: "capitalize" }}>{String(selectedRequest.condition || "-").replace(/_/g, " ")}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Severity & Urgency</span>
+                <strong style={{ textTransform: "uppercase", color: selectedRequest.severity === "critical" ? "#DC2626" : selectedRequest.severity === "high" ? "#EA580C" : selectedRequest.severity === "medium" ? "#D97706" : "#16A34A" }}>
                   {selectedRequest.severity || "-"}
                 </strong>
-                {selectedRequest.is_urgent && <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 800 }}>URGENT</span>}
+                {selectedRequest.is_urgent && (
+                  <span style={{ marginLeft: "8px", background: "#FEF2F2", color: "#DC2626", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 800 }}>
+                    URGENT
+                  </span>
+                )}
               </div>
-              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Status</span>{rescueStatusBadge(selectedRequest.status)}</div>
-              <div><span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Reported At</span><strong>{selectedRequest.date ? formatDateTime(selectedRequest.date as string) : "-"}</strong></div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Current Status</span>
+                {rescueStatusBadge(selectedRequest.status)}
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Dispatch Status</span>
+                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "12px", fontWeight: 700, background: selectedRequest.dispatch_bg, color: selectedRequest.dispatch_color }}>
+                  {selectedRequest.dispatch_status}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaClock size={10} style={{ marginRight: "4px" }} /> Created / Reported Time</span>
+                <strong>{selectedRequest.date ? formatDateTime(selectedRequest.date) : "-"}</strong>
+              </div>
             </div>
 
-            {selectedRequest.rejection_rationale && (
+            {/* Reporter Notes / Description */}
+            {Boolean(selectedRequest.raw?.reporter_notes) && (
+              <div style={{ background: "#F1F5F9", padding: "12px 14px", borderRadius: "10px", border: "1px solid #CBD5E1" }}>
+                <strong style={{ color: "#334155", display: "block", marginBottom: "4px", fontSize: "13px" }}>
+                  <FaInfoCircle size={12} style={{ marginRight: "6px" }} /> Reporter Description / Notes:
+                </strong>
+                <span style={{ fontSize: "13px", color: "#475569" }}>{String(selectedRequest.raw.reporter_notes)}</span>
+              </div>
+            )}
+
+            {/* Rejection Rationale if present */}
+            {Boolean(selectedRequest.rejection_rationale) && (
               <div style={{ background: "#FEF2F2", padding: "12px 14px", borderRadius: "10px", border: "1px solid #FCA5A5" }}>
-                <strong style={{ color: "#DC2626", display: "block", marginBottom: "4px" }}>Rejection Rationale:</strong>
+                <strong style={{ color: "#DC2626", display: "block", marginBottom: "4px", fontSize: "13px" }}>
+                  <FaExclamationTriangle size={12} style={{ marginRight: "6px" }} /> Rejection Rationale:
+                </strong>
                 <span style={{ fontSize: "13px", color: "#991B1B" }}>{selectedRequest.rejection_rationale}</span>
               </div>
             )}
 
-            {selectedRequest.dispatch && (
+            {/* Dispatch & Team Information if available */}
+            {Boolean(selectedRequest.dispatch) && (
               <div style={{ background: "#F5F3FF", padding: "14px 16px", borderRadius: "10px", border: "1px solid #DDD6FE" }}>
-                <strong style={{ color: "#7C3AED", fontSize: "14px", display: "block", marginBottom: "8px" }}>Dispatch & Team Info</strong>
+                <strong style={{ color: "#7C3AED", fontSize: "14px", display: "block", marginBottom: "8px" }}>
+                  <FaTruck size={14} style={{ marginRight: "6px" }} /> Dispatch & Field Team Info
+                </strong>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
-                  {selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id ? (
-                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Vehicle:</span> <strong>{String(selectedRequest.dispatch.assigned_vehicle_id || selectedRequest.dispatch.vehicle_id)}</strong></div>
-                  ) : null}
-                  {selectedRequest.dispatch.assigned_driver_id ? <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Driver:</span> <strong>{String(selectedRequest.dispatch.assigned_driver_id)}</strong></div> : null}
-                  {selectedRequest.dispatch.agents && Array.isArray(selectedRequest.dispatch.agents) && selectedRequest.dispatch.agents.length > 0 ? (
-                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Agents:</span> <strong>{(selectedRequest.dispatch.agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")}</strong></div>
-                  ) : null}
-                  {selectedRequest.dispatch.dispatched_at ? <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Dispatched At:</span> <strong>{formatDateTime(selectedRequest.dispatch.dispatched_at as string)}</strong></div> : null}
+                  {Boolean(selectedRequest.dispatch?.assigned_vehicle_id || selectedRequest.dispatch?.vehicle_id) && (
+                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Vehicle:</span> <strong>{String(selectedRequest.dispatch?.assigned_vehicle_id || selectedRequest.dispatch?.vehicle_id)}</strong></div>
+                  )}
+                  {Boolean(selectedRequest.dispatch?.assigned_driver_id) && (
+                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Driver:</span> <strong>{String(selectedRequest.dispatch?.assigned_driver_id)}</strong></div>
+                  )}
+                  {Boolean(selectedRequest.dispatch?.dispatched_at) && (
+                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Dispatched At:</span> <strong>{formatDateTime(String(selectedRequest.dispatch?.dispatched_at))}</strong></div>
+                  )}
                 </div>
               </div>
             )}
 
-            {selectedRequest.media_urls && selectedRequest.media_urls.length > 0 && (
+            {/* Photos / Evidence */}
+            {Boolean(selectedRequest.media_urls && selectedRequest.media_urls.length > 0) && (
               <div>
-                <strong style={{ display: "block", marginBottom: "6px" }}>Evidence / Photos:</strong>
+                <strong style={{ display: "block", marginBottom: "6px", fontSize: "13px" }}>Photos / Media Evidence:</strong>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                   {selectedRequest.media_urls.map((u: string, i: number) => (
-                    <a key={i} href={u} target="_blank" rel="noreferrer" style={{ padding: "4px 10px", background: "#EFF6FF", color: "#2563EB", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "12px", fontWeight: 600, textDecoration: "none" }}>
-                      Media Photo {i + 1} ↗
+                    <a key={i} href={u} target="_blank" rel="noreferrer" style={{ padding: "6px 12px", background: "#EFF6FF", color: "#2563EB", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "12px", fontWeight: 700, textDecoration: "none" }}>
+                      Photo Evidence {i + 1} ↗
                     </a>
                   ))}
                 </div>
@@ -775,50 +799,6 @@ const RescueRequests = () => {
             )}
           </div>
         )}
-      </Modal>
-
-      <Modal
-        isOpen={isAssignModalOpen}
-        onClose={() => setIsAssignModalOpen(false)}
-        title={`Assign Coordinator${selectedRequest?.ticket_number ? ` — ${selectedRequest.ticket_number}` : ""}`}
-        size="md"
-        footer={
-          <>
-            <button type="button" onClick={() => setIsAssignModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
-            <button type="submit" form="assign-coordinator-form" disabled={isSubmitting || coordinators.length === 0} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>{isSubmitting ? "Assigning..." : "Assign Coordinator"}</button>
-          </>
-        }
-      >
-        <form id="assign-coordinator-form" onSubmit={handleAssignCoordinatorSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {coordinators.length === 0 && (
-            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", color: "#92400E" }}>
-              No rescue coordinators found in the user directory. Add a user with the rescue coordinator role first.
-            </div>
-          )}
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Rescue Coordinator *</label>
-            <select
-              required
-              value={assignForm.coordinator_id}
-              onChange={(e) => setAssignForm({ ...assignForm, coordinator_id: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            >
-              <option value="">Select a coordinator...</option>
-              {coordinators.map((c: CoordinatorUser) => (
-                <option key={c.id} value={c.id}>{String(c.full_name || c.email || c.id)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Notes (optional)</label>
-            <textarea
-              rows={3}
-              value={assignForm.notes}
-              onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", marginTop: "4px" }}
-            />
-          </div>
-        </form>
       </Modal>
 
       {/* Reject Request Confirmation Modal */}
@@ -829,7 +809,9 @@ const RescueRequests = () => {
         size="md"
         footer={
           <>
-            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>Cancel</button>
+            <button type="button" onClick={() => setIsRejectModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>
+              Cancel
+            </button>
             <button type="submit" form="reject-request-form" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", cursor: isSubmitting ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700 }}>
               {isSubmitting ? "Rejecting..." : "Confirm Rejection"}
             </button>

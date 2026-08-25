@@ -45,6 +45,8 @@ export interface DataTableProps<T = any> {
   hideSearch?: boolean;
   /** Custom controls to render on the left side of the table header row. */
   leftHeaderControls?: React.ReactNode;
+  /** Custom max width for the table search box (e.g. "480px"). */
+  searchMaxWidth?: string;
 }
 
 function DataTable<T = any>({
@@ -69,6 +71,7 @@ function DataTable<T = any>({
   onSearchChange,
   hideSearch = false,
   leftHeaderControls,
+  searchMaxWidth,
 }: DataTableProps<T>): React.ReactElement {
   const { addToast } = useToast();
   const { can } = usePermissions();
@@ -253,7 +256,7 @@ function DataTable<T = any>({
             {leftHeaderControls}
           </div>
         ) : !hideSearch ? (
-          <div style={{ position: "relative", width: "100%", maxWidth: "320px", flex: "1 1 200px" }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: searchMaxWidth || "320px", flex: "1 1 200px" }}>
             <FaSearch
               style={{
                 position: "absolute",
@@ -278,10 +281,10 @@ function DataTable<T = any>({
               }}
               style={{
                 width: "100%",
-                padding: "9px 12px 9px 36px",
+                padding: searchMaxWidth ? "10px 14px 10px 38px" : "9px 12px 9px 36px",
                 borderRadius: "8px",
                 border: "1px solid #CBD5E1",
-                fontSize: "13px",
+                fontSize: searchMaxWidth ? "14px" : "13px",
                 outline: "none",
                 boxSizing: "border-box",
               }}

@@ -337,7 +337,6 @@ const RescueManagement = () => {
   const { addToast } = useToast();
 
   // Filter states for Rescue Cases
-  const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "all");
   const [severityFilter, setSeverityFilter] = useState(searchParams.get("severity") || "all");
   const [agentFilter, setAgentFilter] = useState("all");
@@ -635,46 +634,42 @@ const RescueManagement = () => {
   // --- FILTERED LISTS ---
   const filteredCases = useMemo(() => {
     return cases.filter((c) => {
-      // Search filter
-      if (searchQuery.trim()) {
-        const q = toSafeLower(searchQuery);
-        const matchesQuery =
-          toSafeLower(c.ticket_number).includes(q) ||
-          toSafeLower(c.location_address).includes(q) ||
-          toSafeLower(c.reporter_name).includes(q) ||
-          toSafeLower(c.dispatch_agents).includes(q) ||
-          toSafeLower(c.dispatch_vehicle).includes(q);
-        if (!matchesQuery) return false;
-      }
-
-      // Status filter
+      // 1. Status filter
       if (statusFilter !== "all") {
         const st = toSafeLower(c.status);
         if (statusFilter === "pending" && !st.includes("pending")) return false;
-        if (statusFilter === "active" && (st.includes("pending") || st.includes("completed") || st.includes("cancelled"))) return false;
-        if (statusFilter === "dispatched" && !st.includes("dispatched")) return false;
-        if (statusFilter === "completed" && (!st.includes("completed") && !st.includes("admitted") && !st.includes("rescued"))) return false;
-        if (statusFilter === "cancelled" && (!st.includes("cancelled") && !st.includes("rejected"))) return false;
+        if (statusFilter === "active" && (st.includes("pending") || st.includes("completed") || st.includes("cancelled") || st.includes("rejected"))) return false;
+        if (statusFilter === "urgent" && c.is_urgent !== "Yes" && String(c.is_urgent) !== "true" && !st.includes("urgent")) return false;
+        if (statusFilter === "dispatched" && !st.includes("dispatched") && !toSafeLower(c.stage_label).includes("dispatched")) return false;
+        if (statusFilter === "completed" && (!st.includes("completed") && !st.includes("admitted") && !st.includes("rescued") && !st.includes("transferred"))) return false;
+        if (statusFilter === "cancelled" && (!st.includes("cancelled") && !st.includes("rejected") && !st.includes("failed"))) return false;
       }
 
-      // Severity filter
+      // 2. Severity filter
       if (severityFilter !== "all") {
-        if (!toSafeLower(c.severity).includes(toSafeLower(severityFilter))) return false;
+        const sev = toSafeLower(c.severity);
+        const targetSev = toSafeLower(severityFilter);
+        if (!sev.includes(targetSev)) return false;
       }
 
-      // Agent filter
+      // 3. Agent filter
       if (agentFilter !== "all") {
-        if (!toSafeLower(c.dispatch_agents).includes(toSafeLower(agentFilter))) return false;
+        const agStr = toSafeLower(c.dispatch_agents);
+        const crdStr = toSafeLower(c.coordinator_id);
+        const targetAg = toSafeLower(agentFilter);
+        if (!agStr.includes(targetAg) && !crdStr.includes(targetAg)) return false;
       }
 
-      // Vehicle filter
+      // 4. Vehicle filter
       if (vehicleFilter !== "all") {
-        if (!toSafeLower(c.dispatch_vehicle).includes(toSafeLower(vehicleFilter))) return false;
+        const vehStr = toSafeLower(c.dispatch_vehicle);
+        const targetVeh = toSafeLower(vehicleFilter);
+        if (!vehStr.includes(targetVeh)) return false;
       }
 
       return true;
     });
-  }, [cases, searchQuery, statusFilter, severityFilter, agentFilter, vehicleFilter]);
+  }, [cases, statusFilter, severityFilter, agentFilter, vehicleFilter]);
 
   const filteredAgents = useMemo(() => {
     return agentRoster.filter((a) => {
@@ -1049,30 +1044,110 @@ const RescueManagement = () => {
 
       {/* DYNAMIC STATISTICS SECTION (8 CARDS) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "20px" }}>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("all"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Total Rescues" value={stats.total} icon={<FaLifeRing />} color="#2563EB" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("pending"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Pending Rescues" value={stats.pending} icon={<FaClock />} color="#D97706" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("active"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Active Rescues" value={stats.active} icon={<FaAmbulance />} color="#2563EB" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("urgent"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Urgent Incidents" value={stats.urgent} icon={<FaExclamationTriangle />} color="#EF4444" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setSeverityFilter("critical"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Critical Cases" value={stats.critical} icon={<FaMedkit />} color="#DC2626" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("dispatched"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Dispatched Cases" value={stats.dispatched} icon={<FaTruck />} color="#6366F1" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("completed"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Completed Cases" value={stats.completed} icon={<FaCheckCircle />} color="#10B981" />
-        </div>
-        <div onClick={() => { handleTabChange("cases"); setStatusFilter("cancelled"); }} style={{ cursor: "pointer" }}>
-          <StatCard title="Cancelled Cases" value={stats.cancelled} icon={<FaTimes />} color="#64748B" />
-        </div>
+        <StatCard
+          title="Total Rescues"
+          value={stats.total}
+          icon={<FaLifeRing />}
+          color="#2563EB"
+          selected={activeTab === "cases" && statusFilter === "all" && severityFilter === "all"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("all");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Pending Rescues"
+          value={stats.pending}
+          icon={<FaClock />}
+          color="#D97706"
+          selected={activeTab === "cases" && statusFilter === "pending"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("pending");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Active Rescues"
+          value={stats.active}
+          icon={<FaAmbulance />}
+          color="#2563EB"
+          selected={activeTab === "cases" && statusFilter === "active"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("active");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Urgent Incidents"
+          value={stats.urgent}
+          icon={<FaExclamationTriangle />}
+          color="#EF4444"
+          selected={activeTab === "cases" && statusFilter === "urgent"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("urgent");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Critical Cases"
+          value={stats.critical}
+          icon={<FaMedkit />}
+          color="#DC2626"
+          selected={activeTab === "cases" && severityFilter === "critical"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("all");
+            setSeverityFilter("critical");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Dispatched Cases"
+          value={stats.dispatched}
+          icon={<FaTruck />}
+          color="#6366F1"
+          selected={activeTab === "cases" && statusFilter === "dispatched"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("dispatched");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Completed Cases"
+          value={stats.completed}
+          icon={<FaCheckCircle />}
+          color="#10B981"
+          selected={activeTab === "cases" && statusFilter === "completed"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("completed");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+        <StatCard
+          title="Cancelled Cases"
+          value={stats.cancelled}
+          icon={<FaTimes />}
+          color="#64748B"
+          selected={activeTab === "cases" && statusFilter === "cancelled"}
+          onClick={() => {
+            handleTabChange("cases");
+            setStatusFilter("cancelled");
+            setSeverityFilter("all");
+            document.getElementById("rescue-cases-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
       </div>
 
       {/* QUICK SUMMARY CARDS FOR AGENTS AND VEHICLES */}
@@ -1202,23 +1277,9 @@ const RescueManagement = () => {
 
       {/* TAB 1: RESCUE CASES */}
       {activeTab === "cases" && (
-        <div>
-          {/* SEARCH & MULTI-FILTER TOOLBAR */}
-          <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
-            <div>
-              <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Search Cases</label>
-              <div style={{ position: "relative", marginTop: "4px" }}>
-                <FaSearch style={{ position: "absolute", left: "10px", top: "10px", color: "#94A3B8" }} />
-                <input
-                  type="text"
-                  placeholder="Case #, address, agent..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ width: "100%", padding: "8px 8px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-                />
-              </div>
-            </div>
-
+        <div id="rescue-cases-section">
+          {/* MULTI-FILTER TOOLBAR */}
+          <div style={{ background: "#FFFFFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0", marginBottom: "20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
             <div>
               <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Status</label>
               <select
@@ -1229,6 +1290,7 @@ const RescueManagement = () => {
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
                 <option value="active">Active / In Progress</option>
+                <option value="urgent">Urgent Incidents</option>
                 <option value="dispatched">Dispatched</option>
                 <option value="completed">Completed / Admitted</option>
                 <option value="cancelled">Cancelled</option>
@@ -1287,6 +1349,7 @@ const RescueManagement = () => {
             error={error}
             onRetry={fetchAllData}
             module="rescues"
+            searchMaxWidth="480px"
             onRowClick={(row: RescueCaseTableRow) => handleOpenCaseDetails(row, "details")}
           />
         </div>
