@@ -19,6 +19,7 @@ import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import petService from "../../../services/petService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
+import { getCurrentUser } from "../../../utils/roleUtils";
 import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
 import { formatDateTime } from "../../../utils/dateUtils";
 
@@ -160,7 +161,7 @@ const RescueAgentDashboard = () => {
 
   const fetchAssignedCases = useCallback(async () => {
     try {
-      const response = await rescueService.getRescueCases({ assigned_to_me: true });
+      const response = await rescueService.getRescueCases();
       setAssignedCases(unwrapList(response).map(formatAssigned));
     } catch {
       setAssignedCases([]);
@@ -445,12 +446,49 @@ const RescueAgentDashboard = () => {
     { key: "created_at", title: "Reported At" },
   ];
 
+  const handleAcceptCase = async (caseId: string, row?: Record<string, unknown>) => {
+    const rawObj = (row?.raw as Record<string, unknown>) || {};
+    const assignedAgentId = String(row?.assigned_agent_id || rawObj.assigned_agent_id || "");
+    const agentUser = getCurrentUser();
+    const agentUserId = String(agentUser?.id ?? "");
+    if (assignedAgentId && assignedAgentId !== agentUserId) {
+      addToast(`This rescue request has already been accepted by another agent.`, "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const agentName = (agentUser as any)?.name || (agentUser as any)?.email || "Rescue Agent";
+      await rescueService.acceptRescueRequest(caseId, agentUserId || "agent", agentName);
+      addToast("Rescue Request Accepted!", "success");
+      fetchAssignedCases();
+      fetchDashboard();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to accept rescue request.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const rowActions = (row: Record<string, unknown>) => {
     const status = String(row.status || "").toLowerCase();
     const caseId = String(row.id || "");
     const dispatchId = String(row.dispatch_id || "");
 
-    if (status === "dispatched" || status === "verified") {
+    if (status === "verified") {
+      return (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleAcceptCase(caseId, row);
+          }}
+          style={{ padding: "5px 10px", background: "#D97706", color: "#FFF", borderRadius: "6px", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+        >
+          Accept Request
+        </button>
+      );
+    }
+    if (status === "accepted" || status === "dispatched") {
       return (
         <button
           onClick={(e) => {

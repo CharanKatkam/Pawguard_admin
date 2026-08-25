@@ -9,7 +9,8 @@ export type UserRole =
   | "foster_coordinator"
   | "volunteer_coordinator"
   | "inventory_manager"
-  | "finance_user";
+  | "finance_user"
+  | "volunteer";
 
 export interface User {
   id?: string | number;

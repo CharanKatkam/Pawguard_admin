@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
 import Modal from "../../../components/common/Modal";
@@ -21,6 +21,7 @@ import {
   FaFileDownload,
   FaChartBar,
   FaCheckDouble,
+  FaEdit,
 } from "react-icons/fa";
 import volunteerService from "../../../services/volunteerService";
 import shelterService from "../../../services/shelterService";
@@ -42,12 +43,12 @@ const DEFAULT_APPROVAL_MSG =
 const DEFAULT_REJECTION_MSG =
   "Thank you for your interest in volunteering with PawGuard. After reviewing your application, we are unable to proceed with your application at this time. We appreciate your interest in supporting animal welfare.";
 
-type TabKey = "pipeline" | "roster" | "schedules" | "attendance" | "completed" | "performance_reports";
+type TabKey = "overview" | "pipeline" | "roster" | "schedules" | "attendance" | "completed" | "performance_reports";
 
 const VolunteerCoordinatorDashboard = () => {
   const { addToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<TabKey>("pipeline");
+  const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +56,7 @@ const VolunteerCoordinatorDashboard = () => {
   const [volunteers, setVolunteers] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [facilities, setFacilities] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [_stats, setStats] = useState<any>(null);
   const [allAttendance, setAllAttendance] = useState<any[]>([]);
 
   // Filters
@@ -116,12 +117,458 @@ const VolunteerCoordinatorDashboard = () => {
   // Shift Form
   const [shiftForm, setShiftForm] = useState({
     role_name: "Shelter Support & Care",
+    preferred_role: "Shelter Support",
+    date: new Date().toISOString().split("T")[0],
+    start_time: "09:00",
+    end_time: "13:00",
     shelter_facility_id: "",
-    start_at: "",
-    end_at: "",
+    notes: "Please assist with daily shelter tasks.",
     capacity: 5,
     assigned_volunteer_id: "",
+    location_name: "",
+    latitude: "",
+    longitude: "",
+    allowed_radius_meters: "",
   });
+
+  // Edit Shift Form & State
+  const [isEditShiftModalOpen, setIsEditShiftModalOpen] = useState(false);
+  const [_selectedShiftToEdit, setSelectedShiftToEdit] = useState<any>(null);
+  const [editShiftForm, setEditShiftForm] = useState({
+    id: "",
+    role_name: "",
+    preferred_role: "",
+    date: "",
+    start_time: "",
+    end_time: "",
+    shelter_facility_id: "",
+    notes: "",
+    capacity: 5,
+    location_name: "",
+    latitude: "",
+    longitude: "",
+    allowed_radius_meters: "",
+  });
+
+  // Map references
+  const createMapRef = useRef<any>(null);
+  const editMapRef = useRef<any>(null);
+  const createMapContainerRef = useRef<HTMLDivElement>(null);
+  const editMapContainerRef = useRef<HTMLDivElement>(null);
+  const createMarkerRef = useRef<any>(null);
+  const editMarkerRef = useRef<any>(null);
+  const createCircleRef = useRef<any>(null);
+  const editCircleRef = useRef<any>(null);
+
+  // Map search query states & temp marker refs
+  const [createSearchQuery, setCreateSearchQuery] = useState("");
+  const [editSearchQuery, setEditSearchQuery] = useState("");
+  const createTempMarkerRef = useRef<any>(null);
+  const editTempMarkerRef = useRef<any>(null);
+
+  // Volunteer Certificate Issued tracking
+  const [issuedCertificates, setIssuedCertificates] = useState<Record<string, boolean>>({});
+
+  // Custom Leaflet SVG Icon to prevent 404 marker image asset loading issues in Vite
+  const customMarkerIcon = (color: string = "#2563EB") => {
+    const L = (window as any).L;
+    if (!L) return null;
+    return L.divIcon({
+      html: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2ZM12 11.5C10.62 11.5 9.5 10.38 9.5 9C9.5 7.62 10.62 6.5 12 6.5C13.38 6.5 14.5 7.62 14.5 9C14.5 10.38 13.38 11.5 12 11.5Z" fill="${color}" stroke="#FFFFFF" stroke-width="1.5"/>
+             </svg>`,
+      className: "custom-leaflet-icon",
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+    });
+  };
+
+  // Initialize Map for Create Shift Modal
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!isShiftModalOpen || !L || !createMapContainerRef.current) {
+      if (createMapRef.current) {
+        createMapRef.current.remove();
+        createMapRef.current = null;
+        createMarkerRef.current = null;
+        createCircleRef.current = null;
+      }
+      return;
+    }
+
+    let defaultLat = 17.385044; // default center coords
+    let defaultLng = 78.486671;
+
+    if (shiftForm.shelter_facility_id) {
+      const facility = facilities.find((f: any) => String(f.id) === String(shiftForm.shelter_facility_id));
+      if (facility && facility.latitude && facility.longitude) {
+        defaultLat = parseFloat(facility.latitude);
+        defaultLng = parseFloat(facility.longitude);
+      }
+    }
+
+    // Initialize map with a small timeout to ensure DOM container is rendered
+    const timer = setTimeout(() => {
+      if (!createMapContainerRef.current) return;
+      const map = L.map(createMapContainerRef.current).setView([defaultLat, defaultLng], 14);
+      createMapRef.current = map;
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; OpenStreetMap contributors',
+      }).addTo(map);
+
+      // If coordinates are already present, draw marker and circle
+      const initialLat = parseFloat(shiftForm.latitude);
+      const initialLng = parseFloat(shiftForm.longitude);
+      if (!isNaN(initialLat) && !isNaN(initialLng)) {
+        const marker = L.marker([initialLat, initialLng], { icon: customMarkerIcon() }).addTo(map);
+        createMarkerRef.current = marker;
+
+        const radius = parseFloat(shiftForm.allowed_radius_meters) || 500;
+        const circle = L.circle([initialLat, initialLng], {
+          color: "#2563EB",
+          fillColor: "#93C5FD",
+          fillOpacity: 0.4,
+          radius: radius,
+        }).addTo(map);
+        createCircleRef.current = circle;
+        map.setView([initialLat, initialLng], 14);
+      }
+
+      // Map Click Handler to pick location
+      map.on("click", (e: any) => {
+        const { lat, lng } = e.latlng;
+        const roundedLat = parseFloat(lat.toFixed(6));
+        const roundedLng = parseFloat(lng.toFixed(6));
+
+        setShiftForm((prev) => ({
+          ...prev,
+          latitude: String(roundedLat),
+          longitude: String(roundedLng),
+        }));
+
+        if (createMarkerRef.current) {
+          createMarkerRef.current.setLatLng([roundedLat, roundedLng]);
+        } else {
+          createMarkerRef.current = L.marker([roundedLat, roundedLng], { icon: customMarkerIcon() }).addTo(map);
+        }
+
+        const radius = parseFloat(shiftForm.allowed_radius_meters) || 500;
+        if (createCircleRef.current) {
+          createCircleRef.current.setLatLng([roundedLat, roundedLng]);
+          createCircleRef.current.setRadius(radius);
+        } else {
+          createCircleRef.current = L.circle([roundedLat, roundedLng], {
+            color: "#2563EB",
+            fillColor: "#93C5FD",
+            fillOpacity: 0.4,
+            radius: radius,
+          }).addTo(map);
+        }
+      });
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      setCreateSearchQuery("");
+      createTempMarkerRef.current = null;
+      if (createMapRef.current) {
+        createMapRef.current.remove();
+        createMapRef.current = null;
+        createMarkerRef.current = null;
+        createCircleRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isShiftModalOpen]);
+
+  // Center Create Map when shelter facility changes
+  useEffect(() => {
+    if (!createMapRef.current || !shiftForm.shelter_facility_id) return;
+    const facility = facilities.find((f: any) => String(f.id) === String(shiftForm.shelter_facility_id));
+    if (facility && facility.latitude && facility.longitude) {
+      const lat = parseFloat(facility.latitude);
+      const lng = parseFloat(facility.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        createMapRef.current.setView([lat, lng], 14);
+      }
+    }
+  }, [shiftForm.shelter_facility_id, facilities]);
+
+  // Initialize Map for Edit Shift Modal
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!isEditShiftModalOpen || !L || !editMapContainerRef.current) {
+      if (editMapRef.current) {
+        editMapRef.current.remove();
+        editMapRef.current = null;
+        editMarkerRef.current = null;
+        editCircleRef.current = null;
+      }
+      return;
+    }
+
+    let defaultLat = 17.385044; // default center coords
+    let defaultLng = 78.486671;
+
+    // Center on existing shift coordinates if available
+    const initialLat = parseFloat(editShiftForm.latitude);
+    const initialLng = parseFloat(editShiftForm.longitude);
+    const hasInitialCoords = !isNaN(initialLat) && !isNaN(initialLng);
+
+    if (hasInitialCoords) {
+      defaultLat = initialLat;
+      defaultLng = initialLng;
+    } else if (editShiftForm.shelter_facility_id) {
+      // Center on facility fallback coordinates
+      const facility = facilities.find((f: any) => String(f.id) === String(editShiftForm.shelter_facility_id));
+      if (facility && facility.latitude && facility.longitude) {
+        defaultLat = parseFloat(facility.latitude);
+        defaultLng = parseFloat(facility.longitude);
+      }
+    }
+
+    // Initialize map with a small timeout to ensure DOM container is rendered
+    const timer = setTimeout(() => {
+      if (!editMapContainerRef.current) return;
+      const map = L.map(editMapContainerRef.current).setView([defaultLat, defaultLng], 14);
+      editMapRef.current = map;
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; OpenStreetMap contributors',
+      }).addTo(map);
+
+      // If coordinates are present, draw marker and circle
+      if (hasInitialCoords) {
+        const marker = L.marker([initialLat, initialLng], { icon: customMarkerIcon() }).addTo(map);
+        editMarkerRef.current = marker;
+
+        const radius = parseFloat(editShiftForm.allowed_radius_meters) || 500;
+        const circle = L.circle([initialLat, initialLng], {
+          color: "#2563EB",
+          fillColor: "#93C5FD",
+          fillOpacity: 0.4,
+          radius: radius,
+        }).addTo(map);
+        editCircleRef.current = circle;
+        map.setView([initialLat, initialLng], 14);
+      }
+
+      // Map Click Handler to pick location
+      map.on("click", (e: any) => {
+        const { lat, lng } = e.latlng;
+        const roundedLat = parseFloat(lat.toFixed(6));
+        const roundedLng = parseFloat(lng.toFixed(6));
+
+        setEditShiftForm((prev) => ({
+          ...prev,
+          latitude: String(roundedLat),
+          longitude: String(roundedLng),
+        }));
+
+        if (editMarkerRef.current) {
+          editMarkerRef.current.setLatLng([roundedLat, roundedLng]);
+        } else {
+          editMarkerRef.current = L.marker([roundedLat, roundedLng], { icon: customMarkerIcon() }).addTo(map);
+        }
+
+        const radius = parseFloat(editShiftForm.allowed_radius_meters) || 500;
+        if (editCircleRef.current) {
+          editCircleRef.current.setLatLng([roundedLat, roundedLng]);
+          editCircleRef.current.setRadius(radius);
+        } else {
+          editCircleRef.current = L.circle([roundedLat, roundedLng], {
+            color: "#2563EB",
+            fillColor: "#93C5FD",
+            fillOpacity: 0.4,
+            radius: radius,
+          }).addTo(map);
+        }
+      });
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      setEditSearchQuery("");
+      editTempMarkerRef.current = null;
+      if (editMapRef.current) {
+        editMapRef.current.remove();
+        editMapRef.current = null;
+        editMarkerRef.current = null;
+        editCircleRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditShiftModalOpen]);
+
+  // Center Edit Map when shelter facility changes
+  useEffect(() => {
+    if (!editMapRef.current || !editShiftForm.shelter_facility_id) return;
+    const facility = facilities.find((f: any) => String(f.id) === String(editShiftForm.shelter_facility_id));
+    if (facility && facility.latitude && facility.longitude) {
+      const lat = parseFloat(facility.latitude);
+      const lng = parseFloat(facility.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        editMapRef.current.setView([lat, lng], 14);
+      }
+    }
+  }, [editShiftForm.shelter_facility_id, facilities]);
+
+  // Synchronize manual inputs with Create Shift Map Marker and Circle
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!createMapRef.current || !L) return;
+
+    const lat = parseFloat(shiftForm.latitude);
+    const lng = parseFloat(shiftForm.longitude);
+    const radius = parseFloat(shiftForm.allowed_radius_meters) || 500;
+
+    const hasValidCoords = !isNaN(lat) && lat >= -90 && lat <= 90 && !isNaN(lng) && lng >= -180 && lng <= 180;
+
+    if (hasValidCoords) {
+      if (createMarkerRef.current) {
+        createMarkerRef.current.setLatLng([lat, lng]);
+      } else {
+        createMarkerRef.current = L.marker([lat, lng], { icon: customMarkerIcon() }).addTo(createMapRef.current);
+      }
+
+      if (createCircleRef.current) {
+        createCircleRef.current.setLatLng([lat, lng]);
+        createCircleRef.current.setRadius(radius);
+      } else {
+        createCircleRef.current = L.circle([lat, lng], {
+          color: "#2563EB",
+          fillColor: "#93C5FD",
+          fillOpacity: 0.4,
+          radius: radius,
+        }).addTo(createMapRef.current);
+      }
+
+      if (String(shiftForm.latitude).length > 7 && String(shiftForm.longitude).length > 7) {
+        createMapRef.current.setView([lat, lng]);
+      }
+    } else {
+      if (createMarkerRef.current) {
+        createMarkerRef.current.remove();
+        createMarkerRef.current = null;
+      }
+      if (createCircleRef.current) {
+        createCircleRef.current.remove();
+        createCircleRef.current = null;
+      }
+    }
+  }, [shiftForm.latitude, shiftForm.longitude, shiftForm.allowed_radius_meters]);
+
+  // Synchronize manual inputs with Edit Shift Map Marker and Circle
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!editMapRef.current || !L) return;
+
+    const lat = parseFloat(editShiftForm.latitude);
+    const lng = parseFloat(editShiftForm.longitude);
+    const radius = parseFloat(editShiftForm.allowed_radius_meters) || 500;
+
+    const hasValidCoords = !isNaN(lat) && lat >= -90 && lat <= 90 && !isNaN(lng) && lng >= -180 && lng <= 180;
+
+    if (hasValidCoords) {
+      if (editMarkerRef.current) {
+        editMarkerRef.current.setLatLng([lat, lng]);
+      } else {
+        editMarkerRef.current = L.marker([lat, lng], { icon: customMarkerIcon() }).addTo(editMapRef.current);
+      }
+
+      if (editCircleRef.current) {
+        editCircleRef.current.setLatLng([lat, lng]);
+        editCircleRef.current.setRadius(radius);
+      } else {
+        editCircleRef.current = L.circle([lat, lng], {
+          color: "#2563EB",
+          fillColor: "#93C5FD",
+          fillOpacity: 0.4,
+          radius: radius,
+        }).addTo(editMapRef.current);
+      }
+
+      if (String(editShiftForm.latitude).length > 7 && String(editShiftForm.longitude).length > 7) {
+        editMapRef.current.setView([lat, lng]);
+      }
+    } else {
+      if (editMarkerRef.current) {
+        editMarkerRef.current.remove();
+        editMarkerRef.current = null;
+      }
+      if (editCircleRef.current) {
+        editCircleRef.current.remove();
+        editCircleRef.current = null;
+      }
+    }
+  }, [editShiftForm.latitude, editShiftForm.longitude, editShiftForm.allowed_radius_meters]);
+
+  // Handle Map Search Location geocoding via Nominatim OSM
+  const handleSearchLocation = async (query: string, isEditMode: boolean) => {
+    if (!query.trim()) return;
+
+    const map = isEditMode ? editMapRef.current : createMapRef.current;
+    if (!map) {
+      addToast("Map is not initialized yet.", "error");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
+        {
+          headers: {
+            "User-Agent": "PawGuardAdminPortal/1.0 (contact@pawguard.org)"
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Search service returned an error.");
+      }
+
+      const results = await response.json();
+      if (results && results.length > 0) {
+        const result = results[0];
+        const lat = parseFloat(result.lat);
+        const lon = parseFloat(result.lon);
+
+        if (!isNaN(lat) && !isNaN(lon)) {
+          // Center the map at the found coordinates and zoom in
+          map.setView([lat, lon], 15);
+
+          // Add/Update temporary search marker
+          const L = (window as any).L;
+          if (L) {
+            // Use custom icon in distinct red color to separate from pinned location marker
+            const tempIcon = customMarkerIcon("#EF4444");
+            
+            if (isEditMode) {
+              if (editTempMarkerRef.current) {
+                editTempMarkerRef.current.setLatLng([lat, lon]);
+              } else {
+                editTempMarkerRef.current = L.marker([lat, lon], { icon: tempIcon }).addTo(map);
+              }
+              editTempMarkerRef.current.bindPopup("Searched location. Click map near here to set final GPS point.").openPopup();
+            } else {
+              if (createTempMarkerRef.current) {
+                createTempMarkerRef.current.setLatLng([lat, lon]);
+              } else {
+                createTempMarkerRef.current = L.marker([lat, lon], { icon: tempIcon }).addTo(map);
+              }
+              createTempMarkerRef.current.bindPopup("Searched location. Click map near here to set final GPS point.").openPopup();
+            }
+          }
+          addToast(`Centered map on: ${result.display_name.split(",").slice(0, 2).join(",")}`, "success");
+        }
+      } else {
+        addToast("Location not found. Try another search.", "info");
+      }
+    } catch {
+      addToast("Failed to search location. Please check your connection.", "error");
+    }
+  };
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -305,30 +752,83 @@ const VolunteerCoordinatorDashboard = () => {
   // Handle Create Shift
   const handleCreateShift = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!shiftForm.role_name || !shiftForm.start_at || !shiftForm.end_at) {
-      addToast("Role name, start time, and end time are required.", "error");
+    if (!shiftForm.role_name || !shiftForm.date || !shiftForm.start_time || !shiftForm.end_time) {
+      addToast("Role name, date, start time, and end time are required.", "error");
       return;
     }
+    if (shiftForm.start_time >= shiftForm.end_time) {
+      addToast("End time must be after start time.", "error");
+      return;
+    }
+
+    let latNum: number | null = null;
+    let lonNum: number | null = null;
+    let radNum: number | null = null;
+
+    if (shiftForm.latitude.trim()) {
+      latNum = parseFloat(shiftForm.latitude);
+      if (isNaN(latNum) || latNum < -90 || latNum > 90) {
+        addToast("Latitude must be a valid number between -90 and 90.", "error");
+        return;
+      }
+    }
+    if (shiftForm.longitude.trim()) {
+      lonNum = parseFloat(shiftForm.longitude);
+      if (isNaN(lonNum) || lonNum < -180 || lonNum > 180) {
+        addToast("Longitude must be a valid number between -180 and 180.", "error");
+        return;
+      }
+    }
+    if (shiftForm.allowed_radius_meters.trim()) {
+      radNum = parseInt(shiftForm.allowed_radius_meters, 10);
+      if (isNaN(radNum) || radNum <= 0) {
+        addToast("Allowed radius must be a positive number greater than 0.", "error");
+        return;
+      }
+    }
+
+    if ((latNum !== null || lonNum !== null) && !shiftForm.location_name.trim()) {
+      addToast("Location Name is required when configuring GPS coordinates.", "error");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
+      const startIso = new Date(`${shiftForm.date}T${shiftForm.start_time}:00`).toISOString();
+      const endIso = new Date(`${shiftForm.date}T${shiftForm.end_time}:00`).toISOString();
+
+      let finalRoleName = shiftForm.role_name.trim();
+      const selectedRole = shiftForm.preferred_role;
+      if (selectedRole && !finalRoleName.toLowerCase().includes(selectedRole.toLowerCase())) {
+        finalRoleName = `${finalRoleName} (${selectedRole})`;
+      }
+
       const createdShift = await volunteerService.createShift({
-        role_name: shiftForm.role_name,
+        role_name: finalRoleName,
         shelter_facility_id: shiftForm.shelter_facility_id || null,
-        start_at: new Date(shiftForm.start_at).toISOString(),
-        end_at: new Date(shiftForm.end_at).toISOString(),
+        start_at: startIso,
+        end_at: endIso,
         capacity: Number(shiftForm.capacity || 5),
+        notes: shiftForm.notes,
+        status: "Scheduled",
+        location_name: shiftForm.location_name.trim() || null,
+        latitude: latNum,
+        longitude: lonNum,
+        allowed_radius_meters: radNum,
       });
 
       if (shiftForm.assigned_volunteer_id) {
-        const shiftId = volunteerService.extractShiftId(createdShift);
+        const shiftId = volunteerService.extractShiftId 
+          ? volunteerService.extractShiftId(createdShift) 
+          : (createdShift?.id || createdShift?.data?.id || (createdShift?.data as any)?.data?.id);
         if (shiftId) {
           await volunteerService.joinShift(shiftId, shiftForm.assigned_volunteer_id).catch(() => {});
         }
       }
 
       await notificationService.sendBroadcastNotification({
-        title: `New Volunteer Shift: ${shiftForm.role_name}`,
-        message: `A new volunteer shift for ${shiftForm.role_name} has been scheduled. Sign up in your volunteer portal!`,
+        title: `New Volunteer Shift: ${finalRoleName}`,
+        message: `A new volunteer shift for ${finalRoleName} has been scheduled. Sign up in your volunteer portal!`,
         type: "volunteer_shift",
         targetRoles: ["volunteer"],
         actionUrl: "/volunteer-dashboard",
@@ -338,11 +838,18 @@ const VolunteerCoordinatorDashboard = () => {
       setIsShiftModalOpen(false);
       setShiftForm({
         role_name: "Shelter Support & Care",
+        preferred_role: "Shelter Support",
+        date: new Date().toISOString().split("T")[0],
+        start_time: "09:00",
+        end_time: "13:00",
         shelter_facility_id: "",
-        start_at: "",
-        end_at: "",
+        notes: "Please assist with daily shelter tasks.",
         capacity: 5,
         assigned_volunteer_id: "",
+        location_name: "",
+        latitude: "",
+        longitude: "",
+        allowed_radius_meters: "",
       });
       fetchDashboardData();
       notifyDataChanged();
@@ -353,6 +860,136 @@ const VolunteerCoordinatorDashboard = () => {
           : Array.isArray(err?.response?.data?.detail)
           ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
           : err?.response?.data?.message || err?.message || "Failed to create shift.";
+      addToast(errorMsg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Open Edit Shift Modal
+  const handleOpenEditShiftModal = (shift: any) => {
+    setSelectedShiftToEdit(shift);
+    
+    // Extract date and times
+    let shiftDate = "";
+    let shiftStart = "";
+    let shiftEnd = "";
+    if (shift.start_at) {
+      const dObj = new Date(shift.start_at);
+      shiftDate = dObj.toISOString().split("T")[0];
+      shiftStart = dObj.toTimeString().split(" ")[0].slice(0, 5);
+    }
+    if (shift.end_at) {
+      shiftEnd = new Date(shift.end_at).toTimeString().split(" ")[0].slice(0, 5);
+    }
+
+    // Try to extract role name (without prefRole parenthesis suffix)
+    let baseRoleName = shift.role_name || shift.title || "";
+    let prefRole = "Shelter Support";
+    PREFERRED_ROLES.forEach((r) => {
+      if (baseRoleName.includes(`(${r})`)) {
+        baseRoleName = baseRoleName.replace(`(${r})`, "").trim();
+        prefRole = r;
+      }
+    });
+
+    setEditShiftForm({
+      id: shift.id || "",
+      role_name: baseRoleName,
+      preferred_role: prefRole,
+      date: shiftDate,
+      start_time: shiftStart,
+      end_time: shiftEnd,
+      shelter_facility_id: shift.shelter_facility_id || "",
+      notes: shift.notes || "",
+      capacity: Number(shift.capacity || 5),
+      location_name: shift.location_name || "",
+      latitude: shift.latitude !== undefined && shift.latitude !== null ? String(shift.latitude) : "",
+      longitude: shift.longitude !== undefined && shift.longitude !== null ? String(shift.longitude) : "",
+      allowed_radius_meters: shift.allowed_radius_meters !== undefined && shift.allowed_radius_meters !== null ? String(shift.allowed_radius_meters) : "",
+    });
+    setIsEditShiftModalOpen(true);
+  };
+
+  // Handle Edit Shift Submit
+  const handleEditShiftSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editShiftForm.id || !editShiftForm.role_name || !editShiftForm.date || !editShiftForm.start_time || !editShiftForm.end_time) {
+      addToast("Shift ID, role name, date, start time, and end time are required.", "error");
+      return;
+    }
+    if (editShiftForm.start_time >= editShiftForm.end_time) {
+      addToast("End time must be after start time.", "error");
+      return;
+    }
+
+    let latNum: number | null = null;
+    let lonNum: number | null = null;
+    let radNum: number | null = null;
+
+    if (String(editShiftForm.latitude || "").trim()) {
+      latNum = parseFloat(String(editShiftForm.latitude));
+      if (isNaN(latNum) || latNum < -90 || latNum > 90) {
+        addToast("Latitude must be a valid number between -90 and 90.", "error");
+        return;
+      }
+    }
+    if (String(editShiftForm.longitude || "").trim()) {
+      lonNum = parseFloat(String(editShiftForm.longitude));
+      if (isNaN(lonNum) || lonNum < -180 || lonNum > 180) {
+        addToast("Longitude must be a valid number between -180 and 180.", "error");
+        return;
+      }
+    }
+    if (String(editShiftForm.allowed_radius_meters || "").trim()) {
+      radNum = parseInt(String(editShiftForm.allowed_radius_meters), 10);
+      if (isNaN(radNum) || radNum <= 0) {
+        addToast("Allowed radius must be a positive number greater than 0.", "error");
+        return;
+      }
+    }
+
+    if ((latNum !== null || lonNum !== null) && !String(editShiftForm.location_name || "").trim()) {
+      addToast("Location Name is required when configuring GPS coordinates.", "error");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const startIso = new Date(`${editShiftForm.date}T${editShiftForm.start_time}:00`).toISOString();
+      const endIso = new Date(`${editShiftForm.date}T${editShiftForm.end_time}:00`).toISOString();
+
+      let finalRoleName = editShiftForm.role_name.trim();
+      const selectedRole = editShiftForm.preferred_role;
+      if (selectedRole && !finalRoleName.toLowerCase().includes(selectedRole.toLowerCase())) {
+        finalRoleName = `${finalRoleName} (${selectedRole})`;
+      }
+
+      await volunteerService.updateShift(editShiftForm.id, {
+        role_name: finalRoleName,
+        shelter_facility_id: editShiftForm.shelter_facility_id || null,
+        start_at: startIso,
+        end_at: endIso,
+        capacity: Number(editShiftForm.capacity || 5),
+        notes: editShiftForm.notes,
+        location_name: String(editShiftForm.location_name || "").trim() || null,
+        latitude: latNum,
+        longitude: lonNum,
+        allowed_radius_meters: radNum,
+      });
+
+      addToast("Volunteer shift updated successfully!", "success");
+      setIsEditShiftModalOpen(false);
+      setSelectedShiftToEdit(null);
+      fetchDashboardData();
+      notifyDataChanged();
+    } catch (err: any) {
+      const errorMsg =
+        typeof err?.response?.data?.detail === "string"
+          ? err.response.data.detail
+          : Array.isArray(err?.response?.data?.detail)
+          ? err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ")
+          : err?.response?.data?.message || err?.message || "Failed to update shift.";
       addToast(errorMsg, "error");
     } finally {
       setIsSubmitting(false);
@@ -604,14 +1241,47 @@ const VolunteerCoordinatorDashboard = () => {
     }
   };
 
-  const handleIssueCertificate = async (profileId: string) => {
+  const isVolunteerEligibleForCertificate = useCallback((vol: any) => {
+    if (!vol) return false;
+    const volProfileId = String(vol.id || "").trim();
+    const volUserId = String(vol.user_id || vol.user?.id || "").trim();
+
+    const hours = Number(vol.total_hours || vol.hours_served || 0);
+    const shifts = Number(vol.completed_shifts || vol.shifts_completed || 0);
+    if (hours > 0 || shifts > 0) return true;
+
+    const volAttendance = allAttendance.filter((a: any) => {
+      const attVolId = String(a.volunteer_id || a.volunteer?.id || "").trim();
+      const attProfileId = String(a.volunteer_profile_id || a.volunteer?.profile_id || "").trim();
+      const attUserId = String(a.user_id || a.user?.id || a.volunteer?.user_id || "").trim();
+
+      const matchesProfile = Boolean(volProfileId && (attVolId === volProfileId || attProfileId === volProfileId));
+      const matchesUser = Boolean(volUserId && (attVolId === volUserId || attUserId === volUserId));
+      return matchesProfile || matchesUser;
+    });
+
+    const completedLogs = volAttendance.filter((a: any) => Boolean(a.check_out_at));
+    const totalHours = completedLogs.reduce((acc, curr) => acc + (Number(curr.hours_served) || 0), 0);
+    return completedLogs.length > 0 || totalHours > 0;
+  }, [allAttendance]);
+
+  const handleIssueCertificate = async (profileId: string, volunteerRecord?: any) => {
     if (!profileId) {
       addToast("Invalid volunteer profile ID.", "error");
       return;
     }
+
+    const vol = volunteerRecord || volunteers.find((v: any) => String(v.id) === String(profileId));
+    if (vol && !isVolunteerEligibleForCertificate(vol)) {
+      addToast("Volunteer must have at least 1 completed shift or logged service hours to issue a certificate.", "info");
+      return;
+    }
+
     try {
       addToast("Generating verified service certificate...", "info");
       const cert = await volunteerService.getCertificate(profileId);
+
+      setIssuedCertificates((prev) => ({ ...prev, [profileId]: true }));
 
       const certUrl =
         cert?.certificate_url ||
@@ -721,8 +1391,16 @@ const VolunteerCoordinatorDashboard = () => {
 
   // Lists & Derived States
   const pendingApplications = useMemo(() =>
-    volunteers.filter((v) => String(v.status || "applied").toLowerCase() === "applied"),
-    [volunteers]
+    volunteers.filter((v) => {
+      const s = String(v.status || "applied").toLowerCase();
+      if (s !== "applied" && s !== "pending" && s !== "submitted") return false;
+      if (roleFilter) {
+        const role = String(v.preferred_role || v.skills || "").toLowerCase();
+        if (!role.includes(roleFilter.toLowerCase())) return false;
+      }
+      return true;
+    }),
+    [volunteers, roleFilter]
   );
 
   const approvedVolunteers = useMemo(() =>
@@ -760,40 +1438,7 @@ const VolunteerCoordinatorDashboard = () => {
   );
   const completionRate = totalAttendanceCount > 0 ? Math.round((totalCompletedCount / totalAttendanceCount) * 100) : 100;
 
-  const statCards = [
-    {
-      title: "Registered Volunteers",
-      value: loading ? "..." : String(stats?.total_volunteers ?? stats?.registered_volunteers ?? volunteers.length),
-      trend: `${approvedVolunteers.length} Active / Onboarded`,
-      color: "#2563EB",
-      icon: <FaUsers />,
-      onClick: () => setActiveTab("roster"),
-    },
-    {
-      title: "Pending Applications",
-      value: loading ? "..." : String(pendingApplications.length),
-      trend: "Requires Review",
-      color: "#F59E0B",
-      icon: <FaClipboardList />,
-      onClick: () => setActiveTab("pipeline"),
-    },
-    {
-      title: "Scheduled Shifts",
-      value: loading ? "..." : String(shifts.length),
-      trend: `${totalCompletedCount} Completed Work Units`,
-      color: "#10B981",
-      icon: <FaCalendarAlt />,
-      onClick: () => setActiveTab("schedules"),
-    },
-    {
-      title: "Total Hours Served",
-      value: loading ? "..." : `${totalHoursSum} Hrs`,
-      trend: `${completionRate}% Work Completion Rate`,
-      color: "#6366F1",
-      icon: <FaClock />,
-      onClick: () => setActiveTab("performance_reports"),
-    },
-  ];
+
 
   const pipelineColumns = [
     {
@@ -824,13 +1469,30 @@ const VolunteerCoordinatorDashboard = () => {
     },
     {
       key: "availability",
-      header: "Availability & Timings",
+      header: "Availability",
       render: (v: string) => <span style={{ fontWeight: 600, color: "#334155" }}>{v || "Weekends & Mornings"}</span>,
+    },
+    {
+      key: "skills",
+      header: "Skills / Experience",
+      render: (v: string) => <span style={{ fontSize: "12px", color: "#475569" }}>{v || "No skills specified"}</span>,
     },
     {
       key: "created_at",
       header: "Applied Date",
       render: (v: string) => (v ? formatDateTime(v) : "Recent"),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (v: string) => {
+        const s = String(v || "applied").toLowerCase();
+        return (
+          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: "#FEF3C7", color: "#D97706", textTransform: "uppercase" }}>
+            {s}
+          </span>
+        );
+      },
     },
   ];
 
@@ -864,6 +1526,11 @@ const VolunteerCoordinatorDashboard = () => {
       render: (v: string) => <span style={{ color: "#475569" }}>{v || "Flexible"}</span>,
     },
     {
+      key: "skills",
+      header: "Skills / Experience",
+      render: (v: string) => <span style={{ fontSize: "12px", color: "#475569" }}>{v || "None specified"}</span>,
+    },
+    {
       key: "status",
       header: "Status",
       render: (v: string) => {
@@ -882,41 +1549,129 @@ const VolunteerCoordinatorDashboard = () => {
   const shiftColumns = [
     {
       key: "role_name",
-      header: "Shift Activity / Role",
+      header: "Work / Shift Title",
       render: (v: string, r: any) => (
         <div>
-          <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || r.title || "Shelter Support"}</div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>Facility: {r.shelter_facility_id ? String(r.shelter_facility_id).slice(0, 8) : "Central Shelter"}</div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || r.title || "Volunteer Shift"}</div>
+          {r.notes && <div style={{ fontSize: "11px", color: "#64748B", fontStyle: "italic", marginTop: "2px" }}>Instr: {r.notes}</div>}
         </div>
       ),
     },
     {
-      key: "start_at",
-      header: "Start Time",
-      render: (v: string) => (v ? formatDateTime(v) : "-"),
+      key: "preferred_role",
+      header: "Volunteer Type",
+      render: (_: any, r: any) => {
+        const titleLower = String(r.role_name || r.title || "").toLowerCase();
+        let type = "General Support";
+        if (titleLower.includes("foster")) type = "Foster Care";
+        else if (titleLower.includes("transport")) type = "Transport";
+        else if (titleLower.includes("shelter")) type = "Shelter Support";
+        else if (titleLower.includes("event") || titleLower.includes("outreach")) type = "Events & Outreach";
+        return (
+          <span style={{ fontSize: "12px", fontWeight: 600, color: "#4F46E5" }}>
+            {type}
+          </span>
+        );
+      },
     },
     {
-      key: "end_at",
-      header: "End Time",
-      render: (v: string) => (v ? formatDateTime(v) : "-"),
+      key: "volunteer",
+      header: "Claimed By",
+      render: (_: any, r: any) => {
+        const enrollments = allAttendance.filter((a) => a.shift_id === r.id || a.shift?.id === r.id);
+        if (enrollments.length === 0) {
+          return <span style={{ color: "#94A3B8", fontStyle: "italic" }}>Unclaimed</span>;
+        }
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            {enrollments.map((e: any, idx: number) => {
+              const vol = volunteers.find((v) => String(v.id) === String(e.volunteer_id));
+              const name = vol?.user?.full_name || vol?.full_name || `Vol ${String(e.volunteer_id).slice(0, 5)}`;
+              return (
+                <div key={idx} style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
+                  ✓ {name}
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      key: "start_at",
+      header: "Date & Time",
+      render: (_: any, r: any) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{formatDateTime(r.start_at).split(" ")[0]}</div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>
+            {formatDateTime(r.start_at).split(" ").slice(1).join(" ")} — {formatDateTime(r.end_at).split(" ").slice(1).join(" ")}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "shelter_facility_id",
+      header: "Location",
+      render: (v: string, r: any) => {
+        const facility = facilities.find((f) => String(f.id) === String(v));
+        const facilityName = facility?.name || r.location || "Central Shelter";
+        if (r.location_name) {
+          const lat = r.latitude !== null && r.latitude !== undefined ? ` (${r.latitude}, ${r.longitude})` : "";
+          const rad = r.allowed_radius_meters !== null && r.allowed_radius_meters !== undefined ? ` - Radius: ${r.allowed_radius_meters}m` : "";
+          return (
+            <div>
+              <div style={{ fontWeight: 600, color: "#0F172A" }}>{r.location_name}</div>
+              <div style={{ fontSize: "11px", color: "#64748B" }}>
+                {facilityName}{lat}{rad}
+              </div>
+            </div>
+          );
+        }
+        return <span>{facilityName}</span>;
+      },
     },
     {
       key: "capacity",
-      header: "Enrolled / Capacity",
+      header: "Slots & Status",
       render: (_: number, r: any) => {
-        const enrolled = allAttendance.filter((a) => a.shift_id === r.id || a.shift?.id === r.id).length;
+        const enrollments = allAttendance.filter((a) => a.shift_id === r.id || a.shift?.id === r.id);
+        const enrolled = enrollments.length;
         const cap = Number(r.capacity ?? 5);
-        const isFull = enrolled >= cap;
+        
+        let status = "Available";
+        let color = "#3B82F6";
+        let bg = "#EFF6FF";
+
+        if (enrollments.every(e => e.check_out_at && e.check_in_at)) {
+          status = "Completed";
+          color = "#10B981";
+          bg = "#ECFDF5";
+        } else if (enrollments.some(e => e.check_in_at && !e.check_out_at)) {
+          status = "In Progress";
+          color = "#8B5CF6";
+          bg = "#F5F3FF";
+        } else if (enrolled >= cap) {
+          status = "Claimed (Full)";
+          color = "#D97706";
+          bg = "#FEF3C7";
+        } else if (enrolled > 0) {
+          status = "Claimed";
+          color = "#4F46E5";
+          bg = "#EEF2FF";
+        }
+
+        if (r.status === "Cancelled") {
+          status = "Cancelled";
+          color = "#EF4444";
+          bg = "#FEF2F2";
+        }
+
         return (
           <div>
-            <strong style={{ color: isFull ? "#DC2626" : "#2563EB" }}>
-              {enrolled} / {cap} Enrolled
-            </strong>
-            {isFull && (
-              <span style={{ marginLeft: "6px", fontSize: "10px", fontWeight: 800, color: "#DC2626", background: "#FEE2E2", padding: "2px 6px", borderRadius: "4px" }}>
-                FULL
-              </span>
-            )}
+            <div style={{ fontWeight: 600 }}>{enrolled} / {cap} Slots</div>
+            <span style={{ fontSize: "11px", fontWeight: 800, padding: "2px 8px", borderRadius: "999px", background: bg, color, marginTop: "4px", display: "inline-block" }}>
+              {status}
+            </span>
           </div>
         );
       },
@@ -926,31 +1681,73 @@ const VolunteerCoordinatorDashboard = () => {
   const attendanceColumns = [
     {
       key: "volunteer_id",
-      header: "Volunteer ID & Role",
-      render: (v: string, r: any) => (
+      header: "Volunteer",
+      render: (v: string) => {
+        const vol = volunteers.find((x) => String(x.id) === String(v));
+        const name = vol?.user?.full_name || vol?.full_name || `Volunteer ${String(v).slice(0, 8)}`;
+        return (
+          <div>
+            <div style={{ fontWeight: 700, color: "#0F172A" }}>{name}</div>
+            <div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(v).slice(0, 8)}</div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "shift",
+      header: "Shift / Work",
+      render: (v: any, r: any) => (
         <div>
-          <div style={{ fontWeight: 700, color: "#0F172A" }}>ID: {String(v || r.id).slice(0, 8)}</div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>Shift: {r.shift?.role_name || r.role_name || "Shelter Activity"}</div>
+          <div style={{ fontWeight: 700 }}>{v?.role_name || r.role_name || "Volunteer Shift"}</div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(r.id).slice(0, 8)}</div>
         </div>
       ),
     },
     {
+      key: "date",
+      header: "Date",
+      render: (_: any, r: any) => {
+        const start = r.shift?.start_at || r.start_at;
+        return <span>{start ? formatDateTime(start).split(" ")[0] : "-"}</span>;
+      },
+    },
+    {
       key: "check_in_at",
-      header: "Check-In Timestamp",
-      render: (v: string) => (
-        <span style={{ fontWeight: 600, color: v ? "#047857" : "#D97706" }}>
-          {v ? `✓ ${formatDateTime(v)}` : "⏳ Pending"}
-        </span>
-      ),
+      header: "Check-In Time",
+      render: (v: string) => (v ? formatDateTime(v) : "⏳ Not checked in"),
     },
     {
       key: "check_out_at",
-      header: "Check-Out Timestamp",
-      render: (v: string) => (
-        <span style={{ fontWeight: 600, color: v ? "#047857" : "#64748B" }}>
-          {v ? `✓ ${formatDateTime(v)}` : "In Progress"}
-        </span>
-      ),
+      header: "Check-Out Time",
+      render: (v: string) => (v ? formatDateTime(v) : "⏳ Not checked out"),
+    },
+    {
+      key: "status",
+      header: "Attendance Status",
+      render: (_: any, r: any) => {
+        const checkedIn = Boolean(r.check_in_at);
+        const checkedOut = Boolean(r.check_out_at);
+        
+        let status = "Scheduled";
+        let color = "#475569";
+        let bg = "#F1F5F9";
+
+        if (checkedOut) {
+          status = "Completed";
+          color = "#047857";
+          bg = "#ECFDF5";
+        } else if (checkedIn) {
+          status = "In Progress";
+          color = "#1D4ED8";
+          bg = "#EFF6FF";
+        }
+
+        return (
+          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
+            {status}
+          </span>
+        );
+      },
     },
     {
       key: "hours_served",
@@ -962,18 +1759,54 @@ const VolunteerCoordinatorDashboard = () => {
   const completedColumns = [
     {
       key: "volunteer_id",
-      header: "Volunteer & Assignment",
-      render: (v: string, r: any) => (
+      header: "Volunteer",
+      render: (v: string) => {
+        const vol = volunteers.find((x) => String(x.id) === String(v));
+        const name = vol?.user?.full_name || vol?.full_name || `Volunteer ${String(v).slice(0, 8)}`;
+        return (
+          <div>
+            <div style={{ fontWeight: 700, color: "#0F172A" }}>{name}</div>
+            <div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(v).slice(0, 8)}</div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "preferred_role",
+      header: "Volunteer Type",
+      render: (_: any, r: any) => {
+        const vol = volunteers.find((x) => String(x.id) === String(r.volunteer_id));
+        const type = vol?.preferred_role || vol?.skills || "General Support";
+        return (
+          <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px", background: "#F5F3FF", color: "#7C3AED", textTransform: "uppercase" }}>
+            {type}
+          </span>
+        );
+      },
+    },
+    {
+      key: "shift",
+      header: "Work / Shift",
+      render: (v: any, r: any) => (
         <div>
-          <div style={{ fontWeight: 700, color: "#0F172A" }}>ID: {String(v || r.id).slice(0, 8)}</div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>Task: {r.shift?.role_name || r.role_name || "Rescue Support"}</div>
+          <div style={{ fontWeight: 700 }}>{v?.role_name || r.role_name || "Volunteer Shift"}</div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(r.id).slice(0, 8)}</div>
         </div>
       ),
     },
     {
       key: "completed_at",
       header: "Completion Date",
-      render: (_: any, r: any) => formatDateTime(r.check_out_at || r.updated_at || r.created_at),
+      render: (_: any, r: any) => formatDateTime(r.check_out_at || r.updated_at || r.created_at).split(" ")[0],
+    },
+    {
+      key: "status",
+      header: "Completion Status",
+      render: () => (
+        <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px", background: "#ECFDF5", color: "#047857", textTransform: "uppercase" }}>
+          Completed
+        </span>
+      ),
     },
     {
       key: "hours_served",
@@ -982,8 +1815,8 @@ const VolunteerCoordinatorDashboard = () => {
     },
     {
       key: "notes",
-      header: "Completion Notes / Report",
-      render: (v: string) => <span style={{ fontSize: "12px", color: "#475569" }}>{v || "Shift completed successfully"}</span>,
+      header: "Notes / Details",
+      render: (v: string) => <span style={{ fontSize: "12px", color: "#475569" }}>{v || "No notes logged"}</span>,
     },
   ];
 
@@ -1058,18 +1891,31 @@ const VolunteerCoordinatorDashboard = () => {
         </div>
       )}
 
-      {/* Metric Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        {statCards.map((item) => (
-          <StatCard key={item.title} {...item} />
-        ))}
-      </div>
-
       {/* TABBED OPERATIONAL WORKSPACE */}
       <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
         {/* Navigation Tabs */}
         <div style={{ borderBottom: "2px solid #E2E8F0", paddingBottom: "12px", marginBottom: "16px" }}>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab("overview")}
+              style={{
+                padding: "9px 14px",
+                borderRadius: "10px",
+                border: activeTab === "overview" ? "2px solid #3B82F6" : "1px solid #CBD5E1",
+                background: activeTab === "overview" ? "#EFF6FF" : "#FFFFFF",
+                color: activeTab === "overview" ? "#1D4ED8" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaChartBar /> Overview
+            </button>
+
             <button
               type="button"
               onClick={() => setActiveTab("pipeline")}
@@ -1192,13 +2038,113 @@ const VolunteerCoordinatorDashboard = () => {
           </div>
         </div>
 
+        {/* TAB 0: OVERVIEW */}
+        {activeTab === "overview" && (
+          <div>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
+              Volunteer Operations Overview
+            </h3>
+            
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+              <StatCard
+                title="Total Volunteers"
+                value={loading ? "..." : String(volunteers.length)}
+                trend="All registered profiles"
+                color="#3B82F6"
+                icon={<FaUsers />}
+                onClick={() => setActiveTab("roster")}
+              />
+              <StatCard
+                title="Pending Applications"
+                value={loading ? "..." : String(pendingApplications.length)}
+                trend="Awaiting review"
+                color="#F59E0B"
+                icon={<FaClipboardList />}
+                onClick={() => setActiveTab("pipeline")}
+              />
+              <StatCard
+                title="Active Volunteers"
+                value={loading ? "..." : String(approvedVolunteers.length)}
+                trend="Onboarded &amp; active"
+                color="#10B981"
+                icon={<FaUserCheck />}
+                onClick={() => setActiveTab("roster")}
+              />
+              <StatCard
+                title="Scheduled Shifts"
+                value={loading ? "..." : String(shifts.length)}
+                trend="Total calendar shifts"
+                color="#8B5CF6"
+                icon={<FaCalendarAlt />}
+                onClick={() => setActiveTab("schedules")}
+              />
+              <StatCard
+                title="Attendance Logs"
+                value={loading ? "..." : String(allAttendance.length)}
+                trend="Active stream logs"
+                color="#6366F1"
+                icon={<FaClock />}
+                onClick={() => setActiveTab("attendance")}
+              />
+              <StatCard
+                title="Completed Work"
+                value={loading ? "..." : String(completedWorkList.length)}
+                trend="Successfully completed"
+                color="#EC4899"
+                icon={<FaCheckDouble />}
+                onClick={() => setActiveTab("completed")}
+              />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
+              <div style={{ padding: "16px", background: "#F8FAFC", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+                <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#0F172A", fontWeight: 700 }}>Quick Actions</h4>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => setIsApplyModalOpen(true)}
+                    style={{ padding: "8px 12px", background: "#2563EB", color: "#fff", border: "none", borderRadius: "6px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    + New Application (Intake)
+                  </button>
+                  <button
+                    onClick={() => setIsShiftModalOpen(true)}
+                    style={{ padding: "8px 12px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    + Schedule New Shift
+                  </button>
+                </div>
+              </div>
+              
+              <div style={{ padding: "16px", background: "#F8FAFC", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+                <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#0F172A", fontWeight: 700 }}>Operations Notice</h4>
+                <p style={{ margin: 0, fontSize: "13px", color: "#64748B", lineHeight: "1.5" }}>
+                  Use the tabs above to manage the volunteer lifecycle. Ensure work assignments align with the volunteer's preferred type (Foster Care, Transport, Shelter Support, Events &amp; Outreach) to match their skills and availability.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 1: APPLICATIONS PIPELINE */}
         {activeTab === "pipeline" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
                 Pending Volunteer Applications ({pendingApplications.length})
               </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <FaFilter size={12} color="#64748B" />
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  style={{ padding: "7px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+                >
+                  <option value="">All Volunteer Types</option>
+                  {PREFERRED_ROLES.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <DataTable
               columns={pipelineColumns}
@@ -1433,13 +2379,33 @@ const VolunteerCoordinatorDashboard = () => {
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => void handleIssueCertificate(row.id)}
-                      style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#6366F1", fontSize: "11px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                    >
-                      <FaAward /> Certificate
-                    </button>
+                    {(() => {
+                      const isEligible = isVolunteerEligibleForCertificate(row);
+                      const isIssued = Boolean(issuedCertificates[row.id]);
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => void handleIssueCertificate(row.id, row)}
+                          title={isEligible ? (isIssued ? "Download existing certificate" : "Issue volunteer certificate") : "Volunteer must complete verified service first"}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: "6px",
+                            border: isEligible ? "1px solid #6366F1" : "1px solid #CBD5E1",
+                            background: isEligible ? (isIssued ? "#EEF2FF" : "#FFFFFF") : "#F8FAFC",
+                            color: isEligible ? "#6366F1" : "#94A3B8",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            cursor: isEligible ? "pointer" : "not-allowed",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            opacity: isEligible ? 1 : 0.7
+                          }}
+                        >
+                          <FaAward /> {isIssued ? "Download Cert" : isEligible ? "Issue Cert" : "No Service"}
+                        </button>
+                      );
+                    })()}
                   </div>
                 );
               }}
@@ -1504,6 +2470,26 @@ const VolunteerCoordinatorDashboard = () => {
                       }}
                     >
                       <FaClock /> View Roster ({enrolledCount})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditShiftModal(row)}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #CBD5E1",
+                        background: "#FFF",
+                        color: "#475569",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <FaEdit /> Edit
                     </button>
                   </div>
                 );
@@ -1822,14 +2808,74 @@ const VolunteerCoordinatorDashboard = () => {
       <Modal isOpen={isShiftModalOpen} onClose={() => setIsShiftModalOpen(false)} title="Create Volunteer Shift Schedule">
         <form onSubmit={handleCreateShift} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div>
-            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Role / Activity Name *</label>
-            <input type="text" required placeholder="e.g. Dog Walking &amp; Socialization" value={shiftForm.role_name} onChange={(e) => setShiftForm({ ...shiftForm, role_name: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Work / Shift Title *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Feeding &amp; Socialization Care"
+              value={shiftForm.role_name}
+              onChange={(e) => setShiftForm({ ...shiftForm, role_name: e.target.value })}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Volunteer Type / Role *</label>
+              <select
+                value={shiftForm.preferred_role}
+                onChange={(e) => setShiftForm({ ...shiftForm, preferred_role: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+              >
+                {PREFERRED_ROLES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Date *</label>
+              <input
+                type="date"
+                required
+                value={shiftForm.date}
+                onChange={(e) => setShiftForm({ ...shiftForm, date: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Start Time *</label>
+              <input
+                type="time"
+                required
+                value={shiftForm.start_time}
+                onChange={(e) => setShiftForm({ ...shiftForm, start_time: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>End Time *</label>
+              <input
+                type="time"
+                required
+                value={shiftForm.end_time}
+                onChange={(e) => setShiftForm({ ...shiftForm, end_time: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
           </div>
 
           {facilities.length > 0 && (
             <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Shelter Facility</label>
-              <select value={shiftForm.shelter_facility_id} onChange={(e) => setShiftForm({ ...shiftForm, shelter_facility_id: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Location (Shelter Facility) *</label>
+              <select
+                value={shiftForm.shelter_facility_id}
+                onChange={(e) => setShiftForm({ ...shiftForm, shelter_facility_id: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+              >
                 <option value="">Central Shelter Facility</option>
                 {facilities.map((f: any) => (
                   <option key={f.id} value={f.id}>{f.name}</option>
@@ -1838,42 +2884,385 @@ const VolunteerCoordinatorDashboard = () => {
             </div>
           )}
 
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Instructions / Details</label>
+            <textarea
+              rows={3}
+              placeholder="Provide specific guidelines, tasks, contact details or directions for the volunteer..."
+              value={shiftForm.notes}
+              onChange={(e) => setShiftForm({ ...shiftForm, notes: e.target.value })}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ borderTop: "1px solid #E2E8F0", paddingTop: "14px", marginTop: "6px" }}>
+            <h4 style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#0F172A", fontWeight: 700 }}>GPS Geofencing Configuration</h4>
+            
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Location Name (e.g. Shelter Entrance)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. PawGuard Main Shelter"
+                  value={shiftForm.location_name}
+                  onChange={(e) => setShiftForm({ ...shiftForm, location_name: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Allowed Radius (meters)</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Leave empty for backend default (500m)"
+                  value={shiftForm.allowed_radius_meters}
+                  onChange={(e) => setShiftForm({ ...shiftForm, allowed_radius_meters: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Latitude</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 17.123456"
+                  value={shiftForm.latitude}
+                  onChange={(e) => setShiftForm({ ...shiftForm, latitude: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Longitude</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 78.123456"
+                  value={shiftForm.longitude}
+                  onChange={(e) => setShiftForm({ ...shiftForm, longitude: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "6px" }}>Pick Location on Map</label>
+              
+              <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="Search location (e.g. Hyderabad, shelter, street name)..."
+                  value={createSearchQuery}
+                  onChange={(e) => setCreateSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSearchLocation(createSearchQuery, false);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #CBD5E1",
+                    fontSize: "13px"
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSearchLocation(createSearchQuery, false)}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#2563EB",
+                    color: "#FFF",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    cursor: "pointer"
+                  }}
+                >
+                  Search
+                </button>
+              </div>
+
+              <div 
+                ref={createMapContainerRef} 
+                style={{ 
+                  width: "100%", 
+                  height: "220px", 
+                  borderRadius: "8px", 
+                  border: "1px solid #CBD5E1", 
+                  zIndex: 5,
+                  position: "relative" 
+                }} 
+              />
+              <span style={{ display: "block", fontSize: "11px", color: "#64748B", marginTop: "4px" }}>
+                Click anywhere on the map to set the shift coordinates.
+              </span>
+            </div>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Start Time *</label>
-              <input type="datetime-local" required value={shiftForm.start_at} onChange={(e) => setShiftForm({ ...shiftForm, start_at: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Capacity Limit (Available Slots) *</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={shiftForm.capacity}
+                onChange={(e) => setShiftForm({ ...shiftForm, capacity: Number(e.target.value) })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
             </div>
+            
             <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>End Time *</label>
-              <input type="datetime-local" required value={shiftForm.end_at} onChange={(e) => setShiftForm({ ...shiftForm, end_at: e.target.value })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Direct Assignment (Optional)</label>
+              <select
+                value={shiftForm.assigned_volunteer_id}
+                onChange={(e) => setShiftForm({ ...shiftForm, assigned_volunteer_id: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+              >
+                <option value="">Open Shift (Volunteers can claim via Hub)</option>
+                {approvedVolunteers.map((v: any) => (
+                  <option key={v.id} value={v.id}>
+                    {v.user?.full_name || v.full_name || v.emergency_contact_name || "Volunteer"} ({v.preferred_role || "General"})
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Capacity Limit *</label>
-            <input type="number" min="1" required value={shiftForm.capacity} onChange={(e) => setShiftForm({ ...shiftForm, capacity: Number(e.target.value) })} style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }} />
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Direct Volunteer Assignment (Optional)</label>
-            <select
-              value={shiftForm.assigned_volunteer_id}
-              onChange={(e) => setShiftForm({ ...shiftForm, assigned_volunteer_id: e.target.value })}
-              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
-            >
-              <option value="">Open Shift (No Direct Volunteer Assigned Yet)</option>
-              {approvedVolunteers.map((v: any) => (
-                <option key={v.id} value={v.id}>
-                  {v.user?.full_name || v.full_name || v.emergency_contact_name || "Volunteer"} — {v.preferred_role || v.skills || "General Support"} ({v.availability || "Flexible"})
-                </option>
-              ))}
-            </select>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
             <button type="button" onClick={() => setIsShiftModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
             <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700 }}>
               {isSubmitting ? "Saving..." : "Save Shift Schedule"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: Edit Volunteer Shift Location & Details */}
+      <Modal isOpen={isEditShiftModalOpen} onClose={() => { setIsEditShiftModalOpen(false); setSelectedShiftToEdit(null); }} title="Edit Shift Location & Details">
+        <form onSubmit={handleEditShiftSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Work / Shift Title *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Feeding &amp; Socialization Care"
+              value={editShiftForm.role_name}
+              onChange={(e) => setEditShiftForm({ ...editShiftForm, role_name: e.target.value })}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Volunteer Type / Role *</label>
+              <select
+                value={editShiftForm.preferred_role}
+                onChange={(e) => setEditShiftForm({ ...editShiftForm, preferred_role: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+              >
+                {PREFERRED_ROLES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Date *</label>
+              <input
+                type="date"
+                required
+                value={editShiftForm.date}
+                onChange={(e) => setEditShiftForm({ ...editShiftForm, date: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Start Time *</label>
+              <input
+                type="time"
+                required
+                value={editShiftForm.start_time}
+                onChange={(e) => setEditShiftForm({ ...editShiftForm, start_time: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>End Time *</label>
+              <input
+                type="time"
+                required
+                value={editShiftForm.end_time}
+                onChange={(e) => setEditShiftForm({ ...editShiftForm, end_time: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+          </div>
+
+          {facilities.length > 0 && (
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Location (Shelter Facility) *</label>
+              <select
+                value={editShiftForm.shelter_facility_id}
+                onChange={(e) => setEditShiftForm({ ...editShiftForm, shelter_facility_id: e.target.value })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
+              >
+                <option value="">Central Shelter Facility</option>
+                {facilities.map((f: any) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Instructions / Details</label>
+            <textarea
+              rows={3}
+              placeholder="Provide specific guidelines, tasks, contact details or directions for the volunteer..."
+              value={editShiftForm.notes}
+              onChange={(e) => setEditShiftForm({ ...editShiftForm, notes: e.target.value })}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ borderTop: "1px solid #E2E8F0", paddingTop: "14px", marginTop: "6px" }}>
+            <h4 style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#0F172A", fontWeight: 700 }}>GPS Geofencing Configuration</h4>
+            
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Location Name (e.g. Shelter Entrance)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. PawGuard Main Shelter"
+                  value={editShiftForm.location_name}
+                  onChange={(e) => setEditShiftForm({ ...editShiftForm, location_name: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Allowed Radius (meters)</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Leave empty for backend default (500m)"
+                  value={editShiftForm.allowed_radius_meters}
+                  onChange={(e) => setEditShiftForm({ ...editShiftForm, allowed_radius_meters: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Latitude</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 17.123456"
+                  value={editShiftForm.latitude}
+                  onChange={(e) => setEditShiftForm({ ...editShiftForm, latitude: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Longitude</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 78.123456"
+                  value={editShiftForm.longitude}
+                  onChange={(e) => setEditShiftForm({ ...editShiftForm, longitude: e.target.value })}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "6px" }}>Pick Location on Map</label>
+              
+              <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="Search location (e.g. Hyderabad, shelter, street name)..."
+                  value={editSearchQuery}
+                  onChange={(e) => setEditSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSearchLocation(editSearchQuery, true);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #CBD5E1",
+                    fontSize: "13px"
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSearchLocation(editSearchQuery, true)}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#2563EB",
+                    color: "#FFF",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    cursor: "pointer"
+                  }}
+                >
+                  Search
+                </button>
+              </div>
+
+              <div 
+                ref={editMapContainerRef} 
+                style={{ 
+                  width: "100%", 
+                  height: "220px", 
+                  borderRadius: "8px", 
+                  border: "1px solid #CBD5E1", 
+                  zIndex: 5,
+                  position: "relative" 
+                }} 
+              />
+              <span style={{ display: "block", fontSize: "11px", color: "#64748B", marginTop: "4px" }}>
+                Click anywhere on the map to set the shift coordinates.
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>Capacity Limit (Available Slots) *</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={editShiftForm.capacity}
+                onChange={(e) => setEditShiftForm({ ...editShiftForm, capacity: Number(e.target.value) })}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+            <button type="button" onClick={() => { setIsEditShiftModalOpen(false); setSelectedShiftToEdit(null); }} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700 }}>
+              {isSubmitting ? "Saving..." : "Update Shift Details"}
             </button>
           </div>
         </form>
@@ -2540,13 +3929,31 @@ const VolunteerCoordinatorDashboard = () => {
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => void handleIssueCertificate(selectedVolunteerRecord.id)}
-                style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#6366F1", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
-              >
-                <FaAward size={12} /> Download Certificate
-              </button>
+              {(() => {
+                const isEligible = isVolunteerEligibleForCertificate(selectedVolunteerRecord);
+                const isIssued = Boolean(issuedCertificates[selectedVolunteerRecord.id]);
+                return (
+                  <button
+                    type="button"
+                    onClick={() => void handleIssueCertificate(selectedVolunteerRecord.id, selectedVolunteerRecord)}
+                    title={isEligible ? (isIssued ? "Download existing certificate" : "Issue volunteer certificate") : "Volunteer must complete verified service first"}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      border: isEligible ? "1px solid #6366F1" : "1px solid #CBD5E1",
+                      background: isEligible ? (isIssued ? "#EEF2FF" : "#4F46E5") : "#F1F5F9",
+                      color: isEligible ? (isIssued ? "#4338CA" : "#FFFFFF") : "#94A3B8",
+                      fontWeight: 700,
+                      cursor: isEligible ? "pointer" : "not-allowed",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px"
+                    }}
+                  >
+                    <FaAward size={12} /> {isIssued ? "Download Certificate" : isEligible ? "Issue Certificate" : "Ineligible (No Verified Service)"}
+                  </button>
+                );
+              })()}
               <button
                 type="button"
                 onClick={() => setIsProfileModalOpen(false)}

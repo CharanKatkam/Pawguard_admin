@@ -3,18 +3,64 @@ import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
-import { FaHome, FaPaw, FaUserPlus, FaCalendarCheck, FaSync } from "react-icons/fa";
+import Modal from "../../../components/common/Modal";
+import { useToast } from "../../../context/ToastContext";
+import { FaHome, FaPaw, FaUserPlus, FaCalendarCheck, FaSync, FaUsers, FaCheckCircle, FaTimesCircle, FaEye } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
 import fosterService from "../../../services/fosterService";
-import { useDataSync } from "../../../utils/dataSync";
+import volunteerService from "../../../services/volunteerService";
+import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { formatDateTime } from "../../../utils/dateUtils";
+
+// Helper: identify foster-care volunteers
+const isFosterCareVolunteer = (vol: any): boolean => {
+  const role = String(vol?.preferred_role || vol?.volunteer_type || vol?.applied_role || "").toLowerCase();
+  return role.includes("foster");
+};
+
+const isPending = (st?: string) => {
+  const s = String(st || "").toLowerCase();
+  return s === "applied" || s === "pending" || s === "submitted";
+};
+
+const isApproved = (st?: string) => {
+  const s = String(st || "").toLowerCase();
+  return s === "approved" || s === "active" || s === "onboarded";
+};
+
+const VolunteerStatusBadge = ({ status }: { status?: string }) => {
+  const s = String(status || "applied").toLowerCase();
+  const color =
+    isApproved(s) ? "#047857" :
+    isPending(s) ? "#D97706" :
+    s === "rejected" ? "#DC2626" : "#64748B";
+  const bg =
+    isApproved(s) ? "#ECFDF5" :
+    isPending(s) ? "#FEF3C7" :
+    s === "rejected" ? "#FEE2E2" : "#F1F5F9";
+  return (
+    <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
+      {s}
+    </span>
+  );
+};
 
 const FosterCoordinatorDashboard = () => {
   const navigate = useNavigate();
+  const { addToast } = useToast();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Foster volunteers state
+  const [fosterVolunteers, setFosterVolunteers] = useState<any[]>([]);
+  const [volLoading, setVolLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // View Details modal
+  const [selectedVol, setSelectedVol] = useState<any | null>(null);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -48,7 +94,6 @@ const FosterCoordinatorDashboard = () => {
           : [];
       }
 
-      // Sort newest -> oldest
       profileList.sort((a, b) => {
         const timeA = new Date(a.created_at || a.date || a.updated_at || 0).getTime();
         const timeB = new Date(b.created_at || b.date || b.updated_at || 0).getTime();
@@ -68,13 +113,100 @@ const FosterCoordinatorDashboard = () => {
     }
   }, []);
 
+  const fetchFosterVolunteers = useCallback(async () => {
+    try {
+      setVolLoading(true);
+      let res: any;
+      try {
+        res = await volunteerService.getVolunteers();
+      } catch {
+        res = [];
+      }
+      const list: any[] = Array.isArray(res)
+        ? res
+        : Array.isArray(res?.data)
+        ? res.data
+        : Array.isArray(res?.items)
+        ? res.items
+        : [];
+
+      const fosterOnly = list.filter(isFosterCareVolunteer);
+      fosterOnly.sort((a, b) => {
+        const tA = new Date(a.created_at || a.submitted_at || 0).getTime();
+        const tB = new Date(b.created_at || b.submitted_at || 0).getTime();
+        return (isNaN(tB) ? 0 : tB) - (isNaN(tA) ? 0 : tA);
+      });
+      setFosterVolunteers(fosterOnly);
+    } catch {
+      setFosterVolunteers([]);
+    } finally {
+      setVolLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDashboard();
-  }, [fetchDashboard]);
+    fetchFosterVolunteers();
+  }, [fetchDashboard, fetchFosterVolunteers]);
 
-  useDataSync(fetchDashboard);
+  useDataSync(() => {
+    fetchDashboard();
+    fetchFosterVolunteers();
+  });
 
-  // Fallback metric calculations from profile records if dashboard API returns null/403
+  const handleApprove = async (vol: any) => {
+    const id = vol?.id || vol?.application_id || vol?.profile_id;
+    if (!id) { addToast("Invalid volunteer ID.", "error"); return; }
+    try {
+      setIsSubmitting(true);
+      try {
+        await volunteerService.approveApplication(id);
+      } catch (err: any) {
+        if (err?.response?.status === 404 || err?.response?.status === 405) {
+          await volunteerService.updateVolunteerProfile(id, { status: "active" });
+        } else throw err;
+      }
+      addToast(`Foster volunteer approved!`, "success");
+      setFosterVolunteers((prev) =>
+        prev.map((v) => (v.id === id ? { ...v, status: "approved" } : v))
+      );
+      if (selectedVol?.id === id) setSelectedVol((p: any) => p ? { ...p, status: "approved" } : null);
+      fetchFosterVolunteers();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to approve volunteer.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReject = async (vol: any) => {
+    const id = vol?.id || vol?.application_id || vol?.profile_id;
+    if (!id) { addToast("Invalid volunteer ID.", "error"); return; }
+    try {
+      setIsSubmitting(true);
+      try {
+        await volunteerService.rejectApplication(id, "Rejected by Foster Coordinator.");
+      } catch (err: any) {
+        if (err?.response?.status === 404 || err?.response?.status === 405) {
+          await volunteerService.updateVolunteerProfile(id, { status: "rejected" });
+        } else throw err;
+      }
+      addToast("Foster volunteer application rejected.", "info");
+      setFosterVolunteers((prev) =>
+        prev.map((v) => (v.id === id ? { ...v, status: "rejected" } : v))
+      );
+      if (selectedVol?.id === id) setSelectedVol((p: any) => p ? { ...p, status: "rejected" } : null);
+      fetchFosterVolunteers();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to reject volunteer.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Derived counts
   const activeHomesCount =
     dashboardData?.active_homes ??
     dashboardData?.activeHomes ??
@@ -95,14 +227,18 @@ const FosterCoordinatorDashboard = () => {
     dashboardData?.availableCapacity ??
     profiles.reduce((sum, p) => sum + Math.max(0, (Number(p.max_capacity) || 1) - (Number(p.active_count) || 0)), 0);
 
+  const pendingFosterVols = fosterVolunteers.filter((v) => isPending(v.status));
+  const approvedFosterVols = fosterVolunteers.filter((v) => isApproved(v.status));
+
   const stats = [
     { title: "Active Foster Homes", value: loading ? "..." : String(activeHomesCount), trend: "Available Homes", color: "#2563EB", icon: <FaHome />, onClick: () => navigate("/fosters") },
     { title: "Pets in Foster Care", value: loading ? "..." : String(petsInCareCount), trend: "Active Placements", color: "#10B981", icon: <FaPaw />, onClick: () => navigate("/pets") },
     { title: "Pending Foster Applications", value: loading ? "..." : String(pendingRequestsCount), trend: "Requires Review", color: "#F59E0B", icon: <FaUserPlus />, onClick: () => navigate("/fosters") },
     { title: "Total Care Capacity", value: loading ? "..." : String(availableCapacityCount), trend: "Available Slots", color: "#6366F1", icon: <FaCalendarCheck />, onClick: () => navigate("/fosters") },
+    { title: "Foster Volunteers", value: volLoading ? "..." : String(fosterVolunteers.length), trend: `${approvedFosterVols.length} Approved`, color: "#0891B2", icon: <FaUsers /> },
   ];
 
-  const columns: Column<any>[] = [
+  const placementColumns: Column<any>[] = [
     {
       key: "id",
       title: "Profile / Placement ID",
@@ -159,6 +295,47 @@ const FosterCoordinatorDashboard = () => {
     },
   ];
 
+  const volunteerColumns: Column<any>[] = [
+    {
+      key: "name",
+      title: "Volunteer Name & Contact",
+      render: (_: string, row: any) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0F172A" }}>
+            {row.user?.full_name || row.full_name || row.emergency_contact_name || "Volunteer"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#64748B" }}>
+            {row.user?.email || row.email || `ID: ${String(row.id || "").slice(0, 8)}`}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "availability",
+      title: "Availability",
+      render: (v: string) => <span style={{ color: "#475569", fontSize: "13px" }}>{v || "Flexible"}</span>,
+    },
+    {
+      key: "skills",
+      title: "Skills / Experience",
+      render: (_: string, row: any) => (
+        <span style={{ color: "#475569", fontSize: "12px" }}>
+          {row.skills || row.animal_handling_experience || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "created_at",
+      title: "Applied",
+      render: (v: string) => <span style={{ fontSize: "12px", color: "#64748B" }}>{v ? formatDateTime(v) : "—"}</span>,
+    },
+    {
+      key: "status",
+      title: "Status",
+      render: (v: string) => <VolunteerStatusBadge status={v} />,
+    },
+  ];
+
   return (
     <div>
       {/* Header Banner */}
@@ -187,15 +364,131 @@ const FosterCoordinatorDashboard = () => {
         ))}
       </div>
 
-      <div className="soft-card" style={{ padding: "20px" }}>
+      {/* Foster Placements Table */}
+      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
             Active Foster Caregivers &amp; Placements (Newest First)
           </h3>
           {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading foster data...</span>}
         </div>
-        <DataTable columns={columns} data={profiles} loading={loading} emptyMessage="No active foster profiles registered." />
+        <DataTable columns={placementColumns} data={profiles} loading={loading} emptyMessage="No active foster profiles registered." />
       </div>
+
+      {/* ── Foster Care Volunteers ── */}
+      <div className="soft-card" style={{ padding: "20px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+          <div>
+            <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+              Foster Care Volunteer Applications
+            </h3>
+            <span style={{ fontSize: "12px", color: "#64748B" }}>
+              {pendingFosterVols.length} pending · {approvedFosterVols.length} approved · {fosterVolunteers.length} total
+            </span>
+          </div>
+          {volLoading && <span style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600 }}>Loading volunteers...</span>}
+        </div>
+
+        <DataTable
+          columns={volunteerColumns}
+          data={fosterVolunteers}
+          loading={volLoading}
+          emptyMessage="No Foster Care volunteer applications found."
+          renderRowActions={(row) => (
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => { setSelectedVol(row); setIsViewModalOpen(true); }}
+                style={{ padding: "4px 10px", background: "#2563EB", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+              >
+                <FaEye size={11} /> View
+              </button>
+              {isPending(row.status) && (
+                <>
+                  <button
+                    disabled={isSubmitting}
+                    onClick={() => handleApprove(row)}
+                    style={{ padding: "4px 10px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <FaCheckCircle size={11} /> Approve
+                  </button>
+                  <button
+                    disabled={isSubmitting}
+                    onClick={() => handleReject(row)}
+                    style={{ padding: "4px 10px", background: "#EF4444", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <FaTimesCircle size={11} /> Reject
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          onRowClick={(row) => { setSelectedVol(row); setIsViewModalOpen(true); }}
+        />
+      </div>
+
+      {/* Volunteer Details Modal */}
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => { setIsViewModalOpen(false); setSelectedVol(null); }}
+        title="Foster Care Volunteer — Details"
+        size="md"
+        footer={
+          selectedVol ? (
+            <>
+              {isPending(selectedVol.status) && (
+                <>
+                  <button
+                    disabled={isSubmitting}
+                    onClick={() => handleApprove(selectedVol)}
+                    style={{ padding: "8px 16px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Approve Volunteer
+                  </button>
+                  <button
+                    disabled={isSubmitting}
+                    onClick={() => handleReject(selectedVol)}
+                    style={{ padding: "8px 16px", background: "#EF4444", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Reject Application
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => { setIsViewModalOpen(false); setSelectedVol(null); }}
+                style={{ padding: "8px 16px", background: "#64748B", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+              >
+                Close
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {selectedVol && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div><strong style={{ color: "#475569" }}>Name:</strong><br />{selectedVol.user?.full_name || selectedVol.full_name || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Email:</strong><br />{selectedVol.user?.email || selectedVol.email || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Phone:</strong><br />{selectedVol.user?.phone || selectedVol.phone || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Volunteer Type:</strong><br /><span style={{ color: "#2563EB", fontWeight: 700 }}>{selectedVol.preferred_role || "Foster Care"}</span></div>
+              <div><strong style={{ color: "#475569" }}>Availability:</strong><br />{selectedVol.availability || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Status:</strong><br /><VolunteerStatusBadge status={selectedVol.status} /></div>
+              <div><strong style={{ color: "#475569" }}>Applied:</strong><br />{selectedVol.created_at ? formatDateTime(selectedVol.created_at) : "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Emergency Contact:</strong><br />{selectedVol.emergency_contact_name || "—"} {selectedVol.emergency_contact_phone ? `(${selectedVol.emergency_contact_phone})` : ""}</div>
+            </div>
+            {selectedVol.skills && (
+              <div><strong style={{ color: "#475569" }}>Skills:</strong><br />{selectedVol.skills}</div>
+            )}
+            {selectedVol.animal_handling_experience && (
+              <div><strong style={{ color: "#475569" }}>Animal Handling Experience:</strong><br />{selectedVol.animal_handling_experience}</div>
+            )}
+            {selectedVol.notes && (
+              <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#475569" }}>Notes:</strong><br />{selectedVol.notes}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

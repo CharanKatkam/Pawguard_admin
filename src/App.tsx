@@ -51,6 +51,7 @@ import ShelterManagerDashboard from "./pages/dashboard/roles/ShelterManagerDashb
 import AdoptionCoordinatorDashboard from "./pages/dashboard/roles/AdoptionCoordinatorDashboard";
 import FosterCoordinatorDashboard from "./pages/dashboard/roles/FosterCoordinatorDashboard";
 import VolunteerCoordinatorDashboard from "./pages/dashboard/roles/VolunteerCoordinatorDashboard";
+import VolunteerDashboard from "./pages/dashboard/roles/VolunteerDashboard";
 import InventoryManagerDashboard from "./pages/dashboard/roles/InventoryManagerDashboard";
 import FinanceUserDashboard from "./pages/dashboard/roles/FinanceUserDashboard";
 
@@ -118,6 +119,10 @@ function App() {
 
             <Route element={<ProtectedRoute allowedRoles={["volunteer_coordinator", "super_admin"]} />}>
               <Route path="/dashboard/volunteer-coordinator" element={<VolunteerCoordinatorDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["volunteer", "super_admin"]} />}>
+              <Route path="/dashboard/volunteer" element={<VolunteerDashboard />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={["inventory_manager", "super_admin"]} />}>

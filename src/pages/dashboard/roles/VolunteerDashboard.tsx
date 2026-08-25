@@ -266,6 +266,11 @@ const VolunteerDashboard = () => {
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || r.title || "Shelter Support"}</div>
           <div style={{ fontSize: "11px", color: "#64748B" }}>Facility: {r.shelter_facility_id ? String(r.shelter_facility_id).slice(0, 8) : "Central Shelter"}</div>
+          {(r.notes || r.message || r.instructions) && (
+            <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", fontStyle: "italic" }}>
+              Details: {r.notes || r.message || r.instructions}
+            </div>
+          )}
         </div>
       ),
     },
@@ -306,6 +311,11 @@ const VolunteerDashboard = () => {
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{r.shift?.role_name || r.role_name || "Volunteer Shift"}</div>
           <div style={{ fontSize: "11px", color: "#64748B" }}>ID: {String(r.id).slice(0, 8)}</div>
+          {(r.shift?.notes || r.shift?.message || r.shift?.instructions || r.notes || r.message || r.instructions) && (
+            <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", fontStyle: "italic" }}>
+              Details: {r.shift?.notes || r.shift?.message || r.shift?.instructions || r.notes || r.message || r.instructions}
+            </div>
+          )}
         </div>
       ),
     },

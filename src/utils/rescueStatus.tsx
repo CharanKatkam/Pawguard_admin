@@ -1,13 +1,20 @@
 /** Canonical rescue lifecycle (PRR): reported -> verified -> dispatched -> located -> rescued -> admitted. */
 
 export const RESCUE_STATUS_META: Record<string, { label: string; bg: string; color: string }> = {
-  reported: { label: "Reported", bg: "#FFFBEB", color: "#B45309" },
+  submitted: { label: "Submitted", bg: "#FFFBEB", color: "#B45309" },
+  reported: { label: "Submitted", bg: "#FFFBEB", color: "#B45309" },
   verified: { label: "Verified", bg: "#EFF6FF", color: "#2563EB" },
+  accepted: { label: "Accepted", bg: "#FEF3C7", color: "#D97706" },
   dispatched: { label: "Dispatched", bg: "#F5F3FF", color: "#7C3AED" },
-  located: { label: "Located", bg: "#ECFEFF", color: "#0891B2" },
-  rescued: { label: "Rescued", bg: "#ECFDF5", color: "#059669" },
-  admitted: { label: "Admitted", bg: "#D1FAE5", color: "#065F46" },
+  in_progress: { label: "In Progress", bg: "#E0E7FF", color: "#4338CA" },
+  en_route: { label: "In Progress", bg: "#E0E7FF", color: "#4338CA" },
+  located: { label: "In Progress", bg: "#ECFEFF", color: "#0891B2" },
+  rescued: { label: "In Progress", bg: "#ECFDF5", color: "#059669" },
+  secured: { label: "In Progress", bg: "#ECFDF5", color: "#059669" },
+  admitted: { label: "Completed", bg: "#D1FAE5", color: "#065F46" },
+  completed: { label: "Completed", bg: "#D1FAE5", color: "#065F46" },
   rejected: { label: "Rejected", bg: "#FEF2F2", color: "#DC2626" },
+  cancelled: { label: "Cancelled", bg: "#FEF2F2", color: "#DC2626" },
 };
 
 export const rescueStatusMeta = (status?: string | null) => {
@@ -47,8 +54,7 @@ export interface DispatchStageInfo {
 
 /**
  * Dispatch status derived from the rescue request lifecycle + whether a
- * dispatch record exists. Backend dispatch records carry no independent
- * status field; the rescue request status drives the stage.
+ * dispatch record exists.
  */
 export const dispatchStage = (req?: {
   status?: string | null;
@@ -56,31 +62,29 @@ export const dispatchStage = (req?: {
 }): DispatchStageInfo => {
   const status = String(req?.status || "").toLowerCase();
   const hasDispatch = Boolean(req?.dispatch);
-  if (!hasDispatch && (status === "reported" || status === "verified" || status === "rejected")) {
-    return { label: "Not Assigned", bg: "#F1F5F9", color: "#475569" };
+
+  if (status === "accepted") {
+    return { label: "Accepted", bg: "#FEF3C7", color: "#D97706" };
   }
-  if (!hasDispatch && status === "") {
-    return { label: "Not Assigned", bg: "#F1F5F9", color: "#475569" };
-  }
-  if (!hasDispatch && (status === "dispatched" || status === "located")) {
+  if (status === "dispatched") {
     return { label: "Dispatched", bg: "#F5F3FF", color: "#7C3AED" };
   }
-  switch (status) {
-    case "verified":
-      return { label: "Awaiting Dispatch", bg: "#EFF6FF", color: "#2563EB" };
-    case "dispatched":
-      return { label: "Dispatched", bg: "#F5F3FF", color: "#7C3AED" };
-    case "located":
-      return { label: "At Location", bg: "#ECFEFF", color: "#0891B2" };
-    case "rescued":
-      return { label: "Rescued", bg: "#ECFDF5", color: "#059669" };
-    case "admitted":
-      return { label: "Completed", bg: "#D1FAE5", color: "#065F46" };
-    case "rejected":
-      return { label: "Rejected", bg: "#FEF2F2", color: "#DC2626" };
-    default:
-      return { label: "Not Assigned", bg: "#F1F5F9", color: "#475569" };
+  if (["in_progress", "en_route", "located", "secured", "rescued"].includes(status)) {
+    return { label: "In Progress", bg: "#E0E7FF", color: "#4338CA" };
   }
+  if (["completed", "admitted"].includes(status)) {
+    return { label: "Completed", bg: "#D1FAE5", color: "#065F46" };
+  }
+  if (status === "rejected" || status === "cancelled") {
+    return { label: "Rejected", bg: "#FEF2F2", color: "#DC2626" };
+  }
+  if (status === "verified") {
+    return { label: "Not Assigned", bg: "#F1F5F9", color: "#475569" };
+  }
+  if (!hasDispatch && (status === "reported" || status === "submitted" || status === "")) {
+    return { label: "Not Assigned", bg: "#F1F5F9", color: "#475569" };
+  }
+  return { label: "Not Assigned", bg: "#F1F5F9", color: "#475569" };
 };
 
 /** Agents assigned to a dispatch (RescueDispatchAgentResponse[]). */

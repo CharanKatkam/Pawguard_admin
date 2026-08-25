@@ -18,6 +18,7 @@ import {
   FaInfoCircle,
 } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
+import vehicleService from "../../services/vehicleService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
@@ -34,6 +35,10 @@ export interface RescueRequestTableRow {
   is_urgent: boolean;
   status: string;
   rejection_rationale: string;
+  assigned_agent_id?: string;
+  assigned_agent_name?: string;
+  assigned_vehicle_id?: string;
+  assigned_vehicle_number?: string;
   dispatch: Record<string, unknown> | null;
   dispatch_status: string;
   dispatch_bg: string;
@@ -61,6 +66,7 @@ const RescueRequests = () => {
     (currentUser as any)?.id;
 
   const [requests, setRequests] = useState<RescueRequestTableRow[]>([]);
+  const [vehicles, setVehicles] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
@@ -74,6 +80,9 @@ const RescueRequests = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
+  const [targetDispatchRequest, setTargetDispatchRequest] = useState<RescueRequestTableRow | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [targetRejectId, setTargetRejectId] = useState<string | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<RescueRequestTableRow | null>(null);
@@ -110,6 +119,12 @@ const RescueRequests = () => {
 
       let formatted: RescueRequestTableRow[] = list.map((item: Record<string, unknown>) => {
         const stage = dispatchStage({ status: item.status as string, dispatch: item.dispatch as Record<string, unknown> });
+        const dispatchObj = (item.dispatch as Record<string, unknown>) || null;
+        const assignedAgentId = String(item.assigned_agent_id || item.agent_id || dispatchObj?.assigned_driver_id || dispatchObj?.agent_id || item.assigned_agent || "");
+        const assignedAgentName = String(item.assigned_agent_name || item.assigned_agent || dispatchObj?.assigned_driver_name || dispatchObj?.agent_name || (assignedAgentId ? `Agent (${assignedAgentId})` : ""));
+        const assignedVehicleId = String(item.assigned_vehicle_id || dispatchObj?.assigned_vehicle_id || dispatchObj?.vehicle_id || "");
+        const assignedVehicleNumber = String(item.assigned_vehicle_number || item.assigned_vehicle || dispatchObj?.assigned_vehicle_number || dispatchObj?.vehicle_number || (assignedVehicleId ? `Vehicle (${assignedVehicleId})` : ""));
+
         return {
           id: String(item.id || item.request_id || ""),
           ticket_number: String(item.ticket_number || ""),
@@ -121,7 +136,11 @@ const RescueRequests = () => {
           is_urgent: !!item.is_urgent,
           status: String(item.status || "reported").toLowerCase(),
           rejection_rationale: String(item.rejection_rationale || item.rejection_reason || ""),
-          dispatch: (item.dispatch as Record<string, unknown>) || null,
+          assigned_agent_id: assignedAgentId,
+          assigned_agent_name: assignedAgentName,
+          assigned_vehicle_id: assignedVehicleId,
+          assigned_vehicle_number: assignedVehicleNumber,
+          dispatch: dispatchObj,
           dispatch_status: stage.label,
           dispatch_bg: stage.bg,
           dispatch_color: stage.color,
@@ -158,6 +177,14 @@ const RescueRequests = () => {
     }
   }, [isRescueCentreAdmin, currentRescueCentreId]);
 
+  // Fetch available vehicles
+  useEffect(() => {
+    vehicleService.getVehicles().then((res: any) => {
+      const list = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
+      setVehicles(list);
+    }).catch(() => setVehicles([]));
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("action") === "new") {
@@ -169,6 +196,83 @@ const RescueRequests = () => {
     }
     void fetchRequests();
   }, [fetchRequests]);
+
+  // Accept Rescue Request Action with Concurrency Protection
+  const handleAccept = async (req: RescueRequestTableRow) => {
+    const currentUserId = String(currentUser?.id ?? "");
+    if (req.assigned_agent_id && req.assigned_agent_id !== currentUserId) {
+      addToast(`This rescue request has already been accepted by agent ${req.assigned_agent_name || req.assigned_agent_id}.`, "error");
+      return;
+    }
+    if (["accepted", "dispatched", "in_progress", "completed", "admitted"].includes(req.status)) {
+      addToast("This rescue request has already been accepted or dispatched.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const agentName = (currentUser as any)?.name || (currentUser as any)?.email || "Rescue Agent";
+      await rescueService.acceptRescueRequest(req.id, currentUserId || "agent", agentName);
+      addToast(`Rescue Request Accepted! Assigned to ${agentName}.`, "success");
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to accept rescue request.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Open Dispatch Modal
+  const handleOpenDispatchModal = (req: RescueRequestTableRow) => {
+    setTargetDispatchRequest(req);
+    setSelectedVehicleId(req.assigned_vehicle_id || "");
+    setIsDispatchModalOpen(true);
+  };
+
+  // Submit Dispatch Action
+  const handleDispatchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetDispatchRequest || !selectedVehicleId) {
+      addToast("Please select an available rescue vehicle.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const currentUserId = String(currentUser?.id ?? "");
+      const selVeh = vehicles.find((v: any) => String(v.id || v.vehicle_id) === String(selectedVehicleId));
+      const vehicleNum = selVeh ? String((selVeh as any).registration_number || (selVeh as any).vehicle_number || (selVeh as any).model || selectedVehicleId) : selectedVehicleId;
+      const agentName = (currentUser as any)?.name || (currentUser as any)?.email || "Rescue Agent";
+
+      await rescueService.createDispatch({
+        case_id: targetDispatchRequest.id,
+        assigned_vehicle_id: selectedVehicleId,
+        agent_id: currentUserId || "agent",
+        driver_id: currentUserId || "agent",
+      });
+
+      await rescueService.updateRescueCase(targetDispatchRequest.id, {
+        status: "dispatched",
+        assigned_vehicle_id: selectedVehicleId,
+        assigned_vehicle_number: vehicleNum,
+        assigned_agent_id: currentUserId || "agent",
+        assigned_agent_name: agentName,
+      });
+
+      addToast("Rescue team and vehicle dispatched successfully!", "success");
+      setIsDispatchModalOpen(false);
+      setIsViewModalOpen(false);
+      setTargetDispatchRequest(null);
+      setSelectedVehicleId("");
+      fetchRequests();
+      notifyDataChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string; message?: string } } };
+      addToast(e?.response?.data?.detail || e?.response?.data?.message || "Failed to dispatch rescue.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Create Request Action
   const handleCreateRequest = async (e: React.FormEvent) => {
@@ -343,40 +447,80 @@ const RescueRequests = () => {
       ),
     },
     {
+      key: "assigned_agent_name",
+      title: "Assigned Agent",
+      render: (val: string, row: RescueRequestTableRow) => (
+        <span style={{ fontSize: "12px", fontWeight: 600, color: "#1E293B" }}>
+          {val || row.assigned_agent_id || "Unassigned"}
+        </span>
+      ),
+    },
+    {
+      key: "assigned_vehicle_number",
+      title: "Assigned Vehicle",
+      render: (val: string, row: RescueRequestTableRow) => (
+        <span style={{ fontSize: "12px", fontWeight: 600, color: "#1E293B" }}>
+          {val || row.assigned_vehicle_id || "Unassigned"}
+        </span>
+      ),
+    },
+    {
       key: "actions",
       title: "Actions",
-      render: (_val: unknown, row: RescueRequestTableRow) => (
-        <div style={{ display: "flex", gap: "6px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedRequest(row);
-              setIsViewModalOpen(true);
-            }}
-            style={{ padding: "5px 11px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
-          >
-            View Details
-          </button>
-          {["reported", "pending", "new", "awaiting_triage"].includes(row.status) && isAdmin && (
-            <>
+      render: (_val: unknown, row: RescueRequestTableRow) => {
+        const canAccept = row.status === "verified" && (!row.assigned_agent_id || row.assigned_agent_id === String(currentUser?.id ?? ""));
+
+        return (
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedRequest(row);
+                setIsViewModalOpen(true);
+              }}
+              style={{ padding: "5px 11px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+            >
+              View Details
+            </button>
+            {["reported", "pending", "new", "awaiting_triage"].includes(row.status) && isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleVerify(row.id, row)}
+                  style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                >
+                  Verify
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openRejectModal(row)}
+                  style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#EF4444", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {canAccept && (
               <button
                 type="button"
-                onClick={() => handleVerify(row.id, row)}
-                style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                onClick={() => handleAccept(row)}
+                style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#D97706", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
               >
-                Verify
+                Accept
               </button>
+            )}
+            {row.status === "accepted" && (
               <button
                 type="button"
-                onClick={() => openRejectModal(row)}
-                style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#EF4444", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                onClick={() => handleOpenDispatchModal(row)}
+                style={{ padding: "5px 11px", borderRadius: "6px", border: "none", background: "#7C3AED", color: "#FFFFFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
               >
-                Reject
+                Dispatch
               </button>
-            </>
-          )}
-        </div>
-      ),
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -683,6 +827,28 @@ const RescueRequests = () => {
                   </button>
                 </>
               )}
+              {selectedRequest.status === "verified" && (!selectedRequest.assigned_agent_id || selectedRequest.assigned_agent_id === String(currentUser?.id ?? "")) && (
+                <button
+                  onClick={() => {
+                    handleAccept(selectedRequest);
+                    setIsViewModalOpen(false);
+                  }}
+                  style={{ padding: "8px 16px", background: "#D97706", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                >
+                  Accept Request
+                </button>
+              )}
+              {selectedRequest.status === "accepted" && (
+                <button
+                  onClick={() => {
+                    handleOpenDispatchModal(selectedRequest);
+                    setIsViewModalOpen(false);
+                  }}
+                  style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                >
+                  Select Vehicle & Dispatch
+                </button>
+              )}
               <button
                 onClick={() => setIsViewModalOpen(false)}
                 style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
@@ -739,6 +905,14 @@ const RescueRequests = () => {
                 </span>
               </div>
               <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Assigned Rescue Agent</span>
+                <strong>{selectedRequest.assigned_agent_name || selectedRequest.assigned_agent_id || "Unassigned"}</strong>
+              </div>
+              <div>
+                <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Assigned Vehicle</span>
+                <strong>{selectedRequest.assigned_vehicle_number || selectedRequest.assigned_vehicle_id || "Unassigned"}</strong>
+              </div>
+              <div>
                 <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaClock size={10} style={{ marginRight: "4px" }} /> Created / Reported Time</span>
                 <strong>{selectedRequest.date ? formatDateTime(selectedRequest.date) : "-"}</strong>
               </div>
@@ -765,18 +939,14 @@ const RescueRequests = () => {
             )}
 
             {/* Dispatch & Team Information if available */}
-            {Boolean(selectedRequest.dispatch) && (
+            {Boolean(selectedRequest.dispatch || selectedRequest.assigned_vehicle_number || selectedRequest.assigned_agent_name) && (
               <div style={{ background: "#F5F3FF", padding: "14px 16px", borderRadius: "10px", border: "1px solid #DDD6FE" }}>
                 <strong style={{ color: "#7C3AED", fontSize: "14px", display: "block", marginBottom: "8px" }}>
                   <FaTruck size={14} style={{ marginRight: "6px" }} /> Dispatch & Field Team Info
                 </strong>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
-                  {Boolean(selectedRequest.dispatch?.assigned_vehicle_id || selectedRequest.dispatch?.vehicle_id) && (
-                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Vehicle:</span> <strong>{String(selectedRequest.dispatch?.assigned_vehicle_id || selectedRequest.dispatch?.vehicle_id)}</strong></div>
-                  )}
-                  {Boolean(selectedRequest.dispatch?.assigned_driver_id) && (
-                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Driver:</span> <strong>{String(selectedRequest.dispatch?.assigned_driver_id)}</strong></div>
-                  )}
+                  <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Assigned Agent:</span> <strong>{selectedRequest.assigned_agent_name || selectedRequest.assigned_agent_id || "Unassigned"}</strong></div>
+                  <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Assigned Vehicle:</span> <strong>{selectedRequest.assigned_vehicle_number || selectedRequest.assigned_vehicle_id || "Unassigned"}</strong></div>
                   {Boolean(selectedRequest.dispatch?.dispatched_at) && (
                     <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Dispatched At:</span> <strong>{formatDateTime(String(selectedRequest.dispatch?.dispatched_at))}</strong></div>
                   )}
@@ -799,6 +969,45 @@ const RescueRequests = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Select Vehicle & Dispatch Modal */}
+      <Modal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        title={`Dispatch Rescue Vehicle${targetDispatchRequest?.ticket_number ? ` — ${targetDispatchRequest.ticket_number}` : ""}`}
+      >
+        <form onSubmit={handleDispatchSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Select Available Rescue Vehicle *</label>
+            <select
+              required
+              value={selectedVehicleId}
+              onChange={(e) => setSelectedVehicleId(e.target.value)}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "6px", background: "#FFF" }}
+            >
+              <option value="">-- Choose a Vehicle --</option>
+              {vehicles.map((v: any) => {
+                const vId = String(v.id || v.vehicle_id || "");
+                const vNum = String(v.registration_number || v.vehicle_number || v.model || vId);
+                const vType = String(v.type || v.vehicle_type || "Ambulance");
+                return (
+                  <option key={vId} value={vId}>
+                    {vNum} ({vType}) — {v.status || "available"}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+            <button type="button" onClick={() => setIsDispatchModalOpen(false)} style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmitting || !selectedVehicleId} style={{ padding: "9px 16px", borderRadius: "8px", background: "#7C3AED", color: "#FFF", border: "none", fontWeight: 700, cursor: "pointer" }}>
+              {isSubmitting ? "Dispatching..." : "Confirm Dispatch"}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* Reject Request Confirmation Modal */}

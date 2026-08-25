@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
@@ -16,12 +16,30 @@ import {
   FaTruck,
   FaSearch,
   FaExternalLinkAlt,
+  FaTimesCircle,
+  FaEye,
+  FaBus,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
-import { useDataSync } from "../../../utils/dataSync";
+import volunteerService from "../../../services/volunteerService";
+import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
 import { formatDateTime } from "../../../utils/dateUtils";
+
+// ── Transport volunteer helpers ──
+const isTransportVol = (vol: any): boolean =>
+  String(vol?.preferred_role || vol?.volunteer_type || vol?.applied_role || "").toLowerCase().includes("transport");
+
+const isVolPending = (st?: string) => { const s = String(st || "").toLowerCase(); return s === "applied" || s === "pending" || s === "submitted"; };
+const isVolApproved = (st?: string) => { const s = String(st || "").toLowerCase(); return s === "approved" || s === "active" || s === "onboarded"; };
+
+const VolBadge = ({ status }: { status?: string }) => {
+  const s = String(status || "applied").toLowerCase();
+  const color = isVolApproved(s) ? "#047857" : isVolPending(s) ? "#D97706" : s === "rejected" ? "#DC2626" : "#64748B";
+  const bg   = isVolApproved(s) ? "#ECFDF5" : isVolPending(s) ? "#FEF3C7" : s === "rejected" ? "#FEE2E2" : "#F1F5F9";
+  return <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>{s}</span>;
+};
 
 interface RescueDashboardData {
   total_calls: number;
@@ -87,6 +105,13 @@ const RescueCoordinatorDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Transport Volunteers ──
+  const [transportVols, setTransportVols] = useState<any[]>([]);
+  const [volLoading, setVolLoading] = useState(true);
+  const [isVolSubmitting, setIsVolSubmitting] = useState(false);
+  const [selectedVol, setSelectedVol] = useState<any | null>(null);
+  const [isVolModalOpen, setIsVolModalOpen] = useState(false);
+
   const fetchCasesData = async () => {
     try {
       setLoading(true);
@@ -132,12 +157,70 @@ const RescueCoordinatorDashboard = () => {
     }
   };
 
+  const fetchTransportVols = useCallback(async () => {
+    try {
+      setVolLoading(true);
+      let res: any;
+      try { res = await volunteerService.getVolunteers(); } catch { res = []; }
+      const list: any[] = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.items) ? res.items : [];
+      const transport = list.filter(isTransportVol);
+      transport.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setTransportVols(transport);
+    } catch {
+      setTransportVols([]);
+    } finally {
+      setVolLoading(false);
+    }
+  }, []);
+
+  const handleVolApprove = async (vol: any) => {
+    const id = vol?.id || vol?.application_id || vol?.profile_id;
+    if (!id) { addToast("Invalid volunteer ID.", "error"); return; }
+    try {
+      setIsVolSubmitting(true);
+      try { await volunteerService.approveApplication(id); }
+      catch (e: any) {
+        if (e?.response?.status === 404 || e?.response?.status === 405) { await volunteerService.updateVolunteerProfile(id, { status: "active" }); }
+        else throw e;
+      }
+      addToast("Transport volunteer approved!", "success");
+      setTransportVols((prev) => prev.map((v) => v.id === id ? { ...v, status: "approved" } : v));
+      if (selectedVol?.id === id) setSelectedVol((p: any) => p ? { ...p, status: "approved" } : null);
+      fetchTransportVols();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to approve.", "error");
+    } finally { setIsVolSubmitting(false); }
+  };
+
+  const handleVolReject = async (vol: any) => {
+    const id = vol?.id || vol?.application_id || vol?.profile_id;
+    if (!id) { addToast("Invalid volunteer ID.", "error"); return; }
+    try {
+      setIsVolSubmitting(true);
+      try { await volunteerService.rejectApplication(id, "Rejected by Rescue Coordinator."); }
+      catch (e: any) {
+        if (e?.response?.status === 404 || e?.response?.status === 405) { await volunteerService.updateVolunteerProfile(id, { status: "rejected" }); }
+        else throw e;
+      }
+      addToast("Transport volunteer application rejected.", "info");
+      setTransportVols((prev) => prev.map((v) => v.id === id ? { ...v, status: "rejected" } : v));
+      if (selectedVol?.id === id) setSelectedVol((p: any) => p ? { ...p, status: "rejected" } : null);
+      fetchTransportVols();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to reject.", "error");
+    } finally { setIsVolSubmitting(false); }
+  };
+
   useEffect(() => {
     void fetchCasesData();
-  }, []);
+    void fetchTransportVols();
+  }, [fetchTransportVols]);
 
   useDataSync(() => {
     void fetchCasesData();
+    void fetchTransportVols();
   });
 
   // Calculate dynamic card counts
@@ -279,6 +362,9 @@ const RescueCoordinatorDashboard = () => {
     }
   };
 
+  const approvedTransportVols = transportVols.filter((v) => isVolApproved(v.status));
+  const pendingTransportVols = transportVols.filter((v) => isVolPending(v.status));
+
   const stats = [
     {
       title: "Total Rescue Calls",
@@ -331,6 +417,13 @@ const RescueCoordinatorDashboard = () => {
         const el = document.getElementById("rescue-table-section");
         if (el) el.scrollIntoView({ behavior: "smooth" });
       },
+    },
+    {
+      title: "Transport Volunteers",
+      value: volLoading ? "..." : String(transportVols.length),
+      trend: `${approvedTransportVols.length} Available`,
+      color: "#7C3AED",
+      icon: <FaBus />,
     },
   ];
 
@@ -713,6 +806,131 @@ const RescueCoordinatorDashboard = () => {
                 </div>
               </div>
             ) : null}
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Transport Volunteers Section ── */}
+      <div className="soft-card" style={{ padding: "20px", marginTop: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
+              <FaBus style={{ color: "#7C3AED" }} /> Transport Volunteer Pool
+            </h3>
+            <span style={{ fontSize: "12px", color: "#64748B" }}>
+              {pendingTransportVols.length} pending · {approvedTransportVols.length} approved · {transportVols.length} total
+              {" "}·{" "}<em style={{ color: "#7C3AED" }}>Transport volunteers are NOT Rescue Agents — they remain in the volunteer pool</em>
+            </span>
+          </div>
+          {volLoading && <span style={{ fontSize: "12px", color: "#7C3AED", fontWeight: 600 }}>Loading volunteers...</span>}
+        </div>
+
+        <DataTable
+          columns={[
+            {
+              key: "name",
+              title: "Volunteer Name & Contact",
+              render: (_: unknown, row: any) => (
+                <div>
+                  <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.user?.full_name || row.full_name || row.emergency_contact_name || "Volunteer"}</div>
+                  <div style={{ fontSize: "12px", color: "#64748B" }}>{row.user?.email || row.email || `ID: ${String(row.id || "").slice(0, 8)}`}</div>
+                </div>
+              ),
+            },
+            {
+              key: "availability",
+              title: "Availability",
+              render: (v: string) => <span style={{ color: "#475569", fontSize: "13px" }}>{v || "Flexible"}</span>,
+            },
+            {
+              key: "skills",
+              title: "Skills",
+              render: (_: unknown, row: any) => <span style={{ color: "#475569", fontSize: "12px" }}>{row.skills || row.animal_handling_experience || "—"}</span>,
+            },
+            {
+              key: "created_at",
+              title: "Applied",
+              render: (v: string) => <span style={{ fontSize: "12px", color: "#64748B" }}>{v ? formatDateTime(v) : "—"}</span>,
+            },
+            {
+              key: "status",
+              title: "Status",
+              render: (v: string) => <VolBadge status={v} />,
+            },
+          ]}
+          data={transportVols}
+          loading={volLoading}
+          emptyMessage="No Transport volunteer applications found."
+          renderRowActions={(row) => (
+            <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => { setSelectedVol(row); setIsVolModalOpen(true); }}
+                style={{ padding: "4px 10px", background: "#7C3AED", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+              >
+                <FaEye size={11} /> View
+              </button>
+              {isVolPending(row.status) && (
+                <>
+                  <button
+                    disabled={isVolSubmitting}
+                    onClick={() => handleVolApprove(row)}
+                    style={{ padding: "4px 10px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <FaCheckCircle size={11} /> Approve
+                  </button>
+                  <button
+                    disabled={isVolSubmitting}
+                    onClick={() => handleVolReject(row)}
+                    style={{ padding: "4px 10px", background: "#EF4444", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <FaTimesCircle size={11} /> Reject
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          onRowClick={(row) => { setSelectedVol(row); setIsVolModalOpen(true); }}
+        />
+      </div>
+
+      {/* Transport Volunteer Details Modal */}
+      <Modal
+        isOpen={isVolModalOpen}
+        onClose={() => { setIsVolModalOpen(false); setSelectedVol(null); }}
+        title="Transport Volunteer — Details"
+        size="md"
+        footer={
+          selectedVol ? (
+            <>
+              {isVolPending(selectedVol.status) && (
+                <>
+                  <button disabled={isVolSubmitting} onClick={() => handleVolApprove(selectedVol)} style={{ padding: "8px 16px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Approve</button>
+                  <button disabled={isVolSubmitting} onClick={() => handleVolReject(selectedVol)} style={{ padding: "8px 16px", background: "#EF4444", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Reject</button>
+                </>
+              )}
+              <button onClick={() => { setIsVolModalOpen(false); setSelectedVol(null); }} style={{ padding: "8px 16px", background: "#64748B", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Close</button>
+            </>
+          ) : null
+        }
+      >
+        {selectedVol && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px" }}>
+            <div style={{ padding: "10px 14px", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: "8px", fontSize: "12px", color: "#7C3AED", fontWeight: 600 }}>
+              ℹ️ This is a Transport Volunteer — not a Rescue Agent system account. They are part of the available volunteer pool.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div><strong style={{ color: "#475569" }}>Name:</strong><br />{selectedVol.user?.full_name || selectedVol.full_name || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Email:</strong><br />{selectedVol.user?.email || selectedVol.email || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Phone:</strong><br />{selectedVol.user?.phone || selectedVol.phone || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Volunteer Type:</strong><br /><span style={{ color: "#7C3AED", fontWeight: 700 }}>{selectedVol.preferred_role || "Transport"}</span></div>
+              <div><strong style={{ color: "#475569" }}>Availability:</strong><br />{selectedVol.availability || "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Status:</strong><br /><VolBadge status={selectedVol.status} /></div>
+              <div><strong style={{ color: "#475569" }}>Applied:</strong><br />{selectedVol.created_at ? formatDateTime(selectedVol.created_at) : "—"}</div>
+              <div><strong style={{ color: "#475569" }}>Emergency Contact:</strong><br />{selectedVol.emergency_contact_name || "—"} {selectedVol.emergency_contact_phone ? `(${selectedVol.emergency_contact_phone})` : ""}</div>
+            </div>
+            {selectedVol.skills && <div><strong style={{ color: "#475569" }}>Skills:</strong><br />{selectedVol.skills}</div>}
+            {selectedVol.animal_handling_experience && <div><strong style={{ color: "#475569" }}>Experience:</strong><br />{selectedVol.animal_handling_experience}</div>}
+            {selectedVol.notes && <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}><strong style={{ color: "#475569" }}>Notes:</strong><br />{selectedVol.notes}</div>}
           </div>
         )}
       </Modal>

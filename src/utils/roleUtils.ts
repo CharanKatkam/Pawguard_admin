@@ -13,6 +13,7 @@ export const ALLOWED_INTERNAL_ROLES: UserRole[] = [
   "volunteer_coordinator",
   "inventory_manager",
   "finance_user",
+  "volunteer",
 ];
 
 /**
@@ -65,6 +66,14 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
   if (!str) return null;
 
   const lower = String(str).toLowerCase().trim();
+
+  // Volunteer check before everything else to prevent it from matching coordinator or being rejected as public-facing
+  if (lower.includes("volunteer")) {
+    if (lower.includes("coordinator")) {
+      return "volunteer_coordinator";
+    }
+    return "volunteer";
+  }
 
   // 1. Super Admin (Checked first to cover all variations)
   if (
@@ -235,6 +244,8 @@ export const getDashboardPathForRole = (role?: string | UserRole | null): string
       return "/dashboard/foster-coordinator";
     case "volunteer_coordinator":
       return "/dashboard/volunteer-coordinator";
+    case "volunteer":
+      return "/dashboard/volunteer";
     case "inventory_manager":
       return "/dashboard/inventory-manager";
     case "finance_user":
@@ -254,6 +265,7 @@ export const ROLE_DASHBOARD_PATHS: Array<{ path: string; role: UserRole }> = [
   { path: "/dashboard/adoption-coordinator", role: "adoption_coordinator" },
   { path: "/dashboard/foster-coordinator", role: "foster_coordinator" },
   { path: "/dashboard/volunteer-coordinator", role: "volunteer_coordinator" },
+  { path: "/dashboard/volunteer", role: "volunteer" },
   { path: "/dashboard/inventory-manager", role: "inventory_manager" },
   { path: "/dashboard/finance", role: "finance_user" },
 ];
@@ -344,6 +356,8 @@ export const getRoleTitle = (role?: string | UserRole | null): string => {
       return "Foster Coordinator";
     case "volunteer_coordinator":
       return "Volunteer Coordinator";
+    case "volunteer":
+      return "Volunteer";
     case "inventory_manager":
       return "Inventory Manager";
     case "finance_user":
@@ -548,6 +562,11 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
         { name: "Volunteers Directory", path: "/volunteers", iconType: "volunteers" },
         { name: "Schedules & Reports", path: "/reports", iconType: "tasks" },
+      ];
+
+    case "volunteer":
+      return [
+        { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
       ];
 
     case "inventory_manager":

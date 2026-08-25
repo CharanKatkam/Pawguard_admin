@@ -62,6 +62,11 @@ export const rescueService = {
       payload.severity = String(data.severity).toLowerCase();
     }
     if (typeof data.is_urgent === "boolean") payload.is_urgent = data.is_urgent;
+    if (data.assigned_agent_id) payload.assigned_agent_id = data.assigned_agent_id;
+    if (data.assigned_agent_name) payload.assigned_agent_name = data.assigned_agent_name;
+    if (data.assigned_vehicle_id) payload.assigned_vehicle_id = data.assigned_vehicle_id;
+    if (data.assigned_vehicle_number) payload.assigned_vehicle_number = data.assigned_vehicle_number;
+
     const response = await api.post(`/rescue/${requestId}/verify`, payload);
     await publishActionEvent({
       module: "rescue",
@@ -69,6 +74,23 @@ export const rescueService = {
       title: "Rescue Incident Updated",
       message: `Rescue case ${requestId} updated (${payload.severity || "no change"} severity${typeof payload.is_urgent === "boolean" ? `, urgent: ${payload.is_urgent}` : ""}).`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator"],
+    });
+    return response.data;
+  },
+
+  acceptRescueRequest: async (requestId: string, agentId: string, agentName?: string) => {
+    const payload: Record<string, unknown> = {
+      status: "accepted",
+      assigned_agent_id: agentId,
+      assigned_agent_name: agentName || agentId,
+    };
+    const response = await api.post(`/rescue/${requestId}/verify`, payload);
+    await publishActionEvent({
+      module: "rescue",
+      action: "approve",
+      title: "Rescue Request Accepted",
+      message: `Rescue request ${requestId} accepted by field agent ${agentName || agentId}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });
     return response.data;
   },

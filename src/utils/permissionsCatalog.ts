@@ -583,4 +583,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ...perm("reports", "view", "export"),
     ...perm("notifications", "view"),
   ],
+  volunteer: [
+    "view_dashboard",
+    "view_volunteers",
+  ],
 };

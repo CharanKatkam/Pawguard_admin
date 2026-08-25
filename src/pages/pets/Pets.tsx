@@ -37,7 +37,6 @@ import DogLifecycleTimelineModal from "../../components/pets/DogLifecycleTimelin
 
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
 const GENDERS = ["male", "female", "unknown"];
-const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
 
 export const getDogPhotoUrl = (dog: any): string => {
   if (!dog) return "";
@@ -990,9 +989,6 @@ const Pets = () => {
   };
 
   const totalRegisteredCount = (globalTotalCount && globalTotalCount > allDogs.length) ? globalTotalCount : allDogs.length;
-  const inShelterCount = allDogs.filter((dog) =>
-    IN_SHELTER_STATUSES.includes(String(dog.status || "").toLowerCase())
-  ).length;
   const adoptableCount = allDogs.filter((dog) => Boolean(dog.is_adoptable)).length;
 
   const isCardsLoading = loadingAll && allDogs.length === 0 && (globalTotalCount === null || globalTotalCount === 0);
@@ -1007,20 +1003,6 @@ const Pets = () => {
       selected: !statusFilter && !adoptableOnly,
       onClick: () => {
         setStatusFilter("");
-        setAdoptableOnly(false);
-        setPage(1);
-        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
-      },
-    },
-    {
-      title: "Dogs in Shelter",
-      value: isCardsLoading ? "..." : inShelterCount,
-      trend: "Currently Sheltered",
-      color: "#EF4444",
-      icon: <FaAmbulance />,
-      selected: statusFilter === "shelter",
-      onClick: () => {
-        setStatusFilter("shelter");
         setAdoptableOnly(false);
         setPage(1);
         document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
