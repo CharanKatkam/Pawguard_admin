@@ -79,19 +79,23 @@ export const rescueService = {
   },
 
   acceptRescueRequest: async (requestId: string, agentId: string, agentName?: string) => {
-    const payload: Record<string, unknown> = {
-      status: "accepted",
-      assigned_agent_id: agentId,
-      assigned_agent_name: agentName || agentId,
-    };
-    const response = await api.post(`/rescue/${requestId}/verify`, payload);
+    // Instead of calling verify with status: "accepted" (which fails validation),
+    // we assign the coordinator. The frontend maps verified + assigned coordinator to accepted.
+    const response = await api.post(`/rescue/${requestId}/assign-coordinator`, {
+      coordinator_id: agentId,
+    });
     await publishActionEvent({
       module: "rescue",
       action: "approve",
       title: "Rescue Request Accepted",
-      message: `Rescue request ${requestId} accepted by field agent ${agentName || agentId}.`,
+      message: `Rescue request ${requestId} accepted by coordinator/agent ${agentName || agentId}.`,
       targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
     });
+    return response.data;
+  },
+
+  acceptDispatch: async (requestId: string) => {
+    const response = await api.post(`/rescue/${requestId}/accept`);
     return response.data;
   },
 
@@ -261,6 +265,31 @@ export const rescueService = {
     });
     return response.data;
   },
+
+  startTracking: async (requestId: string) => {
+    const response = await api.post(`/rescue/${requestId}/tracking/start`);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "GPS Tracking Started",
+      message: `GPS tracking started for rescue case ${requestId}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
+  stopTracking: async (requestId: string) => {
+    const response = await api.post(`/rescue/${requestId}/tracking/stop`);
+    await publishActionEvent({
+      module: "rescue",
+      action: "update",
+      title: "GPS Tracking Stopped",
+      message: `GPS tracking stopped for rescue case ${requestId}.`,
+      targetRoles: ["super_admin", "rescue_centre_admin", "rescue_coordinator", "rescue_agent"],
+    });
+    return response.data;
+  },
+
 
   // POST /rescue/{request_id}/escalate - RescueEscalateCreate (PRR 3.3)
   escalateRescue: async (requestId: string, escalationType: string, notes?: string) => {

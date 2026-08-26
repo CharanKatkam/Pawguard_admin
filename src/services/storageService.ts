@@ -49,6 +49,69 @@ export const storageService = {
   },
 
   /**
+   * Retrieve all files in the storage system (admin query).
+   */
+  getStoredFiles: async (params?: Record<string, unknown>): Promise<any[]> => {
+    const response = await api.get("/storage", { params });
+    const body = response.data;
+    const data = body?.data || body?.items || body || [];
+    return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * List confirmed storage files associated with a specific entity.
+   */
+  getFilesByEntity: async (entityType: string, entityId: string): Promise<any[]> => {
+    const response = await api.get(`/storage/entity/${entityType}/${entityId}`);
+    const body = response.data;
+    const data = body?.data || body || [];
+    return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * Fetch all storage files and generate a map of dogId to latest confirmed photo download URL.
+   */
+  buildPhotoMapForDogs: async (): Promise<Record<string, string>> => {
+    try {
+      const response = await api.get("/storage", { params: { page_size: 200 } });
+      const body = response.data;
+      const files = body?.data || body?.items || body || [];
+      const confirmed = Array.isArray(files) 
+        ? files.filter((f: any) => f.entity_type === "dog_profile" && f.is_uploaded)
+        : [];
+        
+      const latestFileMap: Record<string, any> = {};
+      confirmed.forEach((f: any) => {
+        const dId = f.entity_id;
+        if (!dId) return;
+        if (!latestFileMap[dId] || new Date(f.created_at).getTime() > new Date(latestFileMap[dId].created_at).getTime()) {
+          latestFileMap[dId] = f;
+        }
+      });
+
+      const resolvedMap: Record<string, string> = {};
+      await Promise.all(
+        Object.keys(latestFileMap).map(async (dId) => {
+          const file = latestFileMap[dId];
+          try {
+            const dlResponse = await api.get(`/storage/${file.id}/download-url`);
+            const dlData = dlResponse.data?.data || dlResponse.data;
+            if (dlData && dlData.download_url) {
+              resolvedMap[dId] = dlData.download_url;
+            }
+          } catch (err) {
+            console.warn(`Failed to get download URL for file ${file.id}:`, err);
+          }
+        })
+      );
+      return resolvedMap;
+    } catch (err) {
+      console.warn("Failed to build dog photo map:", err);
+      return {};
+    }
+  },
+
+  /**
    * Complete end-to-end file upload workflow:
    * 1. Get presigned upload URL from backend
    * 2. PUT binary file directly to presigned S3/Supabase URL

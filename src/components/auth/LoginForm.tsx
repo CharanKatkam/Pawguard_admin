@@ -139,10 +139,10 @@ const LoginForm = () => {
             background: "#FEF2F2",
             border: "1px solid #FCA5A5",
             color: "#991B1B",
-            padding: "12px 14px",
-            borderRadius: "10px",
-            fontSize: "13px",
-            marginBottom: "20px",
+            padding: "8px 12px",
+            borderRadius: "8px",
+            fontSize: "12.5px",
+            marginBottom: "12px",
             display: "flex",
             alignItems: "center",
             gap: "8px",
@@ -153,7 +153,7 @@ const LoginForm = () => {
         </div>
       )}
 
-      <div style={{ marginBottom: "20px" }}>
+      <div style={{ marginBottom: "12px" }}>
         <label htmlFor="email">Email Address</label>
         <input
           id="email"
@@ -165,7 +165,7 @@ const LoginForm = () => {
         />
       </div>
 
-      <div style={{ marginBottom: "16px" }}>
+      <div style={{ marginBottom: "12px" }}>
         <label htmlFor="password">Password</label>
         <PasswordInput
           id="password"
@@ -175,7 +175,7 @@ const LoginForm = () => {
         />
       </div>
 
-      <div className="login-options" style={{ marginBottom: "24px" }}>
+      <div className="login-options" style={{ marginBottom: "16px" }}>
         <label htmlFor="remember">
           <input
             id="remember"

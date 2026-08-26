@@ -31,6 +31,8 @@ import petService from "../../../services/petService";
 import rescueService from "../../../services/rescueService";
 import inventoryService from "../../../services/inventoryService";
 import volunteerService from "../../../services/volunteerService";
+import storageService from "../../../services/storageService";
+import { getDogPhotoUrl } from "../../pets/Pets";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { generateQrDataUrl, generateQrBlob } from "../../../utils/qrGenerator";
 import { formatDateTime } from "../../../utils/dateUtils";
@@ -87,6 +89,30 @@ const triggerDownload = (url: string, filename: string) => {
   link.remove();
 };
 
+const formatDateOnly = (dStr?: string) => {
+  if (!dStr) return "-";
+  try {
+    const d = new Date(dStr);
+    if (isNaN(d.getTime())) return dStr;
+    return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+  } catch {
+    return dStr;
+  }
+};
+
+const getRescueAgentName = (c: any) => {
+  if (!c) return "";
+  if (c.dispatch?.driver_name) return c.dispatch.driver_name;
+  if (c.dispatch?.driver?.full_name) return c.dispatch.driver.full_name;
+  if (Array.isArray(c.dispatch?.agents) && c.dispatch.agents.length > 0) {
+    const names = c.dispatch.agents
+      .map((a: any) => a.agent_name || a.agent?.full_name || "")
+      .filter(Boolean);
+    if (names.length > 0) return names.join(", ");
+  }
+  return "";
+};
+
 const ShelterManagerDashboard = () => {
   const navigate = useNavigate();
   const { addToast } = useToast();
@@ -97,6 +123,10 @@ const ShelterManagerDashboard = () => {
   const [kennelRows, setKennelRows] = useState<any[]>([]);
   const [facilities, setFacilities] = useState<any[]>([]);
   const [incomingRescues, setIncomingRescues] = useState<any[]>([]);
+  const [allRescues, setAllRescues] = useState<any[]>([]);
+  const [selectedRescueForDetails, setSelectedRescueForDetails] = useState<any>(null);
+  const [isRescueDetailsModalOpen, setIsRescueDetailsModalOpen] = useState(false);
+  const [activeRescueForIntake, setActiveRescueForIntake] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
@@ -146,6 +176,16 @@ const ShelterManagerDashboard = () => {
   const [petForm, setPetForm] = useState({ ...emptyPetForm });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Photo uploads state
+  const [intakePhotoFile, setIntakePhotoFile] = useState<File | null>(null);
+  const [intakePhotoUrl, setIntakePhotoUrl] = useState<string>("");
+  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
+  const [editPhotoUrl, setEditPhotoUrl] = useState<string>("");
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  // Backend-persisted photo URL map: dogId → presigned download URL
+  const [dogPhotoMap, setDogPhotoMap] = useState<Record<string, string>>({});
+
   // Cage Allocation State
   const [cageSections, setCageSections] = useState<any[]>([]);
   const [cageKennels, setCageKennels] = useState<any[]>([]);
@@ -180,6 +220,8 @@ const ShelterManagerDashboard = () => {
       ...dog,
       registration_number: dog.registration_number || dog.id || "-",
       rescue_id: dog.rescue_case_id || dog.rescue_id || dog.rescue_case?.id || "-",
+      // Preserve raw kennel_id UUID so the table can cross-reference kennel name
+      kennel_id: dog.kennel_id || null,
       name: dog.name || "-",
       breed: dog.breed || "-",
       gender: dog.gender || "",
@@ -205,6 +247,15 @@ const ShelterManagerDashboard = () => {
     status: k.sanitation_state || k.sanitation || "",
   });
 
+  // Resolve a kennel UUID → human-readable identifier (e.g. "K-01") from kennelRows
+  const getKennelLabel = (kennelId: string | null | undefined): string => {
+    if (!kennelId) return "Unassigned";
+    const found = kennelRows.find((kr: any) => String(kr.id) === String(kennelId));
+    if (found) return found.cageNo || found.id;
+    // Fallback: show truncated UUID so we know it's set but not yet loaded
+    return `Kennel (${String(kennelId).slice(0, 8)}…)`;
+  };
+
   const fetchDashboard = async () => {
     try {
       setLoading(true);
@@ -222,6 +273,7 @@ const ShelterManagerDashboard = () => {
 
       setFacilities(facList);
       setDogs(dogList);
+      setAllRescues(rescueCases);
 
       // Filter incoming rescued dogs ready for intake
       const incoming = rescueCases.filter((c: any) => {
@@ -341,6 +393,40 @@ const ShelterManagerDashboard = () => {
     } finally { setIsShelVolSubmitting(false); }
   };
 
+  /**
+   * Load the persistent photo URL map from backend storage for all dogs.
+   */
+  const loadDogPhotoMap = async () => {
+    try {
+      const map = await storageService.buildPhotoMapForDogs();
+      if (Object.keys(map).length > 0) {
+        setDogPhotoMap(map);
+      }
+    } catch (err) {
+      console.warn("Could not load dog photo map:", err);
+    }
+  };
+
+  /**
+   * Refresh the photo URL for a single dog in the dogPhotoMap.
+   * Called after a successful photo upload so the profile refreshes immediately.
+   */
+  const refreshDogPhotoInMap = async (dId: string) => {
+    try {
+      const files = await storageService.getFilesByEntity("dog_profile", dId);
+      const confirmed = files.filter((f: any) => f.is_uploaded);
+      if (confirmed.length === 0) return;
+      confirmed.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latest = confirmed[0];
+      const dlRes = await storageService.getDownloadUrl(latest.id);
+      if (dlRes?.download_url) {
+        setDogPhotoMap((prev) => ({ ...prev, [dId]: dlRes.download_url }));
+      }
+    } catch (err) {
+      console.warn(`Could not refresh photo for dog ${dId}:`, err);
+    }
+  };
+
   useDataSync(() => {
     fetchDashboard();
     fetchShelterVols();
@@ -349,10 +435,14 @@ const ShelterManagerDashboard = () => {
   useEffect(() => {
     fetchDashboard();
     fetchShelterVols();
+    loadDogPhotoMap();
   }, [fetchShelterVols]);
 
   // Handlers for Rescued Dog Registration
   const handleOpenReceiveRescue = (caseItem: any) => {
+    setActiveRescueForIntake(caseItem);
+    setIntakePhotoFile(null);
+    setIntakePhotoUrl("");
     setPetForm({
       ...emptyPetForm,
       name: caseItem.animal_type ? `Rescued ${caseItem.animal_type}` : `Rescued Dog (${caseItem.ticket_number || caseItem.id})`,
@@ -376,39 +466,82 @@ const ShelterManagerDashboard = () => {
     }
     try {
       setIsSubmitting(true);
-      const createdRes = await petService.createPet(
-        cleanPayload({
-          name: petForm.name,
-          photo_url: petForm.photo_url,
-          breed: petForm.breed,
-          gender: petForm.gender,
-          estimated_age: petForm.estimated_age,
-          age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
-          weight: petForm.weight ? Number(petForm.weight) : undefined,
-          color: petForm.color,
-          rescue_case_id: petForm.rescue_case_id || undefined,
-          rescue_date: petForm.rescue_date || undefined,
-          rescue_location: petForm.rescue_location || undefined,
-          shelter_id: petForm.shelter_id || undefined,
-          intake_condition: petForm.intake_condition || undefined,
-          medical_notes: petForm.medical_notes || undefined,
-          is_adoptable: petForm.is_adoptable,
-          status: petForm.status || "shelter",
-        })
-      );
+      
+      let photoUrl = petForm.photo_url;
+      const existingDogProfileId = activeRescueForIntake?.dog_profile_id;
 
-      const createdDog = createdRes?.data || createdRes;
-      const createdId = dogId(createdDog) || createdDog?.id;
+      // If there is an existing dog profile ID (from admitted case), upload photo first
+      if (intakePhotoFile && existingDogProfileId) {
+        photoUrl = await storageService.uploadFile(intakePhotoFile, {
+          folder: "dogs",
+          entity_type: "dog_profile",
+          entity_id: existingDogProfileId,
+        });
+      }
+
+      const payload = cleanPayload({
+        name: petForm.name,
+        photo_url: photoUrl || undefined,
+        image_url: photoUrl || undefined,
+        image_urls: photoUrl ? [photoUrl] : undefined,
+        photo_gallery_urls: photoUrl ? [photoUrl] : undefined,
+        breed: petForm.breed,
+        gender: petForm.gender,
+        estimated_age: petForm.estimated_age,
+        age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
+        weight: petForm.weight ? Number(petForm.weight) : undefined,
+        color: petForm.color,
+        rescue_case_id: petForm.rescue_case_id || undefined,
+        rescue_date: petForm.rescue_date || undefined,
+        rescue_location: petForm.rescue_location || undefined,
+        shelter_id: petForm.shelter_id || undefined,
+        shelter_facility_id: petForm.shelter_id || undefined,
+        intake_condition: petForm.intake_condition || undefined,
+        medical_notes: petForm.medical_notes || undefined,
+        is_adoptable: petForm.is_adoptable,
+        status: petForm.status || "shelter",
+      });
+
+      // If the rescue case already has an auto-created dog profile (from /admitted),
+      // update it instead of creating a duplicate record.
+      let resultDog: any;
+      if (existingDogProfileId) {
+        const updRes = await petService.updatePet(existingDogProfileId, payload);
+        resultDog = updRes?.data || updRes;
+      } else {
+        const createdRes = await petService.createPet(payload);
+        resultDog = createdRes?.data || createdRes;
+
+        const resultId = dogId(resultDog) || resultDog?.id;
+        // If there was no existing ID initially, we upload now and update the created dog
+        if (intakePhotoFile && resultId) {
+          const uploadedUrl = await storageService.uploadFile(intakePhotoFile, {
+            folder: "dogs",
+            entity_type: "dog_profile",
+            entity_id: resultId,
+          });
+          const updateRes = await petService.updatePet(resultId, {
+            photo_url: uploadedUrl,
+            image_url: uploadedUrl,
+            image_urls: [uploadedUrl],
+            photo_gallery_urls: [uploadedUrl],
+          });
+          resultDog = updateRes?.data || updateRes;
+        }
+      }
+
+      const resultId = dogId(resultDog) || resultDog?.id;
 
       addToast(`Dog "${petForm.name}" registered into shelter care successfully!`, "success");
       setIsRegisterModalOpen(false);
+      setActiveRescueForIntake(null);
       setPetForm({ ...emptyPetForm });
       fetchDashboard();
       notifyDataChanged();
 
       // Automatically prompt for Safety Tag Provisioning
-      if (createdId && createdDog) {
-        openQrModal(formatDog(createdDog));
+      if (resultId && resultDog) {
+        openQrModal(formatDog(resultDog));
       }
     } catch (err: any) {
       const msg = err?.response?.data?.error?.message || err?.response?.data?.message || "Failed to register dog.";
@@ -418,14 +551,23 @@ const ShelterManagerDashboard = () => {
     }
   };
 
-  // Handlers for Edit Dog
   const handleEditDogSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = dogId(selectedDog);
     if (!id) return;
     try {
       setIsSubmitting(true);
-      await petService.updatePet(id, cleanPayload({
+      
+      let photoUrl = petForm.photo_url || getDogPhotoUrl(selectedDog, dogPhotoMap);
+      if (editPhotoFile) {
+        photoUrl = await storageService.uploadFile(editPhotoFile, {
+          folder: "dogs",
+          entity_type: "dog_profile",
+          entity_id: id,
+        });
+      }
+
+      const payload = cleanPayload({
         name: petForm.name,
         breed: petForm.breed,
         gender: petForm.gender,
@@ -435,10 +577,35 @@ const ShelterManagerDashboard = () => {
         color: petForm.color,
         status: petForm.status,
         is_adoptable: petForm.is_adoptable,
-      }));
+        photo_url: photoUrl || undefined,
+        image_url: photoUrl || undefined,
+        image_urls: photoUrl ? [photoUrl] : undefined,
+        photo_gallery_urls: photoUrl ? [photoUrl] : undefined,
+      });
+      const res = await petService.updatePet(id, payload);
+      const updatedDog = res?.data || res;
+
       addToast(`Dog profile for "${petForm.name}" updated!`, "success");
       setIsEditModalOpen(false);
+      
+      // Update local state immediately
+      setDogs((prev) =>
+        prev.map((d) => (dogId(d) === id ? formatDog({ ...d, ...updatedDog }) : d))
+      );
+
+      // If the selectedDog Master modal is currently open and viewing this dog, update it
+      setSelectedDog((prev: any) =>
+        prev && dogId(prev) === id ? formatDog({ ...prev, ...updatedDog }) : prev
+      );
+
       setSelectedDog(null);
+
+      // If a new photo was uploaded, update the photo map for instant display
+      if (editPhotoFile && photoUrl) {
+        setDogPhotoMap((prev) => ({ ...prev, [id]: photoUrl }));
+        await refreshDogPhotoInMap(id);
+      }
+
       fetchDashboard();
       notifyDataChanged();
     } catch (err: any) {
@@ -722,6 +889,23 @@ const ShelterManagerDashboard = () => {
       await shelterService.assignDogToKennel(cageSel.kennelId, cageSel.dogId);
       addToast("Dog successfully assigned to cage/kennel!", "success");
       setIsCageModalOpen(false);
+
+      // Immediately update the local dogs state so the table/modal reflect the
+      // new kennel_id without waiting for a full dashboard re-fetch.
+      setDogs((prev: any[]) =>
+        prev.map((d: any) =>
+          dogId(d) === cageSel.dogId
+            ? { ...d, kennel_id: cageSel.kennelId }
+            : d
+        )
+      );
+      // Also refresh if selectedDog is the same dog
+      setSelectedDog((prev: any) =>
+        prev && dogId(prev) === cageSel.dogId
+          ? { ...prev, kennel_id: cageSel.kennelId }
+          : prev
+      );
+
       fetchDashboard();
       notifyDataChanged();
     } catch (err: any) {
@@ -805,9 +989,18 @@ const ShelterManagerDashboard = () => {
       key: "name",
       title: "Dog Name & ID",
       render: (_val: any, row: any) => (
-        <div>
-          <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.name}</div>
-          <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>ID: {row.registration_number}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#E2E8F0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", overflow: "hidden", flexShrink: 0 }}>
+            {getDogPhotoUrl(row, dogPhotoMap) ? (
+              <img src={getDogPhotoUrl(row, dogPhotoMap)} alt={row.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              "🐶"
+            )}
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.name}</div>
+            <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>ID: {row.registration_number}</div>
+          </div>
         </div>
       ),
     },
@@ -833,6 +1026,29 @@ const ShelterManagerDashboard = () => {
       ),
     },
     { key: "intake_date", title: "Intake Date" },
+    {
+      key: "kennel_id",
+      title: "Cage / Kennel",
+      render: (_val: any, row: any) => {
+        const label = getKennelLabel(row.kennel_id);
+        const isAssigned = !!row.kennel_id;
+        return (
+          <span
+            style={{
+              padding: "3px 10px",
+              borderRadius: "999px",
+              fontSize: "11px",
+              fontWeight: 800,
+              background: isAssigned ? "#ECFDF5" : "#F1F5F9",
+              color: isAssigned ? "#047857" : "#64748B",
+              border: isAssigned ? "1px solid #6EE7B7" : "1px solid #CBD5E1",
+            }}
+          >
+            {isAssigned ? `🛏 ${label}` : "Unassigned"}
+          </span>
+        );
+      },
+    },
     {
       key: "medical_status",
       title: "Medical Status",
@@ -966,18 +1182,19 @@ const ShelterManagerDashboard = () => {
                     <span style={{ fontWeight: 800, color: "#2563EB", fontFamily: "monospace", fontSize: "13px" }}>
                       Ticket #{c.ticket_number || c.id}
                     </span>
-                    <span style={{ padding: "2px 8px", borderRadius: "999px", background: "#FEF3C7", color: "#92400E", fontSize: "11px", fontWeight: 700 }}>
-                      Handed Over
+                    <span style={{ padding: "2px 8px", borderRadius: "999px", background: "#FEF3C7", color: "#92400E", fontSize: "11px", fontWeight: 700, textTransform: "capitalize" }}>
+                      {c.status || "Handed Over"}
                     </span>
                   </div>
-                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#0F172A", marginTop: "6px" }}>
-                    {c.animal_type ? `Rescued ${c.animal_type}` : "Rescued Dog"} ({c.animal_count ?? 1} animal)
+                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#0F172A", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    🐕 {c.animal_type ? `Rescued ${c.animal_type}` : "Rescued Dog"} ({c.animal_count ?? 1} animal)
                   </div>
-                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px" }}>
-                    <strong>Location:</strong> {c.location_address || "Specified Location"}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-                    <strong>Date:</strong> {c.created_at ? String(c.created_at).slice(0, 10) : "Today"}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "4px", fontSize: "12px", color: "#475569", marginTop: "8px" }}>
+                    <div><strong>Rescue Date:</strong> {formatDateOnly(c.created_at)}</div>
+                    <div><strong>Rescue Location:</strong> {c.location_address || "-"}</div>
+                    <div><strong>Reported By:</strong> {c.reporter_name || "-"}</div>
+                    <div><strong>Rescue Agent:</strong> {getRescueAgentName(c) || "-"}</div>
+                    <div><strong>Priority:</strong> <span style={{ textTransform: "capitalize" }}>{c.severity || "-"}</span></div>
                   </div>
                   {c.description && (
                     <div style={{ fontSize: "12px", color: "#475569", marginTop: "6px", background: "#F8FAFC", padding: "8px", borderRadius: "6px", fontStyle: "italic" }}>
@@ -986,13 +1203,22 @@ const ShelterManagerDashboard = () => {
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenReceiveRescue(c)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
-                >
-                  <FaPaw /> Receive & Register Dog
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedRescueForDetails(c); setIsRescueDetailsModalOpen(true); }}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontWeight: 600, fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                  >
+                    View Rescue Details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReceiveRescue(c)}
+                    style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                  >
+                    <FaPaw /> Receive & Register Dog
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1037,6 +1263,7 @@ const ShelterManagerDashboard = () => {
           data={filteredDogs}
           loading={loading}
           emptyMessage="No dogs registered in shelter care yet."
+          onRowClick={(row: any) => { setSelectedDog(row); setIsViewMasterModalOpen(true); }}
           renderRowActions={(row: any) => (
             <div style={{ display: "flex", gap: "6px" }}>
               <button
@@ -1053,6 +1280,8 @@ const ShelterManagerDashboard = () => {
                 title="Edit Dog Record"
                 onClick={() => {
                   setSelectedDog(row);
+                  setEditPhotoFile(null);
+                  setEditPhotoUrl("");
                   setPetForm({
                     ...emptyPetForm,
                     name: row.name || "",
@@ -1064,6 +1293,7 @@ const ShelterManagerDashboard = () => {
                     color: row.color || "",
                     status: row.status || "shelter",
                     is_adoptable: !!row.is_adoptable,
+                    photo_url: getDogPhotoUrl(row, dogPhotoMap) || "",
                   });
                   setIsEditModalOpen(true);
                 }}
@@ -1094,17 +1324,17 @@ const ShelterManagerDashboard = () => {
 
               <button
                 type="button"
-                title="Allocate Cage"
+                title={row.kennel_id ? "Reassign Cage" : "Allocate Cage"}
                 onClick={() => openCageModal(row)}
                 style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#2563EB", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
               >
-                <FaBed /> Allocate Cage
+                <FaBed /> {row.kennel_id ? "Reassign Cage" : "Allocate Cage"}
               </button>
 
               <button
                 type="button"
                 title="Medical Records"
-                onClick={() => navigate(`/medical?dogId=${dogId(row)}`)}
+                onClick={() => navigate(`/medical-records?dogId=${dogId(row)}`)}
                 style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#64748B", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
               >
                 <FaStethoscope color="#DC2626" /> Medical
@@ -1132,6 +1362,59 @@ const ShelterManagerDashboard = () => {
         />
       </div>
 
+      {/* RESCUE CASE DETAILS READ-ONLY MODAL */}
+      <Modal
+        isOpen={isRescueDetailsModalOpen}
+        onClose={() => { setIsRescueDetailsModalOpen(false); setSelectedRescueForDetails(null); }}
+        title={`Rescue Details — ${selectedRescueForDetails?.ticket_number || selectedRescueForDetails?.id || ""}`}
+        maxWidth="600px"
+      >
+        {selectedRescueForDetails && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px", color: "#334155" }}>
+              <div><strong>Rescue Case ID:</strong><br /><span style={{ fontFamily: "monospace", color: "#2563EB" }}>{selectedRescueForDetails.ticket_number || selectedRescueForDetails.id}</span></div>
+              <div><strong>Status:</strong><br /><span style={{ textTransform: "capitalize", fontWeight: 600 }}>{selectedRescueForDetails.status || "-"}</span></div>
+              <div><strong>Rescue Date:</strong><br />{formatDateOnly(selectedRescueForDetails.created_at)}</div>
+              <div><strong>Priority / Severity:</strong><br /><span style={{ textTransform: "capitalize" }}>{selectedRescueForDetails.severity || "-"}</span></div>
+              <div><strong>Rescue Location:</strong><br />{selectedRescueForDetails.location_address || "-"}</div>
+              {(selectedRescueForDetails.latitude && selectedRescueForDetails.longitude) && (
+                <div><strong>GPS:</strong><br />{String(selectedRescueForDetails.latitude)}, {String(selectedRescueForDetails.longitude)}</div>
+              )}
+              <div><strong>Reporter:</strong><br />{selectedRescueForDetails.reporter_name || "-"}{selectedRescueForDetails.reporter_phone ? ` · ${selectedRescueForDetails.reporter_phone}` : ""}</div>
+              <div><strong>Rescue Agent:</strong><br />{getRescueAgentName(selectedRescueForDetails) || "-"}</div>
+              {selectedRescueForDetails.dispatch?.assigned_vehicle_id && (
+                <div><strong>Assigned Vehicle:</strong><br /><span style={{ fontFamily: "monospace", fontSize: "12px" }}>{selectedRescueForDetails.dispatch.assigned_vehicle_id}</span></div>
+              )}
+              {selectedRescueForDetails.reporter_notes && (
+                <div style={{ gridColumn: "1 / -1" }}><strong>Reporter Notes:</strong><br /><span style={{ fontStyle: "italic", color: "#64748B" }}>{selectedRescueForDetails.reporter_notes}</span></div>
+              )}
+            </div>
+            {Array.isArray(selectedRescueForDetails.media_evidence || selectedRescueForDetails.media_urls) &&
+              ((selectedRescueForDetails.media_evidence || selectedRescueForDetails.media_urls) as string[]).length > 0 && (
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "8px" }}>Evidence Photos</div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {((selectedRescueForDetails.media_evidence || selectedRescueForDetails.media_urls) as string[]).map((url: string, idx: number) => (
+                    <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                      <img src={url} alt={`Evidence ${idx + 1}`} style={{ width: "90px", height: "90px", objectFit: "cover", borderRadius: "8px", border: "1px solid #E2E8F0" }} />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "4px" }}>
+              <button
+                type="button"
+                onClick={() => { setIsRescueDetailsModalOpen(false); setSelectedRescueForDetails(null); }}
+                style={{ padding: "8px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer", fontSize: "13px" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* REGISTER RESCUED DOG INTAKE MODAL */}
       <Modal
         isOpen={isRegisterModalOpen}
@@ -1140,6 +1423,37 @@ const ShelterManagerDashboard = () => {
         maxWidth="640px"
       >
         <form onSubmit={handleRegisterPetSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          {/* Read-Only Rescue Details Section */}
+          {activeRescueForIntake && (
+            <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: "8px", padding: "12px" }}>
+              <div style={{ fontSize: "13px", fontWeight: 800, color: "#0369A1", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                🐕 Rescue Details <span style={{ fontWeight: 400, color: "#64748B", fontSize: "11px" }}>(Read-Only)</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px", color: "#334155" }}>
+                <div><strong>Rescue Case:</strong> <span style={{ fontFamily: "monospace", color: "#2563EB" }}>{activeRescueForIntake.ticket_number || activeRescueForIntake.id}</span></div>
+                <div><strong>Status:</strong> <span style={{ textTransform: "capitalize" }}>{activeRescueForIntake.status || "-"}</span></div>
+                <div><strong>Rescue Date:</strong> {formatDateOnly(activeRescueForIntake.created_at)}</div>
+                <div><strong>Priority:</strong> <span style={{ textTransform: "capitalize" }}>{activeRescueForIntake.severity || "-"}</span></div>
+                <div><strong>Rescue Location:</strong> {activeRescueForIntake.location_address || "-"}</div>
+                <div><strong>Reported By:</strong> {activeRescueForIntake.reporter_name || "-"}</div>
+                <div><strong>Rescue Agent:</strong> {getRescueAgentName(activeRescueForIntake) || "-"}</div>
+                {Array.isArray(activeRescueForIntake.media_evidence || activeRescueForIntake.media_urls) &&
+                  ((activeRescueForIntake.media_evidence || activeRescueForIntake.media_urls) as string[]).length > 0 && (
+                  <div>
+                    <strong>Evidence:</strong>{" "}
+                    {((activeRescueForIntake.media_evidence || activeRescueForIntake.media_urls) as string[]).map((url: string, idx: number) => (
+                      <a key={idx} href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563EB", textDecoration: "underline", marginRight: "6px", fontSize: "11px" }}>
+                        View Photo {idx + 1}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", paddingBottom: "2px", borderBottom: "1px solid #E2E8F0" }}>Dog Registration</div>
+
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Dog Name / Code Name *</label>
             <input
@@ -1154,14 +1468,36 @@ const ShelterManagerDashboard = () => {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Photo URL</label>
-              <input
-                type="url"
-                placeholder="https://..."
-                value={petForm.photo_url}
-                onChange={(e) => setPetForm({ ...petForm, photo_url: e.target.value })}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
-              />
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Photo URL / Upload</label>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={petForm.photo_url}
+                  onChange={(e) => setPetForm({ ...petForm, photo_url: e.target.value })}
+                  style={{ flex: 1, padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                />
+                <label style={{ cursor: "pointer", background: "#EFF6FF", color: "#2563EB", border: "1px solid #CBD5E1", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {intakePhotoFile ? "Selected" : "Choose File"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setIntakePhotoFile(file);
+                        setIntakePhotoUrl(URL.createObjectURL(file));
+                      }
+                    }}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              </div>
+              {intakePhotoUrl && (
+                <div style={{ marginTop: "4px" }}>
+                  <img src={intakePhotoUrl} alt="Preview" style={{ width: "40px", height: "40px", borderRadius: "8px", objectFit: "cover" }} />
+                </div>
+              )}
             </div>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Breed / Type</label>
@@ -1305,6 +1641,39 @@ const ShelterManagerDashboard = () => {
               style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
             />
           </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Photo URL / Upload</label>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <input
+                type="url"
+                placeholder="https://..."
+                value={petForm.photo_url}
+                onChange={(e) => setPetForm({ ...petForm, photo_url: e.target.value })}
+                style={{ flex: 1, padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              />
+              <label style={{ cursor: "pointer", background: "#EFF6FF", color: "#2563EB", border: "1px solid #CBD5E1", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, whiteSpace: "nowrap" }}>
+                {editPhotoFile ? "Selected" : "Choose File"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setEditPhotoFile(file);
+                      setEditPhotoUrl(URL.createObjectURL(file));
+                    }
+                  }}
+                  style={{ display: "none" }}
+                />
+              </label>
+            </div>
+            {(editPhotoUrl || getDogPhotoUrl(selectedDog, dogPhotoMap)) && (
+              <div style={{ marginTop: "4px" }}>
+                <img src={editPhotoUrl || getDogPhotoUrl(selectedDog, dogPhotoMap)} alt="Preview" style={{ width: "40px", height: "40px", borderRadius: "8px", objectFit: "cover" }} />
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Breed</label>
@@ -1347,13 +1716,63 @@ const ShelterManagerDashboard = () => {
         {selectedDog && (
           <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             <div style={{ display: "flex", gap: "16px", alignItems: "center", background: "#F8FAFC", padding: "14px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-              <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#E2E8F0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
-                🐶
+              <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#E2E8F0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px", overflow: "hidden" }}>
+                {getDogPhotoUrl(selectedDog, dogPhotoMap) ? (
+                  <img src={getDogPhotoUrl(selectedDog, dogPhotoMap)} alt={selectedDog.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  "🐶"
+                )}
               </div>
-              <div>
+              <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>{selectedDog.name}</div>
                 <div style={{ fontSize: "12px", color: "#64748B", fontFamily: "monospace" }}>Dog ID: {selectedDog.registration_number}</div>
                 <div style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600, marginTop: "2px" }}>Rescue Reference: {selectedDog.rescue_id || "-"}</div>
+              </div>
+              <div>
+                <label style={{ cursor: "pointer", background: "#EFF6FF", color: "#2563EB", border: "1px solid #BAE6FD", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: 700 }}>
+                  {isUploadingPhoto ? "Uploading..." : "Upload Photo"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={isUploadingPhoto}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const dId = dogId(selectedDog);
+                      if (!dId) return;
+                      try {
+                        setIsUploadingPhoto(true);
+                        const uploadedUrl = await storageService.uploadFile(file, {
+                          folder: "dogs",
+                          entity_type: "dog_profile",
+                          entity_id: dId,
+                        });
+                        const res = await petService.updatePet(dId, {
+                          photo_url: uploadedUrl,
+                          image_url: uploadedUrl,
+                          image_urls: [uploadedUrl],
+                          photo_gallery_urls: [uploadedUrl],
+                        });
+                        const updatedDog = res?.data || res;
+                        
+                        addToast("Photo uploaded successfully!", "success");
+
+                        // Update local states instantly
+                        setDogs((prev) =>
+                          prev.map((d) => (dogId(d) === dId ? formatDog({ ...d, ...updatedDog }) : d))
+                        );
+                        setSelectedDog(formatDog({ ...selectedDog, ...updatedDog }));
+                        fetchDashboard();
+                        notifyDataChanged();
+                      } catch (err: any) {
+                        addToast(err?.response?.data?.message || "Failed to upload photo.", "error");
+                      } finally {
+                        setIsUploadingPhoto(false);
+                      }
+                    }}
+                    style={{ display: "none" }}
+                  />
+                </label>
               </div>
             </div>
 
@@ -1366,7 +1785,39 @@ const ShelterManagerDashboard = () => {
               <div><strong>Status:</strong> {selectedDog.status}</div>
               <div><strong>Medical Status:</strong> {selectedDog.medical_status}</div>
               <div><strong>Adoption Readiness:</strong> {selectedDog.adoption_status}</div>
+              <div>
+                <strong>Cage / Kennel Assignment:</strong>{" "}
+                <span
+                  style={{
+                    fontWeight: 700,
+                    color: selectedDog.kennel_id ? "#047857" : "#64748B",
+                  }}
+                >
+                  {getKennelLabel(selectedDog.kennel_id)}
+                </span>
+              </div>
             </div>
+
+            {/* Rescue Origin — cross-reference from allRescues if data available */}
+            {(() => {
+              const rescueId = selectedDog.rescue_id || selectedDog.rescue_case_id || "";
+              const matchedCase = rescueId && rescueId !== "-"
+                ? allRescues.find((r: any) => String(r.id) === String(rescueId))
+                : null;
+              if (!matchedCase) return null;
+              const agentName = getRescueAgentName(matchedCase);
+              return (
+                <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: "8px", padding: "10px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 800, color: "#0369A1", marginBottom: "6px" }}>🐕 Rescue Origin</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px", color: "#334155" }}>
+                    <div><strong>Case:</strong> <span style={{ fontFamily: "monospace", color: "#2563EB" }}>{matchedCase.ticket_number || matchedCase.id}</span></div>
+                    <div><strong>Rescue Date:</strong> {formatDateOnly(matchedCase.created_at)}</div>
+                    <div><strong>Rescue Location:</strong> {matchedCase.location_address || "-"}</div>
+                    {agentName && <div><strong>Rescue Agent:</strong> {agentName}</div>}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
               <button

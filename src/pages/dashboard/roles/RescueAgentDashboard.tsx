@@ -48,26 +48,44 @@ const unwrapList = (v: unknown): Record<string, unknown>[] => {
   return [];
 };
 
-const formatAssigned = (c: Record<string, unknown>) => ({
-  id: String(c.id || c.ticket_number || ""),
-  ticket: String(c.ticket_number || c.id || "-"),
-  reporter: String(c.reporter_name || c.reporter || "-"),
-  phone: String(c.reporter_phone || c.phone || "-"),
-  animal_count: (c.animal_count ?? "-") as string | number,
-  status: String(c.status || "-"),
-  location: String(c.location_address || c.location || "-"),
-  severity: String(c.severity || "-"),
-  is_urgent: !!c.is_urgent,
-  dispatch_id: String((c.dispatch as Record<string, unknown>)?.id || (c.dispatch as Record<string, unknown>)?.dispatch_id || ""),
-  vehicle: String((c.dispatch as Record<string, unknown>)?.assigned_vehicle_id || (c.dispatch as Record<string, unknown>)?.vehicle_id || "-"),
-  agents: Array.isArray((c.dispatch as Record<string, unknown>)?.agents) && ((c.dispatch as Record<string, unknown>).agents as Record<string, unknown>[]).length > 0
-    ? ((c.dispatch as Record<string, unknown>).agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")
-    : "-",
-  dispatched_at: (c.dispatch as Record<string, unknown>)?.dispatched_at ? formatDateTime((c.dispatch as Record<string, unknown>).dispatched_at as string) : "-",
-  created_at: c.created_at ? formatDateTime(c.created_at as string) : "-",
-  media: Array.isArray(c.media_evidence) ? (c.media_evidence as string[]) : Array.isArray(c.media_urls) ? (c.media_urls as string[]) : [],
-  raw: c,
-});
+const formatAssigned = (c: Record<string, unknown>, localStatuses: Record<string, string> = {}) => {
+  const rawStatus = String(c.status || "-").toLowerCase();
+  const dispatchObj = c.dispatch ? { ...(c.dispatch as Record<string, unknown>) } : null;
+  const assignedAgentId = String(c.assigned_agent_id || c.agent_id || dispatchObj?.assigned_driver_id || dispatchObj?.agent_id || c.assigned_agent || "");
+  const hasAssignment = !!(c.coordinator_id || assignedAgentId || dispatchObj);
+  
+  const caseId = String(c.id || c.ticket_number || "");
+  const localStatus = localStatuses[caseId];
+
+  let displayStatus = (rawStatus === "verified" && hasAssignment) ? "accepted" : rawStatus;
+  if (localStatus) {
+    displayStatus = localStatus;
+  }
+  if (dispatchObj && localStatus) {
+    dispatchObj.status = localStatus;
+  }
+
+  return {
+    id: caseId,
+    ticket: String(c.ticket_number || c.id || "-"),
+    reporter: String(c.reporter_name || c.reporter || "-"),
+    phone: String(c.reporter_phone || c.phone || "-"),
+    animal_count: (c.animal_count ?? "-") as string | number,
+    status: displayStatus,
+    location: String(c.location_address || c.location || "-"),
+    severity: String(c.severity || "-"),
+    is_urgent: !!c.is_urgent,
+    dispatch_id: String(dispatchObj?.id || dispatchObj?.dispatch_id || ""),
+    vehicle: String(dispatchObj?.assigned_vehicle_id || dispatchObj?.vehicle_id || "-"),
+    agents: Array.isArray(dispatchObj?.agents) && (dispatchObj.agents as Record<string, unknown>[]).length > 0
+      ? (dispatchObj.agents as Record<string, unknown>[]).map((a: Record<string, unknown>) => String(a.agent_id || a.id || "")).join(", ")
+      : "-",
+    dispatched_at: dispatchObj?.dispatched_at ? formatDateTime(dispatchObj.dispatched_at as string) : "-",
+    created_at: c.created_at ? formatDateTime(c.created_at as string) : "-",
+    media: Array.isArray(c.media_evidence) ? (c.media_evidence as string[]) : Array.isArray(c.media_urls) ? (c.media_urls as string[]) : [],
+    raw: { ...c, dispatch: dispatchObj },
+  };
+};
 
 const RescueAgentDashboard = () => {
   const { addToast } = useToast();
@@ -85,6 +103,37 @@ const RescueAgentDashboard = () => {
   const [assignedCases, setAssignedCases] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Local statuses persistence for en route / accepted states
+  const [localStatuses, setLocalStatuses] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem("pg_rescue_local_statuses");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const updateLocalStatus = (caseId: string, status: string) => {
+    setLocalStatuses((prev) => {
+      const next = { ...prev, [caseId]: status };
+      try {
+        localStorage.setItem("pg_rescue_local_statuses", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const clearLocalStatus = (caseId: string) => {
+    setLocalStatuses((prev) => {
+      const next = { ...prev };
+      delete next[caseId];
+      try {
+        localStorage.setItem("pg_rescue_local_statuses", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Modal States
   const [selectedCase, setSelectedCase] = useState<Record<string, unknown> | null>(null);
@@ -162,11 +211,11 @@ const RescueAgentDashboard = () => {
   const fetchAssignedCases = useCallback(async () => {
     try {
       const response = await rescueService.getRescueCases();
-      setAssignedCases(unwrapList(response).map(formatAssigned));
+      setAssignedCases(unwrapList(response).map((c) => formatAssigned(c, localStatuses)));
     } catch {
       setAssignedCases([]);
     }
-  }, []);
+  }, [localStatuses]);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -206,21 +255,101 @@ const RescueAgentDashboard = () => {
   });
 
   // Stage Progress Action Handlers
-  const handleMarkEnRoute = async (dispatchId: string, caseId: string) => {
+  const handleAcceptDispatch = async (caseId: string) => {
     try {
       setIsSubmitting(true);
-      if (dispatchId) {
-        await rescueService.updateDispatchStatus(dispatchId, "en_route");
-      } else {
-        await rescueService.updateRescueCase(caseId, { status: "en_route" });
-      }
+      await rescueService.acceptDispatch(caseId);
+      addToast("Rescue assignment accepted successfully!", "success");
+      
+      updateLocalStatus(caseId, "accepted");
+      
+      // Update local row status in assignedCases state
+      setAssignedCases((prev) =>
+        prev.map((c) => {
+          if (String(c.id) === caseId) {
+            const newRaw = { 
+              ...(c.raw as any), 
+              dispatch: { 
+                ...((c.raw as any)?.dispatch || {}), 
+                status: "accepted" 
+              } 
+            };
+            return { ...c, raw: newRaw };
+          }
+          return c;
+        })
+      );
+      
+      // Update selectedCase state if open
+      setSelectedCase((prev) => {
+        if (!prev || String(prev.id) !== caseId) return prev;
+        const newRaw = { 
+          ...(prev.raw as any), 
+          dispatch: { 
+            ...((prev.raw as any)?.dispatch || {}), 
+            status: "accepted" 
+          } 
+        };
+        return { ...prev, raw: newRaw };
+      });
+      
+      fetchAssignedCases();
+      fetchDashboard();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to accept rescue assignment.", "error");
+      throw err;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMarkEnRoute = async (_dispatchId: string, caseId: string) => {
+    try {
+      setIsSubmitting(true);
+      await rescueService.startTracking(caseId);
       addToast("Field status updated to En Route!", "info");
+      
+      updateLocalStatus(caseId, "en_route");
+      
+      // Update local row status in assignedCases state
+      setAssignedCases((prev) =>
+        prev.map((c) => {
+          if (String(c.id) === caseId) {
+            const newRaw = { 
+              ...(c.raw as any), 
+              status: "en_route",
+              dispatch: { 
+                ...((c.raw as any)?.dispatch || {}), 
+                status: "en_route" 
+              } 
+            };
+            return { ...c, status: "en_route", raw: newRaw };
+          }
+          return c;
+        })
+      );
+
+      // Also update selectedCase state if open
+      setSelectedCase((prev) => {
+        if (!prev || String(prev.id) !== caseId) return prev;
+        const newRaw = { 
+          ...(prev.raw as any), 
+          status: "en_route",
+          dispatch: { 
+            ...((prev.raw as any)?.dispatch || {}), 
+            status: "en_route" 
+          } 
+        };
+        return { ...prev, status: "en_route", raw: newRaw };
+      });
+
       setIsViewModalOpen(false);
       fetchAssignedCases();
       fetchDashboard();
       notifyDataChanged();
-    } catch {
-      addToast("Failed to update status to En Route.", "error");
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to update status to En Route.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -231,6 +360,9 @@ const RescueAgentDashboard = () => {
       setIsSubmitting(true);
       await rescueService.markRescueLocated(caseId);
       addToast("Animal marked as located on scene!", "info");
+      
+      clearLocalStatus(caseId);
+      
       setIsViewModalOpen(false);
       fetchAssignedCases();
       fetchDashboard();
@@ -247,6 +379,9 @@ const RescueAgentDashboard = () => {
       setIsSubmitting(true);
       await rescueService.markRescueSecured(caseId);
       addToast("Animal marked as secured!", "info");
+      
+      clearLocalStatus(caseId);
+      
       setIsViewModalOpen(false);
       fetchAssignedCases();
       fetchDashboard();
@@ -262,7 +397,10 @@ const RescueAgentDashboard = () => {
     try {
       setIsSubmitting(true);
       await rescueService.markRescueAdmitted(caseId);
-      addToast("Animal admitted to rescue centre & sent to shelter intake!", "success");
+      addToast("🐕 Dog rescued successfully!", "success");
+      
+      clearLocalStatus(caseId);
+      
       setIsViewModalOpen(false);
       setIsDeliveryModalOpen(false);
       fetchAssignedCases();
@@ -488,7 +626,35 @@ const RescueAgentDashboard = () => {
         </button>
       );
     }
-    if (status === "accepted" || status === "dispatched") {
+    if (status === "accepted") {
+      return (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleMarkEnRoute(dispatchId, caseId);
+          }}
+          style={{ padding: "5px 10px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+        >
+          <FaAmbulance /> En Route
+        </button>
+      );
+    }
+    if (status === "dispatched") {
+      const rawDispatch = (row.raw as any)?.dispatch;
+      const dispatchStatus = rawDispatch?.status || "";
+      if (dispatchStatus === "dispatched" || !dispatchStatus) {
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAcceptDispatch(caseId);
+            }}
+            style={{ padding: "5px 10px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+          >
+            Accept Dispatch
+          </button>
+        );
+      }
       return (
         <button
           onClick={(e) => {
@@ -782,15 +948,58 @@ const RescueAgentDashboard = () => {
         footer={
           selectedCase ? (
             <>
-              {["dispatched", "verified"].includes(String(selectedCase.status || "").toLowerCase()) && (
-                <button
-                  disabled={isSubmitting}
-                  onClick={() => handleMarkEnRoute(String(selectedCase.dispatch_id || ""), String(selectedCase.id || ""))}
-                  style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <FaAmbulance size={12} /> Mark En Route
-                </button>
-              )}
+              {(() => {
+                const status = String(selectedCase.status || "").toLowerCase();
+                if (status === "dispatched") {
+                  const rawDispatch = (selectedCase.raw as any)?.dispatch;
+                  const dispatchStatus = rawDispatch?.status || "";
+                  if (dispatchStatus === "dispatched" || !dispatchStatus) {
+                    return (
+                      <button
+                        disabled={isSubmitting}
+                        onClick={async () => {
+                          try {
+                            await handleAcceptDispatch(String(selectedCase.id || ""));
+                            setSelectedCase((prev) => {
+                              if (!prev) return null;
+                              const newRaw = { ...(prev.raw as any), dispatch: { ...((prev.raw as any)?.dispatch || {}), status: "accepted" } };
+                              return { ...prev, raw: newRaw };
+                            });
+                          } catch {
+                            // Do not update UI state if accepting fails
+                          }
+                        }}
+                        style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                      >
+                        <FaCheckCircle size={12} /> Accept Dispatch
+                      </button>
+                    );
+                  }
+                }
+                return null;
+              })()}
+
+              {(() => {
+                const status = String(selectedCase.status || "").toLowerCase();
+                const rawDispatch = (selectedCase.raw as any)?.dispatch;
+                const dispatchStatus = rawDispatch?.status || "";
+                const showEnRoute =
+                  status === "accepted" ||
+                  (status === "dispatched" && dispatchStatus === "accepted") ||
+                  status === "verified";
+                if (showEnRoute) {
+                  return (
+                    <button
+                      disabled={isSubmitting}
+                      onClick={() => handleMarkEnRoute(String(selectedCase.dispatch_id || ""), String(selectedCase.id || ""))}
+                      style={{ padding: "8px 16px", background: "#7C3AED", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <FaAmbulance size={12} /> Mark En Route
+                    </button>
+                  );
+                }
+                return null;
+              })()}
 
               {String(selectedCase.status || "").toLowerCase() === "en_route" && (
                 <button
@@ -824,7 +1033,7 @@ const RescueAgentDashboard = () => {
 
               {String(selectedCase.status || "").toLowerCase() === "admitted" && (
                 <button
-                  onClick={() => window.open(`/public-scan/${(selectedCase.raw as Record<string, unknown>)?.dog_id || selectedCase.id}`, "_blank")}
+                  onClick={() => window.open(`/public-scan/${(selectedCase.raw as Record<string, unknown>)?.dog_profile_id || (selectedCase.raw as Record<string, unknown>)?.dog_id || selectedCase.id}`, "_blank")}
                   style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <FaExternalLinkAlt size={12} /> View Shelter Profile

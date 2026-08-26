@@ -66,21 +66,29 @@ const unwrapList = (v: unknown): Record<string, unknown>[] => {
   return [];
 };
 
-const formatCase = (c: Record<string, unknown>) => ({
-  id: String(c.id || c.ticket_number || ""),
-  ticket: String(c.ticket_number || c.id || "-"),
-  reporter: String(c.reporter_name || c.reporter || "-"),
-  phone: String(c.reporter_phone || c.phone || "-"),
-  animal_count: (c.animal_count ?? "-") as string | number,
-  status: String(c.status || "-"),
-  location: String(c.location_address || c.location || "-"),
-  severity: String(c.severity || "-"),
-  is_urgent: !!c.is_urgent,
-  rejection_rationale: String(c.rejection_rationale || ""),
-  dispatch: (c.dispatch as Record<string, unknown>) || null,
-  created_at: c.created_at ? formatDateTime(c.created_at as string) : "-",
-  raw: c,
-});
+const formatCase = (c: Record<string, unknown>) => {
+  const rawStatus = String(c.status || "-").toLowerCase();
+  const dispatchObj = (c.dispatch as Record<string, unknown>) || null;
+  const assignedAgentId = String(c.assigned_agent_id || c.agent_id || dispatchObj?.assigned_driver_id || dispatchObj?.agent_id || c.assigned_agent || "");
+  const hasAssignment = !!(c.coordinator_id || assignedAgentId || dispatchObj);
+  const displayStatus = (rawStatus === "verified" && hasAssignment) ? "accepted" : rawStatus;
+
+  return {
+    id: String(c.id || c.ticket_number || ""),
+    ticket: String(c.ticket_number || c.id || "-"),
+    reporter: String(c.reporter_name || c.reporter || "-"),
+    phone: String(c.reporter_phone || c.phone || "-"),
+    animal_count: (c.animal_count ?? "-") as string | number,
+    status: displayStatus,
+    location: String(c.location_address || c.location || "-"),
+    severity: String(c.severity || "-"),
+    is_urgent: !!c.is_urgent,
+    rejection_rationale: String(c.rejection_rationale || ""),
+    dispatch: dispatchObj,
+    created_at: c.created_at ? formatDateTime(c.created_at as string) : "-",
+    raw: c,
+  };
+};
 
 const RescueCoordinatorDashboard = () => {
   const navigate = useNavigate();

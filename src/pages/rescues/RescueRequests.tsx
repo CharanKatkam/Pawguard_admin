@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
@@ -16,12 +16,18 @@ import {
   FaPhoneAlt,
   FaUser,
   FaInfoCircle,
+  FaCamera,
+  FaTrash,
+  FaLocationArrow,
+  FaMapPin,
 } from "react-icons/fa";
 import rescueService from "../../services/rescueService";
 import vehicleService from "../../services/vehicleService";
+import storageService from "../../services/storageService";
+import userService from "../../services/userService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
+import { getCurrentUserRole, getCurrentUser, normalizeRole } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 
 export interface RescueRequestTableRow {
@@ -67,6 +73,7 @@ const RescueRequests = () => {
 
   const [requests, setRequests] = useState<RescueRequestTableRow[]>([]);
   const [vehicles, setVehicles] = useState<Record<string, unknown>[]>([]);
+  const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
@@ -83,6 +90,7 @@ const RescueRequests = () => {
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
   const [targetDispatchRequest, setTargetDispatchRequest] = useState<RescueRequestTableRow | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [targetRejectId, setTargetRejectId] = useState<string | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<RescueRequestTableRow | null>(null);
@@ -93,11 +101,72 @@ const RescueRequests = () => {
     reporter_name: "",
     reporter_phone: "",
     location_address: "",
-    physical_condition: "visible_healthy",
+    physical_condition: "unknown",
     severity: "medium",
     is_urgent: false,
     reporter_notes: "",
   });
+
+  // Image Upload State (for the Log Emergency Rescue Call form)
+  const [rescueImageFile, setRescueImageFile] = useState<File | null>(null);
+  const [rescueImagePreview, setRescueImagePreview] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const rescueImageInputRef = useRef<HTMLInputElement>(null);
+
+  const clearRescueImage = () => {
+    setRescueImageFile(null);
+    if (rescueImagePreview) URL.revokeObjectURL(rescueImagePreview);
+    setRescueImagePreview(null);
+    if (rescueImageInputRef.current) rescueImageInputRef.current.value = "";
+  };
+
+  const handleRescueImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (rescueImagePreview) URL.revokeObjectURL(rescueImagePreview);
+    setRescueImageFile(file);
+    setRescueImagePreview(URL.createObjectURL(file));
+  };
+
+  // GPS / Current Location State
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isGettingGps, setIsGettingGps] = useState(false);
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setGpsError("Geolocation is not supported by your browser.");
+      return;
+    }
+    setIsGettingGps(true);
+    setGpsError(null);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = parseFloat(position.coords.latitude.toFixed(6));
+        const lng = parseFloat(position.coords.longitude.toFixed(6));
+        setGpsCoords({ lat, lng });
+        setIsGettingGps(false);
+        // Pre-fill address with readable coords if the field is empty
+        if (!formData.location_address) {
+          setFormData((prev) => ({
+            ...prev,
+            location_address: `GPS: ${lat}, ${lng}`,
+          }));
+        }
+      },
+      (err) => {
+        setIsGettingGps(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setGpsError("Location permission denied. Please enter the address manually.");
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          setGpsError("Location unavailable. Please enter the address manually.");
+        } else {
+          setGpsError("Could not get your location. Please enter the address manually.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   // Fetch Requests Function with Rescue Centre Scoping
   const fetchRequests = useCallback(async () => {
@@ -118,12 +187,17 @@ const RescueRequests = () => {
         : [];
 
       let formatted: RescueRequestTableRow[] = list.map((item: Record<string, unknown>) => {
-        const stage = dispatchStage({ status: item.status as string, dispatch: item.dispatch as Record<string, unknown> });
         const dispatchObj = (item.dispatch as Record<string, unknown>) || null;
         const assignedAgentId = String(item.assigned_agent_id || item.agent_id || dispatchObj?.assigned_driver_id || dispatchObj?.agent_id || item.assigned_agent || "");
         const assignedAgentName = String(item.assigned_agent_name || item.assigned_agent || dispatchObj?.assigned_driver_name || dispatchObj?.agent_name || (assignedAgentId ? `Agent (${assignedAgentId})` : ""));
         const assignedVehicleId = String(item.assigned_vehicle_id || dispatchObj?.assigned_vehicle_id || dispatchObj?.vehicle_id || "");
         const assignedVehicleNumber = String(item.assigned_vehicle_number || item.assigned_vehicle || dispatchObj?.assigned_vehicle_number || dispatchObj?.vehicle_number || (assignedVehicleId ? `Vehicle (${assignedVehicleId})` : ""));
+
+        const rawStatus = String(item.status || "reported").toLowerCase();
+        const hasAssignment = !!(item.coordinator_id || assignedAgentId || dispatchObj);
+        const displayStatus = (rawStatus === "verified" && hasAssignment) ? "accepted" : rawStatus;
+
+        const stage = dispatchStage({ status: displayStatus, dispatch: dispatchObj });
 
         return {
           id: String(item.id || item.request_id || ""),
@@ -134,7 +208,7 @@ const RescueRequests = () => {
           condition: String(item.physical_condition || "-"),
           severity: String(item.severity || item.urgency_level || "medium").toLowerCase(),
           is_urgent: !!item.is_urgent,
-          status: String(item.status || "reported").toLowerCase(),
+          status: displayStatus,
           rejection_rationale: String(item.rejection_rationale || item.rejection_reason || ""),
           assigned_agent_id: assignedAgentId,
           assigned_agent_name: assignedAgentName,
@@ -185,6 +259,24 @@ const RescueRequests = () => {
     }).catch(() => setVehicles([]));
   }, []);
 
+  // Fetch available agents
+  useEffect(() => {
+    userService.getUsers().then((res: any) => {
+      const list = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.items) ? res.items : [];
+      let filtered = list.filter((u: any) => {
+        const r = normalizeRole(u);
+        return r === "rescue_agent" || r === "rescue_coordinator" || String(u.role || "").toLowerCase().includes("agent");
+      });
+      if (isRescueCentreAdmin && currentRescueCentreId) {
+        filtered = filtered.filter((u: any) => {
+          const uCentreId = u.rescue_centre_id || u.rescue_center_id || u.facility_id || u.organization_id;
+          return !uCentreId || String(uCentreId) === String(currentRescueCentreId);
+        });
+      }
+      setAgents(filtered);
+    }).catch(() => setAgents([]));
+  }, [isRescueCentreAdmin, currentRescueCentreId]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("action") === "new") {
@@ -227,43 +319,37 @@ const RescueRequests = () => {
   const handleOpenDispatchModal = (req: RescueRequestTableRow) => {
     setTargetDispatchRequest(req);
     setSelectedVehicleId(req.assigned_vehicle_id || "");
+    setSelectedAgentId(req.assigned_agent_id || "");
     setIsDispatchModalOpen(true);
   };
 
   // Submit Dispatch Action
   const handleDispatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!targetDispatchRequest || !selectedVehicleId) {
-      addToast("Please select an available rescue vehicle.", "error");
+    if (!targetDispatchRequest || !selectedVehicleId || !selectedAgentId) {
+      addToast("Please select both a rescue vehicle and an agent/team.", "error");
       return;
     }
     try {
       setIsSubmitting(true);
-      const currentUserId = String(currentUser?.id ?? "");
-      const selVeh = vehicles.find((v: any) => String(v.id || v.vehicle_id) === String(selectedVehicleId));
-      const vehicleNum = selVeh ? String((selVeh as any).registration_number || (selVeh as any).vehicle_number || (selVeh as any).model || selectedVehicleId) : selectedVehicleId;
-      const agentName = (currentUser as any)?.name || (currentUser as any)?.email || "Rescue Agent";
 
       await rescueService.createDispatch({
         case_id: targetDispatchRequest.id,
         assigned_vehicle_id: selectedVehicleId,
-        agent_id: currentUserId || "agent",
-        driver_id: currentUserId || "agent",
+        agent_id: selectedAgentId,
+        agent_ids: [selectedAgentId],
+        driver_id: selectedAgentId,
       });
 
-      await rescueService.updateRescueCase(targetDispatchRequest.id, {
-        status: "dispatched",
-        assigned_vehicle_id: selectedVehicleId,
-        assigned_vehicle_number: vehicleNum,
-        assigned_agent_id: currentUserId || "agent",
-        assigned_agent_name: agentName,
-      });
+      // The createDispatch backend API already transitions the case status to 'dispatched'
+      // and records vehicle and agent assignments, making a separate /verify call redundant and causing a 409 conflict.
 
       addToast("Rescue team and vehicle dispatched successfully!", "success");
       setIsDispatchModalOpen(false);
       setIsViewModalOpen(false);
       setTargetDispatchRequest(null);
       setSelectedVehicleId("");
+      setSelectedAgentId("");
       fetchRequests();
       notifyDataChanged();
     } catch (err: unknown) {
@@ -288,14 +374,43 @@ const RescueRequests = () => {
       if (isRescueCentreAdmin && currentRescueCentreId) {
         payload.rescue_centre_id = currentRescueCentreId;
       }
+      // Attach GPS coordinates if available
+      if (gpsCoords) {
+        payload.latitude = gpsCoords.lat;
+        payload.longitude = gpsCoords.lng;
+      }
+
+      // Optional image upload — attach URL to payload when provided
+      if (rescueImageFile) {
+        try {
+          setIsUploadingImage(true);
+          const uploadedUrl = await storageService.uploadFile(rescueImageFile, {
+            folder: "rescue_evidence",
+            entity_type: "rescue_request",
+          });
+          if (uploadedUrl) {
+            payload.rescue_image_url = uploadedUrl;
+            payload.media_evidence = [uploadedUrl];
+          }
+        } catch {
+          // Non-fatal — continue without the image but warn the user
+          addToast("Image upload failed. Submitting report without image.", "error");
+        } finally {
+          setIsUploadingImage(false);
+        }
+      }
+
       await rescueService.createRescueRequest(payload);
       addToast("Emergency rescue call logged successfully!", "success");
       setIsAddModalOpen(false);
+      clearRescueImage();
+      setGpsCoords(null);
+      setGpsError(null);
       setFormData({
         reporter_name: "",
         reporter_phone: "",
         location_address: "",
-        physical_condition: "visible_healthy",
+        physical_condition: "unknown",
         severity: "medium",
         is_urgent: false,
         reporter_notes: "",
@@ -702,18 +817,73 @@ const RescueRequests = () => {
       </div>
 
       {/* Log Emergency Rescue Call Modal */}
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Log Emergency Rescue Call">
+      <Modal isOpen={isAddModalOpen} onClose={() => { setIsAddModalOpen(false); setGpsCoords(null); setGpsError(null); }} title="Log Emergency Rescue Call">
         <form onSubmit={handleCreateRequest} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Location Address *</label>
+            {/* Location Address + GPS Button */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Location Address *</label>
+              <button
+                type="button"
+                onClick={handleUseCurrentLocation}
+                disabled={isGettingGps}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #93C5FD",
+                  background: isGettingGps ? "#DBEAFE" : "#EFF6FF",
+                  color: "#2563EB",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: isGettingGps ? "wait" : "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <FaLocationArrow size={11} />
+                {isGettingGps ? "Locating..." : "Use Current Location"}
+              </button>
+            </div>
             <input
               type="text"
               required
               placeholder="Full location details / landmark..."
               value={formData.location_address}
               onChange={(e) => setFormData({ ...formData, location_address: e.target.value })}
-              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px" }}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: `1px solid ${gpsCoords ? "#6EE7B7" : "#CBD5E1"}`, fontSize: "14px" }}
             />
+            {/* GPS error message */}
+            {gpsError && (
+              <div style={{ marginTop: "5px", fontSize: "12px", color: "#DC2626", display: "flex", alignItems: "center", gap: "5px" }}>
+                <FaExclamationTriangle size={11} />
+                {gpsError}
+              </div>
+            )}
+            {/* GPS success indicator + OSM map preview */}
+            {gpsCoords && !gpsError && (
+              <div style={{ marginTop: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#059669", fontWeight: 600, marginBottom: "6px" }}>
+                  <FaMapPin size={11} />
+                  GPS captured: {gpsCoords.lat}, {gpsCoords.lng}
+                  <button
+                    type="button"
+                    onClick={() => { setGpsCoords(null); setGpsError(null); }}
+                    style={{ marginLeft: "6px", background: "none", border: "none", color: "#94A3B8", cursor: "pointer", fontSize: "11px", fontWeight: 600, padding: 0 }}
+                  >
+                    ✕ Clear
+                  </button>
+                </div>
+                {/* Inline OpenStreetMap embed — no API key required */}
+                <iframe
+                  title="Rescue Location Map"
+                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${gpsCoords.lng - 0.005},${gpsCoords.lat - 0.005},${gpsCoords.lng + 0.005},${gpsCoords.lat + 0.005}&layer=mapnik&marker=${gpsCoords.lat},${gpsCoords.lng}`}
+                  style={{ width: "100%", height: "160px", border: "1px solid #A7F3D0", borderRadius: "8px", display: "block" }}
+                  loading="lazy"
+                />
+              </div>
+            )}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
@@ -747,10 +917,12 @@ const RescueRequests = () => {
                 onChange={(e) => setFormData({ ...formData, physical_condition: e.target.value })}
                 style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px", background: "#FFF" }}
               >
-                <option value="visible_healthy">Visible / Healthy</option>
-                <option value="injured_visible">Injured (visible)</option>
+                <option value="unknown">Unknown / Healthy</option>
                 <option value="fractured_injured">Fractured / Injured</option>
-                <option value="critical_condition">Critical Condition</option>
+                <option value="critical_life_threatening">Critical / Life Threatening</option>
+                <option value="contagious_sick">Contagious / Sick</option>
+                <option value="malnourished">Malnourished</option>
+                <option value="abandoned_stray">Abandoned / Stray</option>
               </select>
             </div>
             <div>
@@ -785,12 +957,88 @@ const RescueRequests = () => {
               style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }}
             />
           </div>
+
+          {/* Optional Dog / Rescue Image Upload */}
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
+              <FaCamera size={12} style={{ marginRight: "5px", verticalAlign: "middle" }} />
+              Dog / Rescue Image <span style={{ fontWeight: 400, color: "#94A3B8" }}>(optional)</span>
+            </label>
+            {rescueImagePreview ? (
+              <div style={{ position: "relative", display: "inline-block", borderRadius: "10px", overflow: "hidden", border: "2px solid #BFDBFE" }}>
+                <img
+                  src={rescueImagePreview}
+                  alt="Rescue preview"
+                  style={{ display: "block", maxHeight: "180px", maxWidth: "100%", objectFit: "cover" }}
+                />
+                <button
+                  type="button"
+                  onClick={clearRescueImage}
+                  title="Remove image"
+                  style={{
+                    position: "absolute",
+                    top: "6px",
+                    right: "6px",
+                    background: "rgba(239,68,68,0.9)",
+                    border: "none",
+                    borderRadius: "50%",
+                    width: "26px",
+                    height: "26px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    color: "#FFF",
+                  }}
+                >
+                  <FaTrash size={11} />
+                </button>
+              </div>
+            ) : (
+              <label
+                htmlFor="rescue-image-upload"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "10px 14px",
+                  border: "1.5px dashed #93C5FD",
+                  borderRadius: "8px",
+                  background: "#EFF6FF",
+                  color: "#2563EB",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  width: "fit-content",
+                }}
+              >
+                <FaCamera size={14} />
+                Choose Image
+              </label>
+            )}
+            <input
+              id="rescue-image-upload"
+              ref={rescueImageInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleRescueImageChange}
+              style={{ display: "none" }}
+            />
+          </div>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
-            <button type="button" onClick={() => setIsAddModalOpen(false)} style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddModalOpen(false);
+                clearRescueImage();
+              }}
+              style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}
+            >
               Cancel
             </button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "9px 16px", borderRadius: "8px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700, cursor: "pointer" }}>
-              {isSubmitting ? "Logging..." : "Submit Report"}
+            <button type="submit" disabled={isSubmitting || isUploadingImage} style={{ padding: "9px 16px", borderRadius: "8px", background: "#2563EB", color: "#FFF", border: "none", fontWeight: 700, cursor: "pointer" }}>
+              {isUploadingImage ? "Uploading image..." : isSubmitting ? "Logging..." : "Submit Report"}
             </button>
           </div>
         </form>
@@ -954,7 +1202,23 @@ const RescueRequests = () => {
               </div>
             )}
 
-            {/* Photos / Evidence */}
+            {/* Rescue Image (uploaded via Log Emergency form) */}
+            {Boolean(selectedRequest.raw?.rescue_image_url) && (
+              <div style={{ background: "#F0F9FF", padding: "14px", borderRadius: "10px", border: "1px solid #BAE6FD" }}>
+                <strong style={{ display: "block", marginBottom: "8px", fontSize: "13px", color: "#0369A1" }}>
+                  <FaCamera size={12} style={{ marginRight: "6px" }} />
+                  Dog / Rescue Image:
+                </strong>
+                <img
+                  src={String(selectedRequest.raw.rescue_image_url)}
+                  alt="Rescue evidence"
+                  style={{ maxWidth: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px", border: "1px solid #BAE6FD", display: "block" }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
+            )}
+
+            {/* Photos / Evidence (legacy media_urls) */}
             {Boolean(selectedRequest.media_urls && selectedRequest.media_urls.length > 0) && (
               <div>
                 <strong style={{ display: "block", marginBottom: "6px", fontSize: "13px" }}>Photos / Media Evidence:</strong>
@@ -967,6 +1231,38 @@ const RescueRequests = () => {
                 </div>
               </div>
             )}
+
+            {/* GPS Coordinates + Map (if latitude/longitude were captured at report time) */}
+            {Boolean(selectedRequest.raw?.latitude && selectedRequest.raw?.longitude) && (() => {
+              const lat = Number(selectedRequest.raw.latitude);
+              const lng = Number(selectedRequest.raw.longitude);
+              return (
+                <div style={{ background: "#F0FDF4", padding: "14px", borderRadius: "10px", border: "1px solid #A7F3D0" }}>
+                  <strong style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", fontSize: "13px", color: "#065F46" }}>
+                    <FaMapPin size={12} />
+                    GPS Coordinates (captured at report time):
+                  </strong>
+                  <div style={{ fontSize: "13px", color: "#047857", fontWeight: 600, marginBottom: "8px" }}>
+                    Lat: {lat} &nbsp;|&nbsp; Lng: {lng}
+                    &nbsp;
+                    <a
+                      href={`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=17`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "#2563EB", fontWeight: 700, fontSize: "12px" }}
+                    >
+                      Open in Maps ↗
+                    </a>
+                  </div>
+                  <iframe
+                    title="Reported GPS Location"
+                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`}
+                    style={{ width: "100%", height: "200px", border: "1px solid #6EE7B7", borderRadius: "8px", display: "block" }}
+                    loading="lazy"
+                  />
+                </div>
+              );
+            })()}
           </div>
         )}
       </Modal>
@@ -974,10 +1270,35 @@ const RescueRequests = () => {
       {/* Select Vehicle & Dispatch Modal */}
       <Modal
         isOpen={isDispatchModalOpen}
-        onClose={() => setIsDispatchModalOpen(false)}
-        title={`Dispatch Rescue Vehicle${targetDispatchRequest?.ticket_number ? ` — ${targetDispatchRequest.ticket_number}` : ""}`}
+        onClose={() => {
+          setIsDispatchModalOpen(false);
+          setSelectedVehicleId("");
+          setSelectedAgentId("");
+        }}
+        title={`Dispatch Rescue Vehicle & Team${targetDispatchRequest?.ticket_number ? ` — ${targetDispatchRequest.ticket_number}` : ""}`}
       >
         <form onSubmit={handleDispatchSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Select Available Rescue Agent/Team *</label>
+            <select
+              required
+              value={selectedAgentId}
+              onChange={(e) => setSelectedAgentId(e.target.value)}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "6px", background: "#FFF" }}
+            >
+              <option value="">-- Choose an Agent/Team --</option>
+              {agents.map((a: any) => {
+                const aId = String(a.id || "");
+                const name = String(a.full_name || a.name || a.email || aId);
+                const roleTitle = String(a.role || "Rescue Agent");
+                return (
+                  <option key={aId} value={aId}>
+                    {name} ({roleTitle})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Select Available Rescue Vehicle *</label>
             <select
@@ -1000,10 +1321,18 @@ const RescueRequests = () => {
             </select>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
-            <button type="button" onClick={() => setIsDispatchModalOpen(false)} style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsDispatchModalOpen(false);
+                setSelectedVehicleId("");
+                setSelectedAgentId("");
+              }}
+              style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#475569", fontWeight: 600 }}
+            >
               Cancel
             </button>
-            <button type="submit" disabled={isSubmitting || !selectedVehicleId} style={{ padding: "9px 16px", borderRadius: "8px", background: "#7C3AED", color: "#FFF", border: "none", fontWeight: 700, cursor: "pointer" }}>
+            <button type="submit" disabled={isSubmitting || !selectedVehicleId || !selectedAgentId} style={{ padding: "9px 16px", borderRadius: "8px", background: "#7C3AED", color: "#FFF", border: "none", fontWeight: 700, cursor: "pointer" }}>
               {isSubmitting ? "Dispatching..." : "Confirm Dispatch"}
             </button>
           </div>

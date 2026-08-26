@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable, { type Column } from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
@@ -48,11 +49,23 @@ const MedicalRecords = () => {
   const { addToast } = useToast();
 
   // Search & Pagination & Filter state
+  const [searchParams] = useSearchParams();
+  const dogIdParam = searchParams.get("dogId");
+  const [dogIdFilter, setDogIdFilter] = useState<string | null>(null);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [page, setPage] = useState(1);
   const pageSize = 20;
+
+  useEffect(() => {
+    if (dogIdParam) {
+      setDogIdFilter(dogIdParam);
+    } else {
+      setDogIdFilter(null);
+    }
+  }, [dogIdParam]);
 
   // Debounce search input (300ms)
   useEffect(() => {
@@ -209,11 +222,49 @@ const MedicalRecords = () => {
   const dogLabel = (d: Record<string, unknown> | undefined) =>
     d?.name ? `${String(d.name)}${d.breed ? ` (${String(d.breed)})` : ""}` : d?.id ? String(d.id) : "";
 
+  const getContextField = (key: string): string => {
+    const ctx = selectedDogProfile?.recordContext as Record<string, unknown> | undefined;
+    if (ctx && ctx[key] && ctx[key] !== "-") return String(ctx[key]);
+    return "Not recorded";
+  };
+
+  const openMedicalProfileById = useCallback(async (dogId: string) => {
+    const dog = dogs.find((d) => String(d.id || d.dog_id) === String(dogId)) || {
+      id: dogId,
+      name: "Unnamed Patient",
+      breed: "-",
+      status: "-",
+    };
+    setSelectedDogProfile(dog);
+    setIsProfileModalOpen(true);
+    try {
+      setHistoryLoading(true);
+      const res = await medicalService.getMedicalHistory(dogId);
+      setDogHistory(Array.isArray(res?.data) ? (res.data as Record<string, unknown>[]) : []);
+    } catch {
+      setDogHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [dogs]);
+
+  useEffect(() => {
+    if (dogIdParam && dogs.length > 0) {
+      void openMedicalProfileById(dogIdParam);
+    }
+  }, [dogIdParam, dogs, openMedicalProfileById]);
+
   // Filtered & Paginated records
   const filteredRecords = useMemo(() => {
     return medicalRecords.filter((r) => {
       const matchesCategory = categoryFilter === "all" || r.type === categoryFilter;
       if (!matchesCategory) return false;
+
+      // Filter by dogId query param if present
+      if (dogIdFilter) {
+        const petId = String(r.petId || r.pet_id || r.dog_id || "");
+        if (petId !== dogIdFilter) return false;
+      }
 
       if (!debouncedSearch) return true;
       const q = debouncedSearch.toLowerCase();
@@ -229,7 +280,7 @@ const MedicalRecords = () => {
       ].join(" ").toLowerCase();
       return searchable.includes(q);
     });
-  }, [medicalRecords, categoryFilter, debouncedSearch]);
+  }, [medicalRecords, categoryFilter, debouncedSearch, dogIdFilter]);
 
   const paginatedRecords = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -864,21 +915,21 @@ const MedicalRecords = () => {
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Primary Diagnosis</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {(selectedDogProfile.recordContext as Record<string, unknown> | undefined)?.diagnosis && (selectedDogProfile.recordContext as Record<string, unknown>).diagnosis !== "-" ? String((selectedDogProfile.recordContext as Record<string, unknown>).diagnosis) : "Not recorded"}
+                  {getContextField("diagnosis")}
                 </div>
               </div>
 
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Attending Veterinarian</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {(selectedDogProfile.recordContext as Record<string, unknown> | undefined)?.vetName && (selectedDogProfile.recordContext as Record<string, unknown>).vetName !== "-" ? String((selectedDogProfile.recordContext as Record<string, unknown>).vetName) : "Not recorded"}
+                  {getContextField("vetName")}
                 </div>
               </div>
 
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Treatment / Procedure</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  {(selectedDogProfile.recordContext as Record<string, unknown> | undefined)?.treatment && (selectedDogProfile.recordContext as Record<string, unknown>).treatment !== "-" ? String((selectedDogProfile.recordContext as Record<string, unknown>).treatment) : "Not recorded"}
+                  {getContextField("treatment")}
                 </div>
               </div>
 

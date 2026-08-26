@@ -25,10 +25,12 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
     <div
       style={{
         width: "100%",
-        minHeight: "100vh",
+        height: "100vh",
+        maxHeight: "100vh",
         display: "grid",
         gridTemplateColumns: "minmax(0, 1.2fr) minmax(400px, 0.8fr)",
         background: "#F8FAFC",
+        overflow: "hidden",
       }}
       className="auth-layout-container"
     >
@@ -36,7 +38,7 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
       <div
         style={{
           position: "relative",
-          padding: "52px 60px",
+          padding: "clamp(20px, 3vh, 36px) clamp(28px, 3.5vw, 48px)",
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
@@ -80,8 +82,8 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
             position: "absolute",
             bottom: "-20px",
             right: "-20px",
-            width: "440px",
-            height: "440px",
+            width: "360px",
+            height: "360px",
             opacity: 0.15,
             pointerEvents: "none",
           }}
@@ -105,30 +107,30 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              padding: "7px 16px",
+              padding: "5px 14px",
               borderRadius: "999px",
               background: "rgba(245, 158, 11, 0.1)",
               border: "1px solid rgba(245, 158, 11, 0.35)",
               backdropFilter: "blur(12px)",
               color: "#F59E0B",
               fontWeight: 600,
-              fontSize: "12.5px",
-              marginBottom: "24px",
+              fontSize: "12px",
+              marginBottom: "clamp(8px, 1.4vh, 16px)",
               letterSpacing: "0.02em",
               boxShadow: "0 4px 12px rgba(245, 158, 11, 0.12)",
             }}
           >
             <FaShieldAlt size={12} color="#F59E0B" />
-            <span>Enterprise Animal Rescue Platform</span>
+            <span>Enterprise Dog Rescue Platform</span>
           </div>
 
-          {/* 2. Hero Heading (Slightly Reduced Size by 10-15%) */}
+          {/* 2. Hero Heading */}
           <h1
             style={{
-              fontSize: "38px",
+              fontSize: "clamp(26px, 2.5vw, 34px)",
               fontWeight: 800,
               lineHeight: 1.2,
-              margin: "0 0 14px 0",
+              margin: "0 0 clamp(6px, 1vh, 10px) 0",
               letterSpacing: "-0.02em",
               color: "#FFFFFF",
             }}
@@ -141,10 +143,10 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
           {/* 3. Description */}
           <p
             style={{
-              fontSize: "15px",
-              lineHeight: 1.7,
+              fontSize: "clamp(12px, 1.1vw, 14px)",
+              lineHeight: 1.5,
               color: "#CBD5E1",
-              margin: "0 0 24px 0",
+              margin: "0 0 clamp(10px, 1.5vh, 18px) 0",
               maxWidth: "520px",
             }}
           >
@@ -156,9 +158,9 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "10px",
+              gap: "8px",
               flexWrap: "wrap",
-              marginBottom: "32px",
+              marginBottom: "clamp(10px, 1.5vh, 18px)",
             }}
           >
             {[
@@ -172,11 +174,11 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "5px 12px",
+                  padding: "4px 10px",
                   borderRadius: "8px",
                   background: "rgba(255, 255, 255, 0.05)",
                   border: "1px solid rgba(255, 255, 255, 0.1)",
-                  fontSize: "12px",
+                  fontSize: "11.5px",
                   fontWeight: 600,
                   color: "#E2E8F0",
                 }}
@@ -187,12 +189,12 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
             ))}
           </div>
 
-          {/* 4. Statistics Cards (With Professional SVG Icons & Gold Numbers) */}
+          {/* 4. Statistics Cards */}
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(2, 1fr)",
-              gap: "14px",
+              gap: "clamp(8px, 1.2vh, 12px)",
               maxWidth: "540px",
             }}
           >
@@ -203,20 +205,20 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
                 style={{
                   background: "rgba(255, 255, 255, 0.04)",
                   border: "1px solid rgba(255, 255, 255, 0.09)",
-                  borderRadius: "16px",
-                  padding: "18px 20px",
+                  borderRadius: "14px",
+                  padding: "clamp(10px, 1.4vh, 14px) 16px",
                   backdropFilter: "blur(12px)",
                   boxShadow: "0 8px 24px rgba(15, 23, 42, 0.2)",
                   transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
                   cursor: "default",
                 }}
               >
-                <div style={{ marginBottom: "10px", display: "flex", alignItems: "center" }}>
+                <div style={{ marginBottom: "6px", display: "flex", alignItems: "center" }}>
                   {stat.icon}
                 </div>
                 <div
                   style={{
-                    fontSize: "24px",
+                    fontSize: "clamp(18px, 2vw, 22px)",
                     fontWeight: 800,
                     color: "#F59E0B",
                     lineHeight: 1.2,
@@ -227,10 +229,10 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
                 </div>
                 <div
                   style={{
-                    fontSize: "13px",
+                    fontSize: "12px",
                     fontWeight: 500,
                     color: "#94A3B8",
-                    marginTop: "4px",
+                    marginTop: "2px",
                   }}
                 >
                   {stat.label}
@@ -246,19 +248,19 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
             position: "relative",
             zIndex: 2,
             borderTop: "1px solid rgba(255, 255, 255, 0.08)",
-            paddingTop: "20px",
-            marginTop: "36px",
+            paddingTop: "12px",
+            marginTop: "clamp(12px, 2vh, 20px)",
             display: "flex",
             flexDirection: "column",
-            gap: "4px",
-            fontSize: "12px",
+            gap: "2px",
+            fontSize: "11.5px",
             color: "#64748B",
           }}
         >
           <div style={{ fontWeight: 600, color: "#94A3B8" }}>
             Trusted by Animal Rescue Organizations
           </div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>
+          <div style={{ fontSize: "10.5px", color: "#64748B" }}>
             Version 1.0 • © 2026 PawGuard • Powered by VPD Technologies
           </div>
         </div>
@@ -270,8 +272,9 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          padding: "32px",
+          padding: "clamp(16px, 2.5vh, 32px) 24px",
           background: "#FFFFFF",
+          overflowY: "auto",
         }}
       >
         {children}

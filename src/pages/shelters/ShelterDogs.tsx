@@ -26,6 +26,7 @@ import shelterService from "../../services/shelterService";
 import vetService from "../../services/vetService";
 import medicalService from "../../services/medicalService";
 import userService from "../../services/userService";
+import storageService from "../../services/storageService";
 import { getCurrentUserRole } from "../../utils/roleUtils";
 import { useDataSync, notifyDataChanged } from "../../utils/dataSync";
 import { publishActionEvent } from "../../utils/eventSystem";
@@ -79,6 +80,9 @@ const ShelterDogs = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [facilityFilter, setFacilityFilter] = useState("");
+
+  // Backend-persisted photo URL map: dogId → presigned download URL
+  const [dogPhotoMap, setDogPhotoMap] = useState<Record<string, string>>({});
 
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -413,10 +417,25 @@ const ShelterDogs = () => {
     }
   };
 
+  /**
+   * Load the persistent photo URL map from backend storage for all dogs.
+   */
+  const loadDogPhotoMap = async () => {
+    try {
+      const map = await storageService.buildPhotoMapForDogs();
+      if (Object.keys(map).length > 0) {
+        setDogPhotoMap(map);
+      }
+    } catch (err) {
+      console.warn("Could not load dog photo map:", err);
+    }
+  };
+
   useDataSync(fetchShelterDogsData);
 
   useEffect(() => {
     fetchShelterDogsData();
+    loadDogPhotoMap();
   }, [page, statusFilter, facilityFilter]);
 
   // Safety Tag Modal Handlers
@@ -863,7 +882,7 @@ const ShelterDogs = () => {
       key: "photo_url",
       title: "Photo",
       render: (_val: any, row: any) => {
-        const url = getDogPhotoUrl(row);
+        const url = getDogPhotoUrl(row, dogPhotoMap);
         return url ? (
           <img
             src={url}
@@ -1138,9 +1157,9 @@ const ShelterDogs = () => {
         {selectedDog && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "flex", gap: "16px", alignItems: "center", background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-              {getDogPhotoUrl(selectedDog) ? (
+              {getDogPhotoUrl(selectedDog, dogPhotoMap) ? (
                 <img
-                  src={getDogPhotoUrl(selectedDog)}
+                  src={getDogPhotoUrl(selectedDog, dogPhotoMap)}
                   alt={selectedDog.name || "Dog"}
                   style={{ width: "64px", height: "64px", borderRadius: "12px", objectFit: "cover", border: "2px solid #2563EB" }}
                 />

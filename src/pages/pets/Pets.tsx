@@ -23,7 +23,7 @@ import {
   FaSync,
   FaHistory,
 } from "react-icons/fa";
-import dogService from "../../services/dogService";
+
 import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
 import medicalService from "../../services/medicalService";
@@ -38,8 +38,10 @@ import DogLifecycleTimelineModal from "../../components/pets/DogLifecycleTimelin
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
 const GENDERS = ["male", "female", "unknown"];
 
-export const getDogPhotoUrl = (dog: any): string => {
+export const getDogPhotoUrl = (dog: any, photoMap?: Record<string, string>): string => {
   if (!dog) return "";
+  const dId = dog?.id || dog?.dog_id || dog?.registration_number;
+  if (dId && photoMap && photoMap[dId]) return photoMap[dId];
   if (typeof dog.photo_url === "string" && dog.photo_url.trim()) return dog.photo_url.trim();
   if (typeof dog.image_url === "string" && dog.image_url.trim()) return dog.image_url.trim();
   if (typeof dog.avatar_url === "string" && dog.avatar_url.trim()) return dog.avatar_url.trim();
@@ -54,7 +56,6 @@ export const getDogPhotoUrl = (dog: any): string => {
     if (typeof p === "string" && p.trim()) return p.trim();
     if (p && typeof p.url === "string" && p.url.trim()) return p.url.trim();
   }
-  const dId = dog?.id || dog?.dog_id || dog?.registration_number;
   if (dId) {
     const cached = localStorage.getItem(`pawguard_dog_photo_${dId}`) || sessionStorage.getItem(`pawguard_dog_photo_${dId}`);
     if (cached) return cached;
@@ -142,6 +143,7 @@ const triggerDownload = (url: string, filename: string) => {
 
 const Pets = () => {
   const [dogs, setDogs] = useState<any[]>([]);
+  const [dogPhotoMap, setDogPhotoMap] = useState<Record<string, string>>({});
   const [allDogs, setAllDogs] = useState<any[]>([]);
   const [globalTotalCount, setGlobalTotalCount] = useState<number | null>(null);
   const [loadingAll, setLoadingAll] = useState(true);
@@ -215,7 +217,7 @@ const Pets = () => {
     ...dog,
     registration_number: dog.registration_number || dog.id || "-",
     name: dog.name || "-",
-    photo_url: getDogPhotoUrl(dog),
+    photo_url: getDogPhotoUrl(dog, dogPhotoMap),
     breed: dog.breed || "-",
     gender: dog.gender || "",
     estimated_age: dog.estimated_age || dog.age || "-",
@@ -282,55 +284,40 @@ const Pets = () => {
       return;
     }
 
+    if (!pendingPhotoFile) {
+      addToast("No photo file selected.", "error");
+      return;
+    }
+
     try {
       setIsSavingPhoto(true);
 
-      let persistentStorageUrl = pendingPhotoUrl;
-
-      // 1. If a raw File was selected, upload it to persistent Supabase Storage via backend presigned URL
-      if (pendingPhotoFile) {
-        persistentStorageUrl = await storageService.uploadFile(pendingPhotoFile, {
-          folder: "dogs",
-          entity_type: "dog_profile",
-          entity_id: dId,
-        });
-      }
-
-      // 2. Persist the storage URL to the backend dog master record
-      await dogService.updateDog(dId, {
-        image_urls: [persistentStorageUrl],
-        photo_gallery_urls: [persistentStorageUrl],
-        photo_url: persistentStorageUrl,
-        image_url: persistentStorageUrl,
+      // Upload the file to Supabase Storage via backend presigned URL.
+      // The backend's storage table records entity_type=dog_profile + entity_id=dId,
+      // making this the persistent source of truth for the dog photo.
+      const persistentStorageUrl = await storageService.uploadFile(pendingPhotoFile, {
+        folder: "dogs",
+        entity_type: "dog_profile",
+        entity_id: dId,
       });
 
-      // Clear legacy base64 localStorage fallback so UI uses backend storage URL
+      // Clear any legacy base64 localStorage fallback so the UI uses backend storage URL
       try {
         localStorage.removeItem(`pawguard_dog_photo_${dId}`);
         sessionStorage.removeItem(`pawguard_dog_photo_${dId}`);
       } catch {
-        /* storage fallback */
+        /* ignore storage errors */
       }
 
-      let freshDog: any = null;
-      try {
-        const freshRes = await petService.getPetById(dId);
-        const freshData = freshRes?.data || freshRes;
-        if (freshData && (freshData.id || freshData.registration_number || freshData.name)) {
-          freshDog = formatDog(freshData);
-        }
-      } catch {
-        freshDog = null;
-      }
+      // Update the dogPhotoMap immediately for this dog so the UI reflects the new photo
+      // without requiring a full page reload
+      setDogPhotoMap((prev) => ({ ...prev, [dId]: persistentStorageUrl }));
 
-      const updatedDog = freshDog
-        ? { ...freshDog, photo_url: persistentStorageUrl, image_url: persistentStorageUrl, image_urls: [persistentStorageUrl], photo_gallery_urls: [persistentStorageUrl] }
-        : { ...selectedViewDog, photo_url: persistentStorageUrl, image_url: persistentStorageUrl, image_urls: [persistentStorageUrl], photo_gallery_urls: [persistentStorageUrl] };
-
-      setSelectedViewDog(updatedDog);
+      // Also patch the in-memory dog list and selected view dog
+      setSelectedViewDog((prev: any) => prev ? { ...prev, photo_url: persistentStorageUrl } : prev);
       setDogs((prevDogs: any[]) =>
         prevDogs.map((d: any) =>
-          dogId(d) === dId ? { ...d, photo_url: persistentStorageUrl, image_url: persistentStorageUrl, image_urls: [persistentStorageUrl], photo_gallery_urls: [persistentStorageUrl] } : d
+          dogId(d) === dId ? { ...d, photo_url: persistentStorageUrl } : d
         )
       );
 
@@ -347,6 +334,9 @@ const Pets = () => {
       addToast("Dog photo uploaded and saved successfully!", "success");
       setPendingPhotoUrl(null);
       setPendingPhotoFile(null);
+
+      // Refresh the photo map entry from backend to get a fresh presigned URL
+      await refreshDogPhotoInMap(dId);
       fetchDogs();
       fetchAllDogs();
     } catch (err: any) {
@@ -428,6 +418,42 @@ const Pets = () => {
     }
   };
 
+  /**
+   * Load the persistent photo URL map from backend storage for all dogs.
+   * Called once on mount and after any photo upload to keep the map fresh.
+   */
+  const loadDogPhotoMap = async () => {
+    try {
+      const map = await storageService.buildPhotoMapForDogs();
+      if (Object.keys(map).length > 0) {
+        setDogPhotoMap(map);
+      }
+    } catch (err) {
+      console.warn("Could not load dog photo map:", err);
+    }
+  };
+
+  /**
+   * Refresh the photo URL for a single dog in the dogPhotoMap.
+   * Called after a successful photo upload so the profile refreshes immediately.
+   */
+  const refreshDogPhotoInMap = async (dId: string) => {
+    try {
+      const files = await storageService.getFilesByEntity("dog_profile", dId);
+      const confirmed = files.filter((f: any) => f.is_uploaded);
+      if (confirmed.length === 0) return;
+      // Use the most recently uploaded file
+      confirmed.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latest = confirmed[0];
+      const dlRes = await storageService.getDownloadUrl(latest.id);
+      if (dlRes?.download_url) {
+        setDogPhotoMap((prev) => ({ ...prev, [dId]: dlRes.download_url }));
+      }
+    } catch (err) {
+      console.warn(`Could not refresh photo for dog ${dId}:`, err);
+    }
+  };
+
   useEffect(() => {
     fetchDogs();
   }, [search, page, statusFilter, adoptableOnly]);
@@ -435,6 +461,7 @@ const Pets = () => {
   useEffect(() => {
     fetchAllDogs();
     fetchRescueCases();
+    loadDogPhotoMap();
   }, []);
 
   useEffect(() => {

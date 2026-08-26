@@ -24,9 +24,9 @@ export const dogService = {
     return response.data;
   },
 
-  // GET /dogs — fetch every page (the backend clamps page_size to 100).
+  // GET /dogs — fetch every page (the backend clamps page_size to 50).
   getAllDogs: async (params?: Record<string, unknown>) => {
-    const pageSize = 100;
+    const pageSize = 50;
     const collected: any[] = [];
     const first = await api.get("/dogs", { params: { ...params, page: 1, page_size: pageSize } });
     const firstBody = first.data;
