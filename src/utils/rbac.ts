@@ -228,13 +228,6 @@ export const hasPermission = (permission: string, role?: UserRole): boolean => {
 };
 
 /**
- * Check if the current user can view settings
- */
-export const canViewSettings = (role?: UserRole): boolean => {
-  return hasPermission("manage_settings", role);
-};
-
-/**
  * Check if the current user can view notifications
  */
 export const canViewNotifications = (role?: UserRole): boolean => {
@@ -385,7 +378,6 @@ export default {
   canManage,
   getCurrentUserPermissions,
   expandPermissions,
-  canViewSettings,
   canViewNotifications,
   canViewAuditLogs,
   canCreateBackup,

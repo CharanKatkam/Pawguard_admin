@@ -14,6 +14,12 @@ export interface UserPayload {
   role_names?: string[];
   created_at?: string;
   updated_at?: string;
+  last_login?: string | null;
+  last_login_at?: string | null;
+  lastLogin?: string | null;
+  lastLoginAt?: string | null;
+  last_seen?: string | null;
+  last_authenticated_at?: string | null;
   role?: string;
   department?: string;
   status?: string;

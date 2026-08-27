@@ -11,9 +11,9 @@ import { fosterService } from "../services/fosterService";
 import { volunteerService } from "../services/volunteerService";
 import { financeService } from "../services/financeService";
 import donationsService from "../services/donationsService";
-import { formatDateTime } from "../utils/dateUtils";
 import { firstDefined, unwrapList } from "../utils/chartUtils";
 import type { ActivityEntry, AnyRecord, DashboardSummary } from "../types/dashboard";
+import { getRoleTitle } from "../utils/roleUtils";
 
 export interface ExecutiveDashboardData {
   summary: DashboardSummary;
@@ -45,28 +45,46 @@ const unwrapObject = (value: unknown): DashboardSummary => {
 };
 
 const normalizeActivity = (raw: AnyRecord): ActivityEntry | null => {
-  const title = String(
-    firstDefined(raw.title, raw.action, raw.activity, raw.event, raw.description, raw.message) ?? ""
+  const eventStr = String(
+    firstDefined(raw.event_type, raw.action, raw.title, raw.activity, raw.event, raw.description, raw.message) ?? ""
   ).trim();
-  if (!title) return null;
-  const timeRaw = firstDefined(raw.time, raw.created_at, raw.timestamp, raw.date);
-  const userRaw = firstDefined(
-    raw.user,
-    raw.username,
+  if (!eventStr) return null;
+
+  const timeRaw = firstDefined(raw.created_at, raw.time, raw.timestamp, raw.date);
+
+  const actorName = firstDefined(
+    raw.full_name,
     raw.user_name,
-    raw.user_email,
-    raw.actor,
     raw.email,
-    raw.admin,
+    raw.username,
+    raw.user,
+    raw.actor,
     raw.performed_by
   );
+
+  const roleRaw = firstDefined(
+    raw.role,
+    Array.isArray(raw.roles) ? raw.roles[0] : null
+  );
+
+  const roleTitleStr = roleRaw ? getRoleTitle(String(roleRaw)) : "";
+  const actorStr = actorName
+    ? roleTitleStr && roleTitleStr !== "Unknown Role"
+      ? `${actorName} • ${roleTitleStr}`
+      : String(actorName)
+    : "System";
+
+  const actionFormatted = eventStr
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+
   return {
     id: (firstDefined(raw.id, raw.activity_id, raw.log_id) as ActivityEntry["id"]) ??
       `ACT-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    user: userRaw === null ? "System" : String(userRaw),
-    action: title,
-    module: String(firstDefined(raw.module, raw.category, raw.type, raw.entity) ?? "system"),
-    time: timeRaw ? formatDateTime(timeRaw as string) : "Just now",
+    user: actorStr,
+    action: actionFormatted,
+    module: String(firstDefined(raw.module, raw.event_type, raw.category, raw.type, raw.entity) ?? "system"),
+    time: timeRaw ? String(timeRaw) : "Just now",
     status: String(firstDefined(raw.status, raw.result, raw.state) ?? "Success"),
     raw,
   };
@@ -81,7 +99,12 @@ const mergeActivities = (apiItems: ActivityEntry[], stream: ActivityEntry[]): Ac
     seen.add(key);
     merged.push(entry);
   });
-  return merged.slice(0, 10);
+  return merged.sort((a, b) => {
+    const timeA = new Date(a.time).getTime();
+    const timeB = new Date(b.time).getTime();
+    if (isNaN(timeA) || isNaN(timeB)) return 0;
+    return timeB - timeA;
+  }).slice(0, 15);
 };
 
 export function useExecutiveDashboard() {
@@ -112,7 +135,7 @@ export function useExecutiveDashboard() {
     setRefreshing(true);
     setData((prev) => ({ ...prev, loading: prev.lastUpdated === null, error: null }));
 
-    // Fetch aggregate summary, live resource collections & recent activities concurrently
+    // Fetch aggregate summary, live resource collections & recent activities/audit logs concurrently
     const results = await Promise.allSettled([
       dashboardService.getSuperAdminDashboard().catch(() => ({})),
       userService.getUsers().catch(() => []),
@@ -124,7 +147,7 @@ export function useExecutiveDashboard() {
       volunteerService.getVolunteers().catch(() => []),
       donationsService.getDonations().catch(() => []),
       financeService.getFinanceSummary().catch(() => null),
-      dashboardService.getRecentActivities(10).catch(() => []),
+      dashboardService.getAuditLogs({ limit: 25 }).catch(() => dashboardService.getRecentActivities(25).catch(() => [])),
     ]);
 
     if (requestId !== requestIdRef.current) return;

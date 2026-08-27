@@ -432,7 +432,6 @@ export const MODULE_VIEW_PERMISSIONS: Record<string, string> = {
   "/audit-logs": "view_audit_logs",
   "/certificates": "view_certificates",
   "/notifications": "view_notifications",
-  "/settings": "view_settings",
 };
 
 export const getMenuViewPermission = (path: string): string | undefined =>
@@ -471,7 +470,6 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Audit Logs", path: "/audit-logs", iconType: "audit" },
         { name: "Certificates", path: "/certificates", iconType: "certificates" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
-        { name: "System Settings", path: "/settings", iconType: "settings" },
       ];
 
     case "rescue_centre_admin":

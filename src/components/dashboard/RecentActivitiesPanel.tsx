@@ -82,85 +82,90 @@ const RecentActivitiesPanel = ({ activities, loading }: RecentActivitiesPanelPro
         boxShadow: "0 1px 3px rgba(15, 23, 42, 0.05)",
         display: "flex",
         flexDirection: "column",
+        height: "440px",
       }}
     >
-      <DashboardSectionHeader
-        title="Recent Activities"
-        subtitle="Latest platform-wide activity"
-        actionLabel="View all logs"
-        onAction={() => navigate("/audit-logs")}
-      />
+      <div style={{ flexShrink: 0 }}>
+        <DashboardSectionHeader
+          title="Recent Activities"
+          subtitle="Latest platform-wide activity"
+          actionLabel="View all logs"
+          onAction={() => navigate("/audit-logs")}
+        />
+      </div>
 
-      {loading ? (
-        <DashboardSkeleton rows={6} />
-      ) : activities.length === 0 ? (
-        <div style={{ padding: "28px 0", textAlign: "center", color: "#94A3B8", fontSize: "13px" }}>
-          <FaListCheck size={26} style={{ marginBottom: 8, opacity: 0.5 }} />
-          <p style={{ margin: 0 }}>No recent activity recorded</p>
-        </div>
-      ) : (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-          {activities.slice(0, 10).map((a) => {
-            const color = moduleColor(a.module);
-            return (
-              <li
-                key={String(a.id)}
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  padding: "9px 8px",
-                  borderRadius: "10px",
-                  alignItems: "flex-start",
-                }}
-              >
-                <div
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0, paddingRight: "4px" }}>
+        {loading ? (
+          <DashboardSkeleton rows={6} />
+        ) : activities.length === 0 ? (
+          <div style={{ padding: "28px 0", textAlign: "center", color: "#94A3B8", fontSize: "13px" }}>
+            <FaListCheck size={26} style={{ marginBottom: 8, opacity: 0.5 }} />
+            <p style={{ margin: 0 }}>No recent activity recorded</p>
+          </div>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+            {activities.slice(0, 15).map((a) => {
+              const color = moduleColor(a.module);
+              return (
+                <li
+                  key={String(a.id)}
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
-                    background: `${color}15`,
-                    color,
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 15,
-                    flexShrink: 0,
-                    marginTop: 2,
+                    gap: 12,
+                    padding: "9px 8px",
+                    borderRadius: "10px",
+                    alignItems: "flex-start",
                   }}
                 >
-                  {moduleIcon(a.module)}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: "12.5px", fontWeight: 600, color: "#0F172A", lineHeight: 1.35 }}>
-                    {a.action}
-                  </p>
-                  <p style={{ margin: "2px 0 0", fontSize: "11.5px", color: "#64748B" }}>
-                    {a.user} · {a.module}
-                  </p>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ fontSize: "10.5px", color: "#94A3B8", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                      <FaClock size={9} />
-                      {formatDateTime(a.time)}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        padding: "1px 7px",
-                        borderRadius: 999,
-                        background: `${statusColor(a.status)}15`,
-                        color: statusColor(a.status),
-                      }}
-                    >
-                      {a.status}
-                    </span>
+                  <div
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      background: `${color}15`,
+                      color,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 15,
+                      flexShrink: 0,
+                      marginTop: 2,
+                    }}
+                  >
+                    {moduleIcon(a.module)}
                   </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: "12.5px", fontWeight: 600, color: "#0F172A", lineHeight: 1.35 }}>
+                      {a.action}
+                    </p>
+                    <p style={{ margin: "2px 0 0", fontSize: "11.5px", color: "#64748B" }}>
+                      {a.user} · {a.module}
+                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                      <span style={{ fontSize: "10.5px", color: "#94A3B8", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        <FaClock size={9} />
+                        {formatDateTime(a.time)}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          padding: "1px 7px",
+                          borderRadius: 999,
+                          background: `${statusColor(a.status)}15`,
+                          color: statusColor(a.status),
+                        }}
+                      >
+                        {a.status}
+                      </span>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };

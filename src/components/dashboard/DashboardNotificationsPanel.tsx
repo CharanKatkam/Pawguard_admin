@@ -80,6 +80,7 @@ const DashboardNotificationsPanel = () => {
         boxShadow: "0 1px 3px rgba(15, 23, 42, 0.05)",
         display: "flex",
         flexDirection: "column",
+        height: "440px",
       }}
     >
       <div
@@ -89,6 +90,7 @@ const DashboardNotificationsPanel = () => {
           justifyContent: "space-between",
           gap: 12,
           marginBottom: 14,
+          flexShrink: 0,
         }}
       >
         <div>
@@ -120,75 +122,77 @@ const DashboardNotificationsPanel = () => {
         )}
       </div>
 
-      {loading ? (
-        <DashboardSkeleton rows={3} />
-      ) : recent.length === 0 ? (
-        <div style={{ padding: "28px 0", textAlign: "center", color: "#94A3B8", fontSize: "13px" }}>
-          <FaBell size={26} style={{ marginBottom: 8, opacity: 0.5 }} />
-          <p style={{ margin: 0 }}>No notifications yet</p>
-        </div>
-      ) : (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-          {recent.map((n) => (
-            <li key={n.id}>
-              <button
-                onClick={() => handleOpen(n.id)}
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  width: "100%",
-                  textAlign: "left",
-                  border: "none",
-                  background: n.read ? "transparent" : "#EFF6FF",
-                  borderRadius: "10px",
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                  alignItems: "flex-start",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#F1F5F9";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = n.read ? "transparent" : "#EFF6FF";
-                }}
-              >
-                <div
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0, paddingRight: "4px" }}>
+        {loading ? (
+          <DashboardSkeleton rows={3} />
+        ) : recent.length === 0 ? (
+          <div style={{ padding: "28px 0", textAlign: "center", color: "#94A3B8", fontSize: "13px" }}>
+            <FaBell size={26} style={{ marginBottom: 8, opacity: 0.5 }} />
+            <p style={{ margin: 0 }}>No notifications yet</p>
+          </div>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {recent.map((n) => (
+              <li key={n.id}>
+                <button
+                  onClick={() => handleOpen(n.id)}
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
-                    background: `${typeColor(n.type)}15`,
-                    color: typeColor(n.type),
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 15,
-                    flexShrink: 0,
+                    gap: 12,
+                    width: "100%",
+                    textAlign: "left",
+                    border: "none",
+                    background: n.read ? "transparent" : "#EFF6FF",
+                    borderRadius: "10px",
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    alignItems: "flex-start",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#F1F5F9";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = n.read ? "transparent" : "#EFF6FF";
                   }}
                 >
-                  {typeIcon[n.type] ?? <FaBell />}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                    <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#0F172A" }}>{n.title}</span>
-                    {!n.read && (
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} />
+                  <div
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      background: `${typeColor(n.type)}15`,
+                      color: typeColor(n.type),
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 15,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {typeIcon[n.type] ?? <FaBell />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#0F172A" }}>{n.title}</span>
+                      {!n.read && (
+                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} />
+                      )}
+                    </div>
+                    <p style={{ margin: "3px 0 0", fontSize: "11.5px", color: "#64748B", lineHeight: 1.4 }}>
+                      {n.message}
+                    </p>
+                    {(n.created_at || n.time) && (
+                      <span style={{ fontSize: "10.5px", color: "#94A3B8" }}>
+                        {formatDateTime(n.created_at || n.time)}
+                      </span>
                     )}
                   </div>
-                  <p style={{ margin: "3px 0 0", fontSize: "11.5px", color: "#64748B", lineHeight: 1.4 }}>
-                    {n.message}
-                  </p>
-                  {(n.created_at || n.time) && (
-                    <span style={{ fontSize: "10.5px", color: "#94A3B8" }}>
-                      {formatDateTime(n.created_at || n.time)}
-                    </span>
-                  )}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <div style={{ marginTop: "auto", paddingTop: 12, display: "flex", gap: 8 }}>
         <button

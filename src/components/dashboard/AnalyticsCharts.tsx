@@ -1,4 +1,3 @@
-import React from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -7,14 +6,14 @@ import {
   Area,
   BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 import {
   buildMonthlyTrend,
@@ -33,7 +32,7 @@ interface AnalyticsChartsProps {
   donations?: AnyRecord[];
   inventory: AnyRecord[];
   medical: AnyRecord[];
-  shelters: AnyRecord[];
+  shelters?: AnyRecord[];
   users: AnyRecord[];
 }
 
@@ -110,7 +109,7 @@ const AnalyticsCharts = ({
   donations = [],
   inventory,
   medical,
-  shelters,
+  shelters = [],
   users,
 }: AnalyticsChartsProps) => {
   const adoptionTrend = buildMonthlyTrend(adoptions, { count: 6 });
@@ -125,7 +124,7 @@ const AnalyticsCharts = ({
   const inventoryStatus = buildStatusDistribution(inventory);
   const adoptionPipeline = buildStatusDistribution(adoptions);
   const medicalStatus = buildStatusDistribution(medical);
-  const shelterOccupancy = buildShelterOccupancy(shelters, 8);
+  const shelterOccupancy = buildShelterOccupancy(shelters, 6);
   const userRoles = buildUserRoleDistribution(users);
 
   return (
@@ -222,16 +221,16 @@ const AnalyticsCharts = ({
         {renderPieLabels(medicalStatus)}
       </ChartCard>
 
-      <ChartCard title="Shelter Occupancy" subtitle="Occupied vs capacity per facility" hasData={shelterOccupancy.length > 0}>
+      <ChartCard title="Shelter Occupancy Overview" subtitle="Occupied vs capacity per facility" hasData={shelterOccupancy.length > 0}>
         <ResponsiveContainer>
-          <BarChart data={shelterOccupancy}>
-            <CartesianGrid stroke="#E2E8F0" strokeDasharray="5 5" />
-            <XAxis dataKey="name" tick={{ fill: "#64748B", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} angle={-18} textAnchor="end" height={52} />
-            <YAxis allowDecimals={false} tick={{ fill: "#64748B" }} axisLine={false} tickLine={false} />
+          <BarChart data={shelterOccupancy} layout="vertical" margin={{ left: 5, right: 15, top: 5, bottom: 5 }}>
+            <CartesianGrid stroke="#E2E8F0" strokeDasharray="5 5" horizontal={false} />
+            <XAxis type="number" allowDecimals={false} tick={{ fill: "#64748B", fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey="name" width={115} tick={{ fill: "#334155", fontSize: 10, fontWeight: 600 }} axisLine={false} tickLine={false} />
             <Tooltip />
             <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Bar dataKey="occupied" name="Occupied" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={16} />
-            <Bar dataKey="capacity" name="Capacity" fill="#CBD5E1" radius={[4, 4, 0, 0]} maxBarSize={16} />
+            <Bar dataKey="occupied" name="Occupied" fill="#2563EB" radius={[0, 4, 4, 0]} maxBarSize={16} />
+            <Bar dataKey="capacity" name="Capacity" fill="#CBD5E1" radius={[0, 4, 4, 0]} maxBarSize={16} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>

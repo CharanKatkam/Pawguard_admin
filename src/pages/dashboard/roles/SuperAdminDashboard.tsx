@@ -19,6 +19,7 @@ import QuickActions from "../../../components/dashboard/QuickActions";
 import SystemAlerts from "../../../components/dashboard/SystemAlerts";
 import DashboardNotificationsPanel from "../../../components/dashboard/DashboardNotificationsPanel";
 import RecentActivitiesPanel from "../../../components/dashboard/RecentActivitiesPanel";
+import ShelterOccupancyTable from "../../../components/dashboard/ShelterOccupancyTable";
 import DashboardNavigationCards from "../../../components/dashboard/DashboardNavigationCards";
 import { getCurrentUser, getCurrentUserRole, getRoleTitle } from "../../../utils/roleUtils";
 import { formatDateTime } from "../../../utils/dateUtils";
@@ -386,17 +387,8 @@ const SuperAdminDashboard = () => {
         </Suspense>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-          gap: "14px",
-          marginBottom: "28px",
-          alignItems: "start",
-        }}
-      >
-        <DashboardNotificationsPanel />
-        <RecentActivitiesPanel activities={activities} loading={loading} />
+      <div style={{ marginBottom: "28px" }}>
+        <ShelterOccupancyTable shelters={shelters} dogs={dogs} loading={loading} />
       </div>
 
       <div style={{ marginBottom: "28px" }}>
@@ -405,6 +397,19 @@ const SuperAdminDashboard = () => {
           subtitle="Quick access shortcuts to frequently used operational areas"
         />
         <DashboardNavigationCards />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+          gap: "16px",
+          marginBottom: "28px",
+          alignItems: "stretch",
+        }}
+      >
+        <DashboardNotificationsPanel />
+        <RecentActivitiesPanel activities={activities} loading={loading} />
       </div>
     </div>
   );

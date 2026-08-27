@@ -71,7 +71,7 @@ const mapRole = (r: Record<string, unknown>): RoleRecord => {
   const name = String(r.name || r.roleName || r.title || r.slug || r.role || "");
   const rawId = r.id ?? r.role_id ?? r.uid;
   const id = rawId !== undefined && rawId !== null ? String(rawId) : name || "-";
-  const isSystem = isSystemRole(name);
+  const isSystem = isSystemRole(name) || r.is_system === true;
   const count =
     typeof r.userCount === "number"
       ? r.userCount
@@ -84,7 +84,7 @@ const mapRole = (r: Record<string, unknown>): RoleRecord => {
     description: typeof r.description === "string" ? r.description : typeof r.label === "string" ? r.label : "",
     category: typeof r.category === "string" ? r.category : isSystem ? "System Governance" : "Custom Operations",
     permissions: normalizePermissionList(
-      r.permissions ?? r.permission_codes ?? r.permissionCodes ?? r.permissionList
+      r.permission_codes ?? r.permissions ?? r.permissionCodes ?? r.permissionList
     ),
     userCount: count,
     isSystem,
@@ -305,7 +305,7 @@ const RolesPermissions = () => {
     try {
       setUsersLoading(true);
       setUserError(null);
-      const res = await userService.getUsers({ page_size: 20 });
+      const res = await userService.getUsers({ page_size: 100 });
       const rawBody = res as unknown;
       const rawData = (rawBody as { data?: unknown })?.data;
       const rawItems = (rawData as { items?: unknown })?.items;
@@ -316,7 +316,27 @@ const RolesPermissions = () => {
         : Array.isArray(rawItems)
         ? (rawItems as Record<string, unknown>[])
         : [];
-      setUsers(list.map(mapUser));
+      const mappedUsers = list.map(mapUser);
+      setUsers(mappedUsers);
+
+      // Dynamically calculate user counts per role across authoritative user dataset
+      const counts: Record<string, number> = {};
+      mappedUsers.forEach((u) => {
+        const rName = u.role || "general_public";
+        const norm = normalizeRole(rName) || rName;
+        counts[norm] = (counts[norm] || 0) + 1;
+        if (rName && counts[rName] === undefined) {
+          counts[rName] = (counts[rName] || 0) + 1;
+        }
+      });
+
+      setRoles((prevRoles) =>
+        prevRoles.map((r) => {
+          const normName = normalizeRole(r.name) || r.name;
+          const realCount = counts[normName] ?? counts[r.name] ?? 0;
+          return { ...r, userCount: realCount };
+        })
+      );
     } catch (err: unknown) {
       setUserError(getErrorMsg(err, "Failed to load users."));
     } finally {
@@ -326,8 +346,10 @@ const RolesPermissions = () => {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void fetchRolesAndPermissions();
-      void fetchUsers();
+      void (async () => {
+        await fetchRolesAndPermissions();
+        await fetchUsers();
+      })();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [fetchRolesAndPermissions, fetchUsers]);
@@ -590,22 +612,31 @@ const RolesPermissions = () => {
     );
   }, [roles, roleSearch]);
 
-  // Partition users into legitimate internal staff vs public website users
+  const [userCategoryFilter, setUserCategoryFilter] = useState<"all" | "staff" | "public">("all");
+
   const staffUsers = useMemo(
     () => users.filter((u) => isInternalRole(u.role)),
     [users]
   );
 
+  const categoryUsers = useMemo(() => {
+    if (userCategoryFilter === "staff") return staffUsers;
+    if (userCategoryFilter === "public") return users.filter((u) => !isInternalRole(u.role));
+    return users;
+  }, [users, staffUsers, userCategoryFilter]);
+
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
-    if (!q) return staffUsers;
-    return staffUsers.filter(
+    if (!q) return categoryUsers;
+    return categoryUsers.filter(
       (u) =>
         u.name.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
-        u.role.toLowerCase().includes(q)
+        u.role.toLowerCase().includes(q) ||
+        (u.department || "").toLowerCase().includes(q) ||
+        (u.id || "").toLowerCase().includes(q)
     );
-  }, [staffUsers, userSearch]);
+  }, [categoryUsers, userSearch]);
 
   const activeStaffUsers = staffUsers.filter((u) => u.is_active).length;
 
@@ -901,6 +932,64 @@ const RolesPermissions = () => {
         </div>
       ) : (
         <div id="users-tab-section" className="soft-card" style={{ padding: "20px" }}>
+          {/* Category Filter Tabs */}
+          <div style={{ display: "flex", gap: "6px", marginBottom: "16px", background: "#F1F5F9", padding: "4px", borderRadius: "10px", width: "fit-content", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setUserCategoryFilter("all")}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "7px",
+                border: "none",
+                fontSize: "12.5px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: userCategoryFilter === "all" ? "#2563EB" : "transparent",
+                color: userCategoryFilter === "all" ? "#FFFFFF" : "#64748B",
+                boxShadow: userCategoryFilter === "all" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              All Users ({users.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setUserCategoryFilter("staff")}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "7px",
+                border: "none",
+                fontSize: "12.5px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: userCategoryFilter === "staff" ? "#2563EB" : "transparent",
+                color: userCategoryFilter === "staff" ? "#FFFFFF" : "#64748B",
+                boxShadow: userCategoryFilter === "staff" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Internal Staff ({staffUsers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setUserCategoryFilter("public")}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "7px",
+                border: "none",
+                fontSize: "12.5px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: userCategoryFilter === "public" ? "#2563EB" : "transparent",
+                color: userCategoryFilter === "public" ? "#FFFFFF" : "#64748B",
+                boxShadow: userCategoryFilter === "public" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Public &amp; Community ({users.length - staffUsers.length})
+            </button>
+          </div>
+
           <div
             style={{
               display: "flex",
@@ -912,7 +1001,7 @@ const RolesPermissions = () => {
             }}
           >
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-              Assign & Revoke Roles for Every User
+              Assign &amp; Revoke Roles for Every User
             </h3>
             <div style={{ position: "relative", minWidth: "240px" }}>
               <FaSearch

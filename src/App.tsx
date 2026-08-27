@@ -11,7 +11,6 @@ import Shelters from "./pages/shelters/Shelters";
 import ShelterDogs from "./pages/shelters/ShelterDogs";
 import Adoptions from "./pages/adoptions/Adoptions";
 import Reports from "./pages/reports/Reports";
-import Settings from "./pages/settings/Settings";
 import MedicalRecords from "./pages/medical/MedicalRecords";
 import VaccinationReminders from "./pages/medical/VaccinationReminders";
 
@@ -398,14 +397,6 @@ function App() {
               }
             >
               <Route path="/audit-logs" element={<AuditLogs />} />
-            </Route>
-
-            <Route
-              element={
-                <ProtectedRoute permission="view_settings" allowedRoles={["super_admin"]} />
-              }
-            >
-              <Route path="/settings" element={<Settings />} />
             </Route>
 
             <Route

@@ -59,6 +59,10 @@ interface UserTableRow {
   created_at?: string;
   updatedAt: string;
   updated_at?: string;
+  lastLogin?: string | null;
+  last_login?: string | null;
+  last_login_at?: string | null;
+  last_seen?: string | null;
   direct_permissions?: string[];
   status: string;
   appStatus?: string;
@@ -455,8 +459,8 @@ const Users = () => {
   const currentShelterId = (currentUser as any)?.shelter_id || (currentUser as any)?.shelterId || (currentUser as any)?.facility_id || (currentUser as any)?.facilityId || (currentUser as any)?.organization_id;
 
 
-  // Filter state for summary cards: "staff" (default internal accounts) or "public" (non-staff registrations)
-  const [activeFilter, setActiveFilter] = useState<"staff" | "public">("staff");
+  // Filter state for summary cards: "all" (master directory), "staff" (internal accounts), or "public" (community registrations)
+  const [activeFilter, setActiveFilter] = useState<"all" | "staff" | "public">(isSuperAdmin ? "all" : "staff");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
@@ -823,6 +827,15 @@ const Users = () => {
             ? "approved"
             : (rawStatusStr === "rejected" || rawStatusStr === "declined" ? "rejected" : "pending");
 
+        const computedLastLogin =
+          user.last_login ||
+          user.last_login_at ||
+          user.lastLogin ||
+          user.lastLoginAt ||
+          user.last_seen ||
+          user.last_authenticated_at ||
+          (user.updated_at && user.created_at && user.updated_at !== user.created_at ? user.updated_at : null);
+
         return {
           id: user.id || "-",
           name: user.full_name || user.name || "Not provided",
@@ -841,6 +854,8 @@ const Users = () => {
           created_at: user.created_at || "",
           updatedAt: user.updated_at || "",
           updated_at: user.updated_at || "",
+          lastLogin: computedLastLogin,
+          last_login: computedLastLogin,
           direct_permissions: user.direct_permissions || [],
           status: user.is_active !== undefined ? (user.is_active ? "Active" : "Inactive") : (user.status === "Active" ? "Active" : "Inactive"),
           appStatus: computedAppStatus,
@@ -1134,10 +1149,25 @@ const Users = () => {
 
     return [
       {
-        title: "Total Staff Accounts",
+        title: "All User Accounts",
+        value: loading ? "..." : `${users.length} Total Users`,
+        trend: "Master Platform Identity Directory",
+        color: "#2563EB",
+        icon: <FaUsers />,
+        onClick: () => {
+          setActiveFilter("all");
+          setRoleFilter("all");
+          setStatusFilter("all");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: activeFilter === "all" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
+      },
+      {
+        title: "Internal Staff Accounts",
         value: loading ? "..." : `${staffUsers.length} Staff`,
         trend: "Internal Admin / System Accounts",
-        color: "#2563EB",
+        color: "#0891B2",
         icon: <FaUserShield />,
         onClick: () => {
           setActiveFilter("staff");
@@ -1149,34 +1179,17 @@ const Users = () => {
         selected: activeFilter === "staff" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
       },
       {
-        title: "Active Staff",
-        value: loading ? "..." : `${staffUsers.filter((u) => u.isActive).length} Active`,
+        title: "Active Users",
+        value: loading ? "..." : `${users.filter((u) => u.isActive).length} Active`,
         trend: "Operational Access Enabled",
         color: "#059669",
         icon: <FaCheckCircle />,
         onClick: () => {
-          setActiveFilter("staff");
           setStatusFilter("active");
-          setRoleFilter("all");
           setSearchTerm("");
           document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
         },
-        selected: activeFilter === "staff" && statusFilter === "active",
-      },
-      {
-        title: "Inactive Staff",
-        value: loading ? "..." : `${staffUsers.filter((u) => !u.isActive).length} Inactive`,
-        trend: "Access Suspended",
-        color: "#EF4444",
-        icon: <FaTimesCircle />,
-        onClick: () => {
-          setActiveFilter("staff");
-          setStatusFilter("inactive");
-          setRoleFilter("all");
-          setSearchTerm("");
-          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        },
-        selected: activeFilter === "staff" && statusFilter === "inactive",
+        selected: statusFilter === "active",
       },
       {
         title: "Super Admins",
@@ -1194,7 +1207,7 @@ const Users = () => {
         selected: activeFilter === "staff" && roleFilter === "super_admin",
       },
       {
-        title: "Public Website Users",
+        title: "Public & Community Users",
         value: loading ? "..." : `${publicUsers.length} Users`,
         trend: "Public Service Accounts (Non-Staff)",
         color: "#64748B",
@@ -1206,14 +1219,19 @@ const Users = () => {
           setSearchTerm("");
           document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
         },
-        selected: activeFilter === "public",
+        selected: activeFilter === "public" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
       },
     ];
-  }, [staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm, isRescueCentreAdmin, isShelterManager]);
+  }, [users, staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm, isRescueCentreAdmin, isShelterManager]);
 
   // Table rows filtered according to active filter tab, role filter, status filter, and search
   const filteredUsers = useMemo(() => {
-    const baseList = activeFilter === "public" ? publicUsers : staffUsers;
+    const baseList =
+      activeFilter === "public"
+        ? publicUsers
+        : activeFilter === "all"
+        ? users
+        : staffUsers;
 
     return baseList.filter((u) => {
       if (!matchesRoleFilter(u.roles, roleFilter)) {
@@ -1234,7 +1252,7 @@ const Users = () => {
       }
       return true;
     });
-  }, [staffUsers, publicUsers, activeFilter, roleFilter, statusFilter, searchTerm, matchesRoleFilter]);
+  }, [users, staffUsers, publicUsers, activeFilter, roleFilter, statusFilter, searchTerm, matchesRoleFilter]);
 
   const getTableTitle = () => {
     if (isRescueCentreAdmin) {
@@ -1257,7 +1275,26 @@ const Users = () => {
       return "Shelter Staff Accounts";
     }
 
-    if (activeFilter === "public") return "Public Registered Users (Read-Only Reference)";
+    if (activeFilter === "all") {
+      if (roleFilter !== "all") {
+        const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
+        if (option) return `${option.label} Accounts (Master Directory)`;
+      }
+      if (statusFilter === "active") return "Active User Accounts (Master Directory)";
+      if (statusFilter === "inactive") return "Inactive User Accounts (Master Directory)";
+      return "All User Accounts";
+    }
+
+    if (activeFilter === "public") {
+      if (roleFilter !== "all") {
+        const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
+        if (option) return `${option.label} Public Accounts`;
+      }
+      if (statusFilter === "active") return "Active Public & Community Accounts";
+      if (statusFilter === "inactive") return "Inactive Public & Community Accounts";
+      return "Public & Community Accounts";
+    }
+
     if (roleFilter !== "all") {
       const option = ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
       if (option) return `${option.label} Staff Accounts`;
@@ -1309,7 +1346,14 @@ const Users = () => {
     {
       key: "lastLogin",
       title: "Last Login",
-      render: () => <span style={{ fontSize: "12px", color: "#94A3B8" }}>Not available</span>,
+      render: (_val: unknown, row: UserTableRow) => {
+        const val = row.lastLogin || row.last_login || row.last_login_at || row.last_seen;
+        return val && String(val).trim() ? (
+          formatDate(String(val))
+        ) : (
+          <span style={{ fontSize: "12px", color: "#94A3B8" }}>Not available</span>
+        );
+      },
     },
   ];
 
@@ -1406,6 +1450,66 @@ const Users = () => {
 
       {/* Main Table Card */}
       <div className="soft-card" style={{ padding: "20px" }}>
+        {/* Segmented Control Tabs for Super Admin */}
+        {isSuperAdmin && (
+          <div style={{ display: "flex", gap: "6px", marginBottom: "18px", background: "#F1F5F9", padding: "4px", borderRadius: "10px", width: "fit-content", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => { setActiveFilter("all"); setPage(1); }}
+              style={{
+                padding: "8px 18px",
+                borderRadius: "7px",
+                border: "none",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: activeFilter === "all" ? "#2563EB" : "transparent",
+                color: activeFilter === "all" ? "#FFFFFF" : "#64748B",
+                boxShadow: activeFilter === "all" ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              All User Accounts ({users.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setActiveFilter("staff"); setPage(1); }}
+              style={{
+                padding: "8px 18px",
+                borderRadius: "7px",
+                border: "none",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: activeFilter === "staff" ? "#2563EB" : "transparent",
+                color: activeFilter === "staff" ? "#FFFFFF" : "#64748B",
+                boxShadow: activeFilter === "staff" ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Internal Admin &amp; Staff ({staffUsers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setActiveFilter("public"); setPage(1); }}
+              style={{
+                padding: "8px 18px",
+                borderRadius: "7px",
+                border: "none",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: activeFilter === "public" ? "#2563EB" : "transparent",
+                color: activeFilter === "public" ? "#FFFFFF" : "#64748B",
+                boxShadow: activeFilter === "public" ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Public &amp; Community ({publicUsers.length})
+            </button>
+          </div>
+        )}
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "16px" }}>
           <div>
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
@@ -1467,10 +1571,10 @@ const Users = () => {
             </div>
 
             {/* Clear Filters Button */}
-            {(roleFilter !== "all" || statusFilter !== "all" || searchTerm || activeFilter !== "staff") && (
+            {(roleFilter !== "all" || statusFilter !== "all" || searchTerm || activeFilter !== (isSuperAdmin ? "all" : "staff")) && (
               <button
                 onClick={() => {
-                  setActiveFilter("staff");
+                  setActiveFilter(isSuperAdmin ? "all" : "staff");
                   setRoleFilter("all");
                   setStatusFilter("all");
                   setSearchTerm("");
@@ -1501,12 +1605,12 @@ const Users = () => {
         <div id="users-table">
           <DataTable
             columns={columns}
-            data={filteredUsers.slice((page - 1) * 5, page * 5)}
+            data={filteredUsers.slice((page - 1) * 15, page * 15)}
             module="users"
             serverMode={true}
             totalCount={filteredUsers.length}
             page={page}
-            pageSize={5}
+            pageSize={15}
             onPageChange={setPage}
             searchValue={searchTerm}
             onSearchChange={setSearchTerm}

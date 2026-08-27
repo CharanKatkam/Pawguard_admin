@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   FaUserCircle,
-  FaCog,
   FaSignOutAlt,
   FaChevronLeft,
   FaChevronRight,
@@ -13,7 +12,6 @@ import {
   FaQrcode,
 } from "react-icons/fa";
 import { getCurrentUser, getCurrentUserRole, getRoleTitle, isScannerAuthorizedRole } from "../../utils/roleUtils";
-import { canViewSettings } from "../../utils/rbac";
 import authService from "../../services/auth/authService";
 import { clearAuthData } from "../../utils/authStorage";
 import NotificationDropdown from "./NotificationDropdown";
@@ -72,7 +70,6 @@ const getPageTitle = (pathname: string): string => {
   if (path.includes("/audit-logs")) return "Audit Trail Logs";
   if (path.includes("/certificates")) return "Vaccines & Certificates";
   if (path.includes("/notifications")) return "System Notifications";
-  if (path.includes("/settings")) return "System Settings";
 
   return "PawGuard Platform";
 };
@@ -205,29 +202,6 @@ const Header = ({
 
           {/* Role-Specific Notifications */}
           <NotificationDropdown />
-
-          {/* Quick Settings (Super Admin only) */}
-          {canViewSettings(currentRole ?? undefined) && (
-            <button
-              onClick={() => navigate("/settings")}
-              style={{
-                background: "#F8FAFC",
-                border: "1px solid #E2E8F0",
-                borderRadius: "10px",
-                width: "40px",
-                height: "40px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#475569",
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-              }}
-              title="System Settings"
-            >
-              <FaCog size={17} />
-            </button>
-          )}
 
           <div style={{ width: "1px", height: "24px", background: "#E2E8F0" }} />
 
