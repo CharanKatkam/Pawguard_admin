@@ -342,11 +342,14 @@ const RescueManagement = () => {
   const [agentFilter, setAgentFilter] = useState("all");
   const [vehicleFilter, setVehicleFilter] = useState("all");
 
-  // Filter states for Agents & Vehicles
+  // Filter & Pagination states for Agents & Vehicles
   const [agentSearch, setAgentSearch] = useState("");
   const [agentStatusFilter, setAgentStatusFilter] = useState("all");
+  const [agentPage, setAgentPage] = useState(1);
+
   const [vehicleSearch, setVehicleSearch] = useState("");
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState("all");
+  const [vehiclePage, setVehiclePage] = useState(1);
 
   // Selected Detail Modals
   const [selectedCase, setSelectedCase] = useState<RescueCaseTableRow | null>(null);
@@ -688,6 +691,12 @@ const RescueManagement = () => {
     });
   }, [agentRoster, agentSearch, agentStatusFilter]);
 
+  const totalAgentPages = Math.ceil(filteredAgents.length / 9) || 1;
+  const paginatedAgents = useMemo(() => {
+    const start = (agentPage - 1) * 9;
+    return filteredAgents.slice(start, start + 9);
+  }, [filteredAgents, agentPage]);
+
   const filteredVehicles = useMemo(() => {
     return vehicleFleet.filter((v) => {
       if (vehicleSearch.trim()) {
@@ -704,6 +713,12 @@ const RescueManagement = () => {
       return true;
     });
   }, [vehicleFleet, vehicleSearch, vehicleStatusFilter]);
+
+  const totalVehiclePages = Math.ceil(filteredVehicles.length / 9) || 1;
+  const paginatedVehicles = useMemo(() => {
+    const start = (vehiclePage - 1) * 9;
+    return filteredVehicles.slice(start, start + 9);
+  }, [filteredVehicles, vehiclePage]);
 
   // --- ACTIONS & HANDLERS ---
   const handleOpenCaseDetails = async (row: RescueCaseTableRow, tab: "details" | "tracking" = "details") => {
@@ -1037,13 +1052,13 @@ const RescueManagement = () => {
             }}
           >
             <FaPlus size={14} />
-            <span>+ New Rescue Case</span>
+            <span>New Rescue Case</span>
           </button>
         </Can>
       </div>
 
-      {/* DYNAMIC STATISTICS SECTION (8 CARDS) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "20px" }}>
+      {/* DYNAMIC STATISTICS SECTION (8 CARDS IN 4 COLUMNS x 2 ROWS) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "14px", marginBottom: "20px" }}>
         <StatCard
           title="Total Rescues"
           value={stats.total}
@@ -1366,13 +1381,19 @@ const RescueManagement = () => {
                 type="text"
                 placeholder="Search agent by name, email, phone..."
                 value={agentSearch}
-                onChange={(e) => setAgentSearch(e.target.value)}
+                onChange={(e) => {
+                  setAgentSearch(e.target.value);
+                  setAgentPage(1);
+                }}
                 style={{ width: "100%", padding: "8px 8px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
               />
             </div>
             <select
               value={agentStatusFilter}
-              onChange={(e) => setAgentStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setAgentStatusFilter(e.target.value);
+                setAgentPage(1);
+              }}
               style={{ width: "180px", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
             >
               <option value="all">All Statuses</option>
@@ -1382,9 +1403,9 @@ const RescueManagement = () => {
             </select>
           </div>
 
-          {/* AGENTS ROSTER GRID */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
-            {filteredAgents.map((agent) => (
+          {/* AGENTS ROSTER GRID (3 COLUMNS x 3 ROWS, MAX 9 PER PAGE) */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "16px", width: "100%", boxSizing: "border-box" }}>
+            {paginatedAgents.map((agent) => (
               <div
                 key={agent.id}
                 onClick={() => { setSelectedAgent(agent); setIsAgentModalOpen(true); }}
@@ -1396,16 +1417,22 @@ const RescueManagement = () => {
                   cursor: "pointer",
                   boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
                   transition: "all 0.2s ease",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  minWidth: 0,
+                  boxSizing: "border-box",
+                  overflow: "hidden",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#3B82F6", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: 1 }}>
+                    <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#3B82F6", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "16px", flexShrink: 0 }}>
                       {agent.full_name.slice(0, 2).toUpperCase()}
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A" }}>{agent.full_name}</div>
-                      <div style={{ fontSize: "12px", color: "#64748B" }}>{agent.role} • {agent.agent_code}</div>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{agent.full_name}</div>
+                      <div style={{ fontSize: "12px", color: "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{agent.role} • {agent.agent_code}</div>
                     </div>
                   </div>
 
@@ -1417,26 +1444,74 @@ const RescueManagement = () => {
                       fontWeight: 800,
                       background: agent.availability === "Available" ? "#ECFDF5" : "#FEF2F2",
                       color: agent.availability === "Available" ? "#059669" : "#DC2626",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
                     }}
                   >
                     {agent.availability === "Available" ? "● AVAILABLE" : "○ BUSY ON RESCUE"}
                   </span>
                 </div>
 
-                <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "4px", marginBottom: "14px" }}>
-                  <div>📍 <strong>Service Area:</strong> {agent.service_area}</div>
-                  <div>🚐 <strong>Vehicle:</strong> {agent.assigned_vehicle}</div>
-                  <div>📞 <strong>Contact:</strong> {agent.phone}</div>
+                <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "4px", marginBottom: "14px", minWidth: 0, overflow: "hidden" }}>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📍 <strong>Service Area:</strong> {agent.service_area}</div>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🚐 <strong>Vehicle:</strong> {agent.assigned_vehicle}</div>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📞 <strong>Contact:</strong> {agent.phone}</div>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #F1F5F9", fontSize: "12px" }}>
-                  <span style={{ color: "#64748B" }}>Active Cases: <strong style={{ color: "#2563EB" }}>{agent.active_cases_count}</strong></span>
-                  <span style={{ color: "#64748B" }}>Total Completed: <strong style={{ color: "#059669" }}>{agent.completed_rescues_count}</strong></span>
-                  <span style={{ color: "#2563EB", fontWeight: 700 }}>Details →</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #F1F5F9", fontSize: "12px", flexWrap: "wrap", gap: "6px" }}>
+                  <span style={{ color: "#64748B", whiteSpace: "nowrap" }}>Active Cases: <strong style={{ color: "#2563EB" }}>{agent.active_cases_count}</strong></span>
+                  <span style={{ color: "#64748B", whiteSpace: "nowrap" }}>Total Completed: <strong style={{ color: "#059669" }}>{agent.completed_rescues_count}</strong></span>
+                  <span style={{ color: "#2563EB", fontWeight: 700, whiteSpace: "nowrap" }}>Details →</span>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* AGENT PAGINATION CONTROLS */}
+          {totalAgentPages > 1 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "20px", padding: "12px 16px", background: "#FFFFFF", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+              <div style={{ fontSize: "13px", color: "#64748B" }}>
+                Showing <strong>{((agentPage - 1) * 9) + 1}</strong> to <strong>{Math.min(agentPage * 9, filteredAgents.length)}</strong> of <strong>{filteredAgents.length}</strong> rescue agents
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  disabled={agentPage <= 1}
+                  onClick={() => setAgentPage((prev) => Math.max(1, prev - 1))}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #CBD5E1",
+                    background: agentPage <= 1 ? "#F1F5F9" : "#FFFFFF",
+                    color: agentPage <= 1 ? "#94A3B8" : "#334155",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: agentPage <= 1 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Previous
+                </button>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A", padding: "0 8px" }}>
+                  Page {agentPage} of {totalAgentPages}
+                </span>
+                <button
+                  disabled={agentPage >= totalAgentPages}
+                  onClick={() => setAgentPage((prev) => Math.min(totalAgentPages, prev + 1))}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #CBD5E1",
+                    background: agentPage >= totalAgentPages ? "#F1F5F9" : "#FFFFFF",
+                    color: agentPage >= totalAgentPages ? "#94A3B8" : "#334155",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: agentPage >= totalAgentPages ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1451,13 +1526,19 @@ const RescueManagement = () => {
                 type="text"
                 placeholder="Search vehicle code, plate, model..."
                 value={vehicleSearch}
-                onChange={(e) => setVehicleSearch(e.target.value)}
+                onChange={(e) => {
+                  setVehicleSearch(e.target.value);
+                  setVehiclePage(1);
+                }}
                 style={{ width: "100%", padding: "8px 8px 8px 32px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
               />
             </div>
             <select
               value={vehicleStatusFilter}
-              onChange={(e) => setVehicleStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setVehicleStatusFilter(e.target.value);
+                setVehiclePage(1);
+              }}
               style={{ width: "180px", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF" }}
             >
               <option value="all">All Statuses</option>
@@ -1467,9 +1548,9 @@ const RescueManagement = () => {
             </select>
           </div>
 
-          {/* VEHICLE FLEET GRID */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
-            {filteredVehicles.map((vehicle) => (
+          {/* VEHICLE FLEET GRID (3 COLUMNS x 3 ROWS, MAX 9 PER PAGE) */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "16px", width: "100%", boxSizing: "border-box" }}>
+            {paginatedVehicles.map((vehicle) => (
               <div
                 key={vehicle.id}
                 onClick={() => { setSelectedVehicle(vehicle); setIsVehicleModalOpen(true); }}
@@ -1481,12 +1562,18 @@ const RescueManagement = () => {
                   cursor: "pointer",
                   boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
                   transition: "all 0.2s ease",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  minWidth: 0,
+                  boxSizing: "border-box",
+                  overflow: "hidden",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: "16px", color: "#0F172A", fontFamily: "monospace" }}>{vehicle.vehicle_code}</div>
-                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>{vehicle.model} ({vehicle.registration_number})</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", marginBottom: "12px" }}>
+                  <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+                    <div style={{ fontWeight: 800, fontSize: "16px", color: "#0F172A", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vehicle.vehicle_code}</div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vehicle.model} ({vehicle.registration_number})</div>
                   </div>
 
                   <span
@@ -1497,25 +1584,73 @@ const RescueManagement = () => {
                       fontWeight: 800,
                       background: vehicle.status === "Available" ? "#ECFDF5" : vehicle.status === "On Rescue" ? "#EFF6FF" : "#FEF2F2",
                       color: vehicle.status === "Available" ? "#059669" : vehicle.status === "On Rescue" ? "#2563EB" : "#DC2626",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
                     }}
                   >
                     {vehicle.status === "Available" ? "● READY" : vehicle.status === "On Rescue" ? "🚑 ON RESCUE" : "🔧 SERVICE"}
                   </span>
                 </div>
 
-                <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "6px", marginBottom: "14px" }}>
-                  <div>👮 <strong>Primary Driver:</strong> {vehicle.assigned_driver}</div>
-                  <div>📍 <strong>Base Location:</strong> {vehicle.location}</div>
-                  <div>⚓ <strong>Capacity Used:</strong> <strong style={{ color: "#2563EB" }}>{vehicle.capacity_used} / {vehicle.capacity} Dogs</strong></div>
+                <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "6px", marginBottom: "14px", minWidth: 0, overflow: "hidden" }}>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>👮 <strong>Primary Driver:</strong> {vehicle.assigned_driver}</div>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📍 <strong>Base Location:</strong> {vehicle.location}</div>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>⚓ <strong>Capacity Used:</strong> <strong style={{ color: "#2563EB" }}>{vehicle.capacity_used} / {vehicle.capacity} Dogs</strong></div>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #F1F5F9", fontSize: "12px" }}>
-                  <span style={{ color: "#64748B" }}>Fuel Level: <strong>{vehicle.fuel_level}</strong></span>
-                  <span style={{ color: "#2563EB", fontWeight: 700 }}>Fleet Details →</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #F1F5F9", fontSize: "12px", flexWrap: "wrap", gap: "6px" }}>
+                  <span style={{ color: "#64748B", whiteSpace: "nowrap" }}>Fuel Level: <strong>{vehicle.fuel_level}</strong></span>
+                  <span style={{ color: "#2563EB", fontWeight: 700, whiteSpace: "nowrap" }}>Fleet Details →</span>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* VEHICLE PAGINATION CONTROLS */}
+          {totalVehiclePages > 1 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "20px", padding: "12px 16px", background: "#FFFFFF", borderRadius: "10px", border: "1px solid #E2E8F0" }}>
+              <div style={{ fontSize: "13px", color: "#64748B" }}>
+                Showing <strong>{((vehiclePage - 1) * 9) + 1}</strong> to <strong>{Math.min(vehiclePage * 9, filteredVehicles.length)}</strong> of <strong>{filteredVehicles.length}</strong> rescue vehicles
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  disabled={vehiclePage <= 1}
+                  onClick={() => setVehiclePage((prev) => Math.max(1, prev - 1))}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #CBD5E1",
+                    background: vehiclePage <= 1 ? "#F1F5F9" : "#FFFFFF",
+                    color: vehiclePage <= 1 ? "#94A3B8" : "#334155",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: vehiclePage <= 1 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Previous
+                </button>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A", padding: "0 8px" }}>
+                  Page {vehiclePage} of {totalVehiclePages}
+                </span>
+                <button
+                  disabled={vehiclePage >= totalVehiclePages}
+                  onClick={() => setVehiclePage((prev) => Math.min(totalVehiclePages, prev + 1))}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #CBD5E1",
+                    background: vehiclePage >= totalVehiclePages ? "#F1F5F9" : "#FFFFFF",
+                    color: vehiclePage >= totalVehiclePages ? "#94A3B8" : "#334155",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: vehiclePage >= totalVehiclePages ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

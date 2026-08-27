@@ -21,33 +21,21 @@ import {
   FaPlus,
   FaFileAlt,
   FaCopy,
-  FaExternalLinkAlt,
   FaCheckCircle,
   FaTimesCircle,
-  FaHandsHelping,
 } from "react-icons/fa";
 import shelterService from "../../../services/shelterService";
 import petService from "../../../services/petService";
 import rescueService from "../../../services/rescueService";
 import inventoryService from "../../../services/inventoryService";
-import volunteerService from "../../../services/volunteerService";
+
 import storageService from "../../../services/storageService";
 import { getDogPhotoUrl } from "../../pets/Pets";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { generateQrDataUrl, generateQrBlob } from "../../../utils/qrGenerator";
 import { formatDateTime } from "../../../utils/dateUtils";
 
-// ── Shelter Support volunteer helpers ──
-const isShelterSupportVol = (vol: any): boolean =>
-  String(vol?.preferred_role || vol?.volunteer_type || vol?.applied_role || "").toLowerCase().includes("shelter");
-const isShelVolPending = (st?: string) => { const s = String(st || "").toLowerCase(); return s === "applied" || s === "pending" || s === "submitted"; };
-const isShelVolApproved = (st?: string) => { const s = String(st || "").toLowerCase(); return s === "approved" || s === "active" || s === "onboarded"; };
-const ShelVolBadge = ({ status }: { status?: string }) => {
-  const s = String(status || "applied").toLowerCase();
-  const color = isShelVolApproved(s) ? "#047857" : isShelVolPending(s) ? "#D97706" : s === "rejected" ? "#DC2626" : "#64748B";
-  const bg   = isShelVolApproved(s) ? "#ECFDF5" : isShelVolPending(s) ? "#FEF3C7" : s === "rejected" ? "#FEE2E2" : "#F1F5F9";
-  return <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>{s}</span>;
-};
+
 
 const IN_SHELTER_STATUSES = ["rescued", "clinic", "shelter"];
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
@@ -164,12 +152,7 @@ const ShelterManagerDashboard = () => {
   const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
   const [isRefreshingScanData, setIsRefreshingScanData] = useState(false);
 
-  // ── Shelter Support Volunteers ──
-  const [shelterVols, setShelterVols] = useState<any[]>([]);
-  const [shelterVolLoading, setShelterVolLoading] = useState(true);
-  const [isShelVolSubmitting, setIsShelVolSubmitting] = useState(false);
-  const [selectedShelVol, setSelectedShelVol] = useState<any | null>(null);
-  const [isShelVolModalOpen, setIsShelVolModalOpen] = useState(false);
+
 
   // Selected Dog & Form States
   const [selectedDog, setSelectedDog] = useState<any | null>(null);
@@ -337,61 +320,7 @@ const ShelterManagerDashboard = () => {
     }
   };
 
-  const fetchShelterVols = useCallback(async () => {
-    try {
-      setShelterVolLoading(true);
-      let res: any;
-      try { res = await volunteerService.getVolunteers(); } catch { res = []; }
-      const list: any[] = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.items) ? res.items : [];
-      const shelterOnly = list.filter(isShelterSupportVol);
-      shelterOnly.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-      setShelterVols(shelterOnly);
-    } catch {
-      setShelterVols([]);
-    } finally {
-      setShelterVolLoading(false);
-    }
-  }, []);
 
-  const handleShelVolApprove = async (vol: any) => {
-    const id = vol?.id || vol?.application_id || vol?.profile_id;
-    if (!id) { addToast("Invalid volunteer ID.", "error"); return; }
-    try {
-      setIsShelVolSubmitting(true);
-      try { await volunteerService.approveApplication(id); }
-      catch (e: any) {
-        if (e?.response?.status === 404 || e?.response?.status === 405) { await volunteerService.updateVolunteerProfile(id, { status: "active" }); }
-        else throw e;
-      }
-      addToast("Shelter Support volunteer approved!", "success");
-      setShelterVols((prev) => prev.map((v) => v.id === id ? { ...v, status: "approved" } : v));
-      if (selectedShelVol?.id === id) setSelectedShelVol((p: any) => p ? { ...p, status: "approved" } : null);
-      fetchShelterVols();
-      notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.message || "Failed to approve.", "error");
-    } finally { setIsShelVolSubmitting(false); }
-  };
-
-  const handleShelVolReject = async (vol: any) => {
-    const id = vol?.id || vol?.application_id || vol?.profile_id;
-    if (!id) { addToast("Invalid volunteer ID.", "error"); return; }
-    try {
-      setIsShelVolSubmitting(true);
-      try { await volunteerService.rejectApplication(id, "Rejected by Shelter Manager."); }
-      catch (e: any) {
-        if (e?.response?.status === 404 || e?.response?.status === 405) { await volunteerService.updateVolunteerProfile(id, { status: "rejected" }); }
-        else throw e;
-      }
-      addToast("Shelter Support volunteer application rejected.", "info");
-      setShelterVols((prev) => prev.map((v) => v.id === id ? { ...v, status: "rejected" } : v));
-      if (selectedShelVol?.id === id) setSelectedShelVol((p: any) => p ? { ...p, status: "rejected" } : null);
-      fetchShelterVols();
-      notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.message || "Failed to reject.", "error");
-    } finally { setIsShelVolSubmitting(false); }
-  };
 
   /**
    * Load the persistent photo URL map from backend storage for all dogs.
@@ -429,14 +358,12 @@ const ShelterManagerDashboard = () => {
 
   useDataSync(() => {
     fetchDashboard();
-    fetchShelterVols();
   });
 
   useEffect(() => {
     fetchDashboard();
-    fetchShelterVols();
     loadDogPhotoMap();
-  }, [fetchShelterVols]);
+  }, []);
 
   // Handlers for Rescued Dog Registration
   const handleOpenReceiveRescue = (caseItem: any) => {
@@ -1344,23 +1271,6 @@ const ShelterManagerDashboard = () => {
         />
       </div>
 
-      {/* KENNEL REGISTRY TABLE */}
-      <div className="soft-card" style={{ padding: "20px" }}>
-        <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 700 }}>
-          Kennel Registry & Sanitation Status
-        </h3>
-        <DataTable
-          columns={[
-            { key: "cageNo", title: "Cage / Ward" },
-            { key: "section", title: "Section" },
-            { key: "capacity", title: "Capacity" },
-            { key: "status", title: "Sanitation State" },
-          ]}
-          data={kennelRows}
-          loading={loading}
-          emptyMessage="No kennels registered yet."
-        />
-      </div>
 
       {/* RESCUE CASE DETAILS READ-ONLY MODAL */}
       <Modal
@@ -2246,129 +2156,6 @@ const ShelterManagerDashboard = () => {
             </button>
           </div>
         </div>
-      </Modal>
-
-      {/* ── Shelter Support Volunteers Section ── */}
-      <div className="soft-card" style={{ padding: "20px", marginTop: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
-              <FaHandsHelping style={{ color: "#059669" }} /> Shelter Support Volunteer Pool
-            </h3>
-            <span style={{ fontSize: "12px", color: "#64748B" }}>
-              {shelterVols.filter((v) => isShelVolPending(v.status)).length} pending
-              {" · "}{shelterVols.filter((v) => isShelVolApproved(v.status)).length} approved
-              {" · "}{shelterVols.length} total
-            </span>
-          </div>
-          {shelterVolLoading && <span style={{ fontSize: "12px", color: "#059669", fontWeight: 600 }}>Loading volunteers...</span>}
-        </div>
-
-        <DataTable
-          columns={[
-            {
-              key: "name",
-              title: "Volunteer Name & Contact",
-              render: (_: unknown, row: any) => (
-                <div>
-                  <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.user?.full_name || row.full_name || row.emergency_contact_name || "Volunteer"}</div>
-                  <div style={{ fontSize: "12px", color: "#64748B" }}>{row.user?.email || row.email || `ID: ${String(row.id || "").slice(0, 8)}`}</div>
-                </div>
-              ),
-            },
-            {
-              key: "availability",
-              title: "Availability",
-              render: (v: string) => <span style={{ color: "#475569", fontSize: "13px" }}>{v || "Flexible"}</span>,
-            },
-            {
-              key: "skills",
-              title: "Skills",
-              render: (_: unknown, row: any) => <span style={{ color: "#475569", fontSize: "12px" }}>{row.skills || row.animal_handling_experience || "—"}</span>,
-            },
-            {
-              key: "created_at",
-              title: "Applied",
-              render: (v: string) => <span style={{ fontSize: "12px", color: "#64748B" }}>{v ? formatDateTime(v) : "—"}</span>,
-            },
-            {
-              key: "status",
-              title: "Status",
-              render: (v: string) => <ShelVolBadge status={v} />,
-            },
-          ]}
-          data={shelterVols}
-          loading={shelterVolLoading}
-          emptyMessage="No Shelter Support volunteer applications found."
-          renderRowActions={(row) => (
-            <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => { setSelectedShelVol(row); setIsShelVolModalOpen(true); }}
-                style={{ padding: "4px 10px", background: "#059669", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-              >
-                <FaEye size={11} /> View
-              </button>
-              {isShelVolPending(row.status) && (
-                <>
-                  <button
-                    disabled={isShelVolSubmitting}
-                    onClick={() => handleShelVolApprove(row)}
-                    style={{ padding: "4px 10px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                  >
-                    <FaCheckCircle size={11} /> Approve
-                  </button>
-                  <button
-                    disabled={isShelVolSubmitting}
-                    onClick={() => handleShelVolReject(row)}
-                    style={{ padding: "4px 10px", background: "#EF4444", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                  >
-                    <FaTimesCircle size={11} /> Reject
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-          onRowClick={(row) => { setSelectedShelVol(row); setIsShelVolModalOpen(true); }}
-        />
-      </div>
-
-      {/* Shelter Support Volunteer Details Modal */}
-      <Modal
-        isOpen={isShelVolModalOpen}
-        onClose={() => { setIsShelVolModalOpen(false); setSelectedShelVol(null); }}
-        title="Shelter Support Volunteer — Details"
-        size="md"
-        footer={
-          selectedShelVol ? (
-            <>
-              {isShelVolPending(selectedShelVol.status) && (
-                <>
-                  <button disabled={isShelVolSubmitting} onClick={() => handleShelVolApprove(selectedShelVol)} style={{ padding: "8px 16px", background: "#10B981", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Approve</button>
-                  <button disabled={isShelVolSubmitting} onClick={() => handleShelVolReject(selectedShelVol)} style={{ padding: "8px 16px", background: "#EF4444", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Reject</button>
-                </>
-              )}
-              <button onClick={() => { setIsShelVolModalOpen(false); setSelectedShelVol(null); }} style={{ padding: "8px 16px", background: "#64748B", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Close</button>
-            </>
-          ) : null
-        }
-      >
-        {selectedShelVol && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-              <div><strong style={{ color: "#475569" }}>Name:</strong><br />{selectedShelVol.user?.full_name || selectedShelVol.full_name || "—"}</div>
-              <div><strong style={{ color: "#475569" }}>Email:</strong><br />{selectedShelVol.user?.email || selectedShelVol.email || "—"}</div>
-              <div><strong style={{ color: "#475569" }}>Phone:</strong><br />{selectedShelVol.user?.phone || selectedShelVol.phone || "—"}</div>
-              <div><strong style={{ color: "#475569" }}>Volunteer Type:</strong><br /><span style={{ color: "#059669", fontWeight: 700 }}>{selectedShelVol.preferred_role || "Shelter Support"}</span></div>
-              <div><strong style={{ color: "#475569" }}>Availability:</strong><br />{selectedShelVol.availability || "—"}</div>
-              <div><strong style={{ color: "#475569" }}>Status:</strong><br /><ShelVolBadge status={selectedShelVol.status} /></div>
-              <div><strong style={{ color: "#475569" }}>Applied:</strong><br />{selectedShelVol.created_at ? formatDateTime(selectedShelVol.created_at) : "—"}</div>
-              <div><strong style={{ color: "#475569" }}>Emergency Contact:</strong><br />{selectedShelVol.emergency_contact_name || "—"} {selectedShelVol.emergency_contact_phone ? `(${selectedShelVol.emergency_contact_phone})` : ""}</div>
-            </div>
-            {selectedShelVol.skills && <div><strong style={{ color: "#475569" }}>Skills:</strong><br />{selectedShelVol.skills}</div>}
-            {selectedShelVol.animal_handling_experience && <div><strong style={{ color: "#475569" }}>Experience:</strong><br />{selectedShelVol.animal_handling_experience}</div>}
-            {selectedShelVol.notes && <div style={{ background: "#F8FAFC", padding: "10px 12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}><strong style={{ color: "#475569" }}>Notes:</strong><br />{selectedShelVol.notes}</div>}
-          </div>
-        )}
       </Modal>
     </div>
   );

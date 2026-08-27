@@ -63,10 +63,18 @@ export const shelterService = {
     return response.data;
   },
 
-  // GET /shelter/facilities (paginated, with search & filters)
+  // GET /shelter/facilities (paginated, with search & filters, fallback to /rescue-centres for rescue roles)
   getShelters: async (params?: Record<string, unknown>) => {
-    const response = await api.get("/shelter/facilities", { params });
-    return response.data;
+    try {
+      const response = await api.get("/shelter/facilities", { params });
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        const fallback = await api.get("/rescue-centres", { params }).catch(() => null);
+        if (fallback?.data) return fallback.data;
+      }
+      throw err;
+    }
   },
 
   // POST /shelter/facilities - ShelterFacilityCreate { name, address, phone, ... }
@@ -82,10 +90,18 @@ export const shelterService = {
     return response.data;
   },
 
-  // GET /shelter/facilities/{facility_id}
+  // GET /shelter/facilities/{facility_id} (fallback to /rescue-centres/{facility_id} for rescue roles)
   getShelterById: async (facilityId: string) => {
-    const response = await api.get(`/shelter/facilities/${facilityId}`);
-    return response.data;
+    try {
+      const response = await api.get(`/shelter/facilities/${facilityId}`);
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        const fallback = await api.get(`/rescue-centres/${facilityId}`).catch(() => null);
+        if (fallback?.data) return fallback.data;
+      }
+      throw err;
+    }
   },
 
   // PUT /shelter/facilities/{facility_id} - ShelterFacilityUpdate
@@ -147,8 +163,12 @@ export const shelterService = {
 
   // GET /shelter/facilities/{facility_id}/sections
   getFacilitySections: async (facilityId: string) => {
-    const response = await api.get(`/shelter/facilities/${facilityId}/sections`);
-    return response.data;
+    try {
+      const response = await api.get(`/shelter/facilities/${facilityId}/sections`);
+      return response.data;
+    } catch {
+      return { success: true, data: [] };
+    }
   },
 
   // POST /shelter/sections/{section_id}/kennels - KennelCreate
@@ -166,8 +186,12 @@ export const shelterService = {
 
   // GET /shelter/sections/{section_id}/kennels
   getSectionKennels: async (sectionId: string) => {
-    const response = await api.get(`/shelter/sections/${sectionId}/kennels`);
-    return response.data;
+    try {
+      const response = await api.get(`/shelter/sections/${sectionId}/kennels`);
+      return response.data;
+    } catch {
+      return { success: true, data: [] };
+    }
   },
 
   // POST /shelter/kennels/{kennel_id}/assign/{dog_id}

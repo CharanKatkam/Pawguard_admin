@@ -1056,7 +1056,7 @@ const ShelterDogs = () => {
 
             <select
               value={facilityFilter}
-              onChange={(e) => setFacilityFilter(e.target.value)}
+              onChange={(e) => { setFacilityFilter(e.target.value); setPage(1); }}
               style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px" }}
             >
               <option value="">All Facilities</option>
@@ -1076,6 +1076,7 @@ const ShelterDogs = () => {
           totalCount={totalCount}
           page={page}
           onPageChange={setPage}
+          pageSize={20}
           searchValue={search}
           onSearchChange={(term) => { setSearch(term); setPage(1); }}
           onRowClick={(row) => { setSelectedDog(row); setIsViewMasterModalOpen(true); }}

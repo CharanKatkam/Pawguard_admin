@@ -461,9 +461,10 @@ export const Shelters = () => {
       key: "actions",
       header: "Actions",
       render: (_v, row) => (
-        <div style={{ display: "flex", gap: "6px" }}>
+        <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setViewShelterId(row.id);
               setIsShelterDetailsOpen(true);
             }}
@@ -485,7 +486,8 @@ export const Shelters = () => {
           </button>
           <Can permission={["edit_shelters", "manage_shelters"]}>
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setSelectedFacility(row);
                 setEditForm({
                   name: row.name || "",
@@ -513,7 +515,8 @@ export const Shelters = () => {
           </Can>
           <Can permission={["delete_shelters", "manage_shelters"]}>
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setSelectedFacility(row);
                 setIsDeleteModalOpen(true);
               }}
@@ -601,9 +604,10 @@ export const Shelters = () => {
       key: "actions",
       header: "Actions",
       render: (_v, row) => (
-        <div style={{ display: "flex", gap: "6px" }}>
+        <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setSelectedKennelForDetails(row);
               setIsKennelDetailsOpen(true);
             }}
@@ -621,7 +625,8 @@ export const Shelters = () => {
           </button>
           {!row.is_occupied && (
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setIsAssignModalOpen(true);
               }}
               style={{
@@ -890,6 +895,13 @@ export const Shelters = () => {
               setSearch(s);
               setPage(1);
             }}
+            searchMaxWidth="100%"
+            onRowClick={(row) => {
+              if (row?.id) {
+                setViewShelterId(row.id);
+                setIsShelterDetailsOpen(true);
+              }
+            }}
             leftHeaderControls={
               <>
                 <select
@@ -942,76 +954,65 @@ export const Shelters = () => {
       {/* TAB 2: Physical Kennels Workspace */}
       {activeTab === "kennels" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Kennel Filters */}
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ flex: 1, minWidth: "220px", position: "relative" }}>
-              <FaSearch style={{ position: "absolute", left: "12px", top: "11px", color: "#94A3B8" }} />
-              <input
-                type="text"
-                value={kennelSearch}
-                onChange={(e) => setKennelSearch(e.target.value)}
-                placeholder="Search kennel identifier, section, or facility..."
-                style={{
-                  width: "100%",
-                  padding: "8px 12px 8px 36px",
-                  borderRadius: "6px",
-                  border: "1px solid #CBD5E1",
-                  fontSize: "13px",
-                }}
-              />
-            </div>
-
-            <select
-              value={kennelFacilityFilter}
-              onChange={(e) => setKennelFacilityFilter(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="">All Facilities</option>
-              {allShelters.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
-
-            <select
-              value={kennelSanitationFilter}
-              onChange={(e) => setKennelSanitationFilter(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="">All Sanitation States</option>
-              <option value="clean">Clean</option>
-              <option value="needs_cleaning">Needs Cleaning</option>
-              <option value="disinfecting">Disinfecting</option>
-              <option value="out_of_service">Out of Service</option>
-            </select>
-
-            <select
-              value={kennelSectionTypeFilter}
-              onChange={(e) => setKennelSectionTypeFilter(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="">All Section Types</option>
-              {SECTION_TYPES.map((st) => (
-                <option key={st} value={st}>{st.toUpperCase()}</option>
-              ))}
-            </select>
-
-            <select
-              value={kennelOccupancyFilter}
-              onChange={(e) => setKennelOccupancyFilter(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
-            >
-              <option value="">All Occupancy States</option>
-              <option value="available">Available Units</option>
-              <option value="occupied">Occupied Units</option>
-            </select>
-          </div>
-
           {/* Kennels Table */}
           <DataTable
             columns={kennelWorkspaceColumns}
             data={filteredKennels}
             loading={kennelsLoading}
             emptyMessage="No kennel units found matching current search and filter criteria."
+            searchValue={kennelSearch}
+            onSearchChange={(s) => setKennelSearch(s)}
+            onRowClick={(row) => {
+              setSelectedKennelForDetails(row);
+              setIsKennelDetailsOpen(true);
+            }}
+            leftHeaderControls={
+              <>
+                <select
+                  value={kennelFacilityFilter}
+                  onChange={(e) => setKennelFacilityFilter(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                >
+                  <option value="">All Facilities</option>
+                  {allShelters.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={kennelSanitationFilter}
+                  onChange={(e) => setKennelSanitationFilter(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                >
+                  <option value="">All Sanitation States</option>
+                  <option value="clean">Clean</option>
+                  <option value="needs_cleaning">Needs Cleaning</option>
+                  <option value="disinfecting">Disinfecting</option>
+                  <option value="out_of_service">Out of Service</option>
+                </select>
+
+                <select
+                  value={kennelSectionTypeFilter}
+                  onChange={(e) => setKennelSectionTypeFilter(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                >
+                  <option value="">All Section Types</option>
+                  {SECTION_TYPES.map((st) => (
+                    <option key={st} value={st}>{st.toUpperCase()}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={kennelOccupancyFilter}
+                  onChange={(e) => setKennelOccupancyFilter(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+                >
+                  <option value="">All Occupancy States</option>
+                  <option value="available">Available Units</option>
+                  <option value="occupied">Occupied Units</option>
+                </select>
+              </>
+            }
           />
         </div>
       )}

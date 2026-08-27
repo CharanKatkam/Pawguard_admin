@@ -173,10 +173,41 @@ const FosterManagement = () => {
       });
 
       setFosters(formatted);
+      fetchPlacements(formatted);
     } catch (err: any) {
       setError(err?.response?.data?.detail || err?.response?.data?.message || "Failed to load foster profiles.");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const [activePlacements, setActivePlacements] = useState<any[]>([]);
+
+  const fetchPlacements = useCallback(async (fosterProfiles: FosterProfileRow[]) => {
+    try {
+      const activeProfiles = fosterProfiles.filter((f) => Number(f.active_count || 0) > 0);
+      if (activeProfiles.length === 0) {
+        setActivePlacements([]);
+        return;
+      }
+      const results = await Promise.allSettled(
+        activeProfiles.map((f) => fosterService.getProfilePlacements(f.id))
+      );
+      const allPlacements: any[] = [];
+      results.forEach((res, idx) => {
+        if (res.status === "fulfilled" && res.value) {
+          const list = unwrapList(res.value);
+          const f = activeProfiles[idx];
+          list.forEach((p: any) => {
+            if (p.is_active || p.status === "active" || (!p.returned_at && p.status !== "converted_to_adopt")) {
+              allPlacements.push({ ...p, foster_family: f.foster_family, profile_id: f.id });
+            }
+          });
+        }
+      });
+      setActivePlacements(allPlacements);
+    } catch {
+      setActivePlacements([]);
     }
   }, []);
 
@@ -209,9 +240,9 @@ const FosterManagement = () => {
 
   // Derived metrics
   const totalActiveHomes = fosters.filter((f) => f.is_available || f.status === "approved").length;
-  const totalPetsInFoster = fosters.reduce((sum, f) => sum + (f.active_count || 0), 0);
+  const totalPetsInFoster = activePlacements.length;
   const totalAvailableSlots = fosters.reduce((sum, f) => sum + Math.max(0, (f.max_capacity || 1) - (f.active_count || 0)), 0);
-  const pendingApplicationsCount = fosters.filter((f) => f.status === "applied").length;
+  const pendingApplicationsCount = fosters.filter((f) => f.status === "applied" || f.status === "pending").length;
 
   const filteredFosters = useMemo(() => {
     return fosters.filter((f) => {
@@ -237,18 +268,43 @@ const FosterManagement = () => {
     return filteredFosters.slice(start, start + pageSize);
   }, [filteredFosters, page]);
 
-  // Active Placements collection across all profiles
-  const activePlacements = useMemo(() => {
-    const placements: any[] = [];
-    fosters.forEach((f) => {
-      if (f.raw?.placements && Array.isArray(f.raw.placements)) {
-        f.raw.placements.forEach((p: any) => {
-          placements.push({ ...p, foster_family: f.foster_family, profile_id: f.id });
-        });
-      }
-    });
-    return placements;
-  }, [fosters]);
+  const handleApproveProfile = async (profileId: string) => {
+    try {
+      setIsSubmitting(true);
+      await fosterService.updateProfile(profileId, {
+        status: "approved",
+        is_available: true,
+        background_check_passed: true,
+        home_inspection_passed: true,
+      });
+      addToast("Foster profile approved successfully!", "success");
+      fetchFosters();
+      notifyDataChanged();
+      setSelectedFoster((prev) => (prev && prev.id === profileId ? { ...prev, status: "approved", is_available: true } : prev));
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to approve profile.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRejectProfile = async (profileId: string) => {
+    try {
+      setIsSubmitting(true);
+      await fosterService.updateProfile(profileId, {
+        status: "rejected",
+        is_available: false,
+      });
+      addToast("Foster profile rejected.", "info");
+      fetchFosters();
+      notifyDataChanged();
+      setSelectedFoster((prev) => (prev && prev.id === profileId ? { ...prev, status: "rejected", is_available: false } : prev));
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to reject profile.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Handlers
   const handleApplySubmit = async (e: React.FormEvent) => {
@@ -611,23 +667,6 @@ const FosterManagement = () => {
               </select>
             }
             onRowClick={(row) => void openFosterDetail(row)}
-            onEdit={(row) => {
-              setEditForm({
-                id: row.id,
-                status: (row.status as any) || "approved",
-                is_available: row.is_available,
-                max_capacity: row.max_capacity,
-                preferences: row.preferences || "",
-                notes: row.notes || "",
-                background_check_passed: row.background_check_passed,
-                home_inspection_passed: row.home_inspection_passed,
-              });
-              setIsEditModalOpen(true);
-            }}
-            onDelete={(row) => {
-              setSelectedFoster(row);
-              setIsDeleteModalOpen(true);
-            }}
             renderRowActions={(row: FosterProfileRow) => (
               <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
                 <button
@@ -648,27 +687,71 @@ const FosterManagement = () => {
                 >
                   Inspect Profile
                 </button>
-                <button
-                  onClick={() => {
-                    setPlaceTargetProfileId(row.id);
-                    setIsPlaceModalOpen(true);
-                  }}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #A7F3D0",
-                    background: "#ECFDF5",
-                    color: "#047857",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Place Dog
-                </button>
+                {(row.status === "applied" || row.status === "pending") && (
+                  <>
+                    <button
+                      disabled={isSubmitting}
+                      onClick={() => void handleApproveProfile(row.id)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #A7F3D0",
+                        background: "#ECFDF5",
+                        color: "#047857",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      disabled={isSubmitting}
+                      onClick={() => void handleRejectProfile(row.id)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #FCA5A5",
+                        background: "#FEF2F2",
+                        color: "#991B1B",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </>
+                )}
+                {row.status === "approved" && (
+                  <button
+                    onClick={() => {
+                      setPlaceTargetProfileId(row.id);
+                      setIsPlaceModalOpen(true);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #A7F3D0",
+                      background: "#ECFDF5",
+                      color: "#047857",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Place Dog
+                  </button>
+                )}
               </div>
             )}
           />
@@ -932,36 +1015,88 @@ const FosterManagement = () => {
       </Modal>
 
       {/* Detailed Profile & History Modal */}
-      <Modal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} title={`Foster Profile — ${selectedFoster?.foster_family || "Caregiver"}`} maxWidth="720px">
+      <Modal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} title={`Foster Application Review — ${selectedFoster?.foster_family || "Caregiver"}`} maxWidth="750px">
         {selectedFoster && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Header Box */}
             <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>{selectedFoster.foster_family}</h2>
                 <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  Profile ID: <span style={{ fontFamily: "monospace" }}>{selectedFoster.id}</span>
+                  Profile / Application ID: <span style={{ fontFamily: "monospace" }}>{selectedFoster.id}</span>
                 </div>
+                {selectedFoster.user?.email && (
+                  <div style={{ fontSize: "13px", color: "#334155", marginTop: "2px" }}>
+                    Email: <strong>{selectedFoster.user.email}</strong> {selectedFoster.user?.phone ? `• Phone: ${selectedFoster.user.phone}` : ""}
+                  </div>
+                )}
               </div>
-              <span style={{ padding: "6px 14px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: "#ECFDF5", color: "#059669" }}>
+              <span
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "999px",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  textTransform: "uppercase",
+                  background: selectedFoster.status === "approved" ? "#D1FAE5" : selectedFoster.status === "applied" || selectedFoster.status === "pending" ? "#FEF3C7" : selectedFoster.status === "rejected" ? "#FEE2E2" : "#F1F5F9",
+                  color: selectedFoster.status === "approved" ? "#047857" : selectedFoster.status === "applied" || selectedFoster.status === "pending" ? "#B45309" : selectedFoster.status === "rejected" ? "#B91C1C" : "#475569",
+                }}
+              >
                 {selectedFoster.status}
               </span>
             </div>
 
+            {/* Application Overview & Preferences Grid */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Background Check</div>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: selectedFoster.background_check_passed ? "#059669" : "#D97706", marginTop: "4px" }}>
-                  {selectedFoster.background_check_passed ? "✓ Passed / Verified" : "Pending Verification"}
+              <div style={{ background: "#FFF", padding: "12px 16px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Care Capacity &amp; Placements</div>
+                <div style={{ fontSize: "14px", fontWeight: 700, color: "#2563EB", marginTop: "4px" }}>
+                  {selectedFoster.active_count || 0} Active / {selectedFoster.max_capacity || 1} Max Capacity
                 </div>
               </div>
-              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Home Inspection</div>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: selectedFoster.home_inspection_passed ? "#059669" : "#D97706", marginTop: "4px" }}>
-                  {selectedFoster.home_inspection_passed ? "✓ Passed / Verified Yard" : "Pending Inspection"}
+              <div style={{ background: "#FFF", padding: "12px 16px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Care Preferences</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  {selectedFoster.preferences || "Any"}
                 </div>
               </div>
             </div>
 
+            {/* Residence, Household & Questionnaire Details */}
+            {selectedFoster.notes && (
+              <div style={{ background: "#FFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A", marginBottom: "8px" }}>
+                  Application Questionnaire &amp; Residence Information
+                </div>
+                <div style={{ fontSize: "13px", color: "#334155", whiteSpace: "pre-line", lineHeight: "1.5" }}>
+                  {selectedFoster.notes}
+                </div>
+              </div>
+            )}
+
+            {/* Verification & Inspection Status */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ background: "#FFF", padding: "12px 16px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Background Check</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: selectedFoster.background_check_passed ? "#059669" : "#D97706", marginTop: "4px" }}>
+                  {selectedFoster.background_check_passed ? "✓ Passed / Verified" : "Pending Verification"}
+                </div>
+                {selectedFoster.raw?.background_check_notes && (
+                  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>Notes: {selectedFoster.raw.background_check_notes}</div>
+                )}
+              </div>
+              <div style={{ background: "#FFF", padding: "12px 16px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Home Inspection</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: selectedFoster.home_inspection_passed ? "#059669" : "#D97706", marginTop: "4px" }}>
+                  {selectedFoster.home_inspection_passed ? "✓ Passed / Verified Yard" : "Pending Inspection"}
+                </div>
+                {selectedFoster.raw?.home_inspection_notes && (
+                  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>Notes: {selectedFoster.raw.home_inspection_notes}</div>
+                )}
+              </div>
+            </div>
+
+            {/* Recent History / Progress Logs */}
             <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "16px" }}>
               <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
                 <FaHistory color="#2563EB" /> Recent Progress Logs &amp; Supply Dispatches
@@ -971,7 +1106,7 @@ const FosterManagement = () => {
                   No recent logs registered for this profile.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "180px", overflowY: "auto" }}>
                   {progressLogs.map((log, idx) => (
                     <div key={idx} style={{ background: "#FFF", padding: "10px", borderRadius: "6px", border: "1px solid #E2E8F0", fontSize: "12px" }}>
                       <strong>Progress Log:</strong> Weight: {log.weight_kg || "-"}kg &bull; Behavior: {log.behavior_notes || "-"}
@@ -986,8 +1121,29 @@ const FosterManagement = () => {
               )}
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setIsDetailModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF" }}>Close</button>
+            {/* Modal Footer Actions */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              {(selectedFoster.status === "applied" || selectedFoster.status === "pending") && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleApproveProfile(selectedFoster.id)}
+                    style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Accept/Approve
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleRejectProfile(selectedFoster.id)}
+                    style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Reject
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={() => setIsDetailModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}>Close</button>
             </div>
           </div>
         )}

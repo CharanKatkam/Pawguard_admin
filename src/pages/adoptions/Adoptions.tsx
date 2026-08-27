@@ -295,6 +295,12 @@ const Adoptions = () => {
       addToast(`Updated status to ${newStatus.toUpperCase()}!`, "success");
       fetchAdoptions();
       notifyDataChanged();
+      setSelectedAdoption((prev) => {
+        if (prev && String(prev.id) === appId) {
+          return { ...prev, status: newStatus };
+        }
+        return prev;
+      });
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to update status.", "error");
     } finally {
@@ -570,13 +576,21 @@ const Adoptions = () => {
                 >
                   <FaStar /> Score
                 </button>
-                {String(row.status).toLowerCase() !== "approved" && String(row.status).toLowerCase() !== "completed" && (
-                  <button
-                    onClick={() => void handleStatusChange(String(row.id), "approved")}
-                    style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                  >
-                    Approve
-                  </button>
+                {String(row.status).toLowerCase() !== "approved" && String(row.status).toLowerCase() !== "completed" && String(row.status).toLowerCase() !== "rejected" && (
+                  <>
+                    <button
+                      onClick={() => void handleStatusChange(String(row.id), "approved")}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => void handleStatusChange(String(row.id), "rejected")}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Reject
+                    </button>
+                  </>
                 )}
                 {String(row.status).toLowerCase() === "approved" && (
                   <button
@@ -850,8 +864,28 @@ const Adoptions = () => {
               )}
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setIsDetailsModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF" }}>Close</button>
+             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              {String(selectedAdoption.status).toLowerCase() !== "approved" && String(selectedAdoption.status).toLowerCase() !== "completed" && String(selectedAdoption.status).toLowerCase() !== "rejected" && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleStatusChange(String(selectedAdoption.id), "approved")}
+                    style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Accept/Approve
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleStatusChange(String(selectedAdoption.id), "rejected")}
+                    style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Reject
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={() => setIsDetailsModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", cursor: "pointer" }}>Close</button>
             </div>
           </div>
         )}

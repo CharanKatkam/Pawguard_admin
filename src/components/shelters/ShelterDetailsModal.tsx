@@ -313,12 +313,12 @@ export const ShelterDetailsModal: React.FC<ShelterDetailsModalProps> = ({
           {/* Tabs Header */}
           <div style={{ display: "flex", gap: "8px", borderBottom: "1px solid #E2E8F0", paddingBottom: "8px", overflowX: "auto" }}>
             {[
-              { id: "info", label: "A-B. Overview & Contact", icon: <FaBuilding /> },
-              { id: "capacity", label: "C-D. Sections & Kennels", icon: <FaBed /> },
-              { id: "animals", label: "E-H. Current Animals", icon: <FaPaw /> },
-              { id: "medical", label: "G. Medical & Quarantine", icon: <FaUserMd /> },
-              { id: "transfers", label: "I-J. Transfers & Placements", icon: <FaExchangeAlt /> },
-              { id: "history", label: "K. Audit History", icon: <FaHistory /> },
+              { id: "info", label: "Overview & Contact", icon: <FaBuilding /> },
+              { id: "capacity", label: "Sections & Kennels", icon: <FaBed /> },
+              { id: "animals", label: "Current Animals", icon: <FaPaw /> },
+              { id: "medical", label: "Medical & Quarantine", icon: <FaUserMd /> },
+              { id: "transfers", label: "Transfers & Placements", icon: <FaExchangeAlt /> },
+              { id: "history", label: "Audit History", icon: <FaHistory /> },
             ].map((tab) => (
               <button
                 key={tab.id}

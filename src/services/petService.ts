@@ -32,7 +32,7 @@ export const petService = {
 
   // GET /dogs — fetch complete dataset across all pages for global KPI calculations
   getAllDogs: async (params?: Record<string, unknown>) => {
-    const pageSize = 100;
+    const pageSize = 50;
     const collected: any[] = [];
     try {
       const firstRes = await api.get("/dogs", { params: { ...params, page: 1, page_size: pageSize } });

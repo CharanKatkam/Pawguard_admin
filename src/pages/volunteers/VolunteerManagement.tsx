@@ -49,6 +49,11 @@ const VolunteerManagement = () => {
   const [volError, setVolError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [appPage, setAppPage] = useState(1);
+
+  useEffect(() => {
+    setAppPage(1);
+  }, [statusFilter, searchQuery]);
 
   // Shifts & Attendance State
   const [shifts, setShifts] = useState<any[]>([]);
@@ -1203,12 +1208,19 @@ const VolunteerManagement = () => {
           ) : (
             <DataTable
               columns={appColumns}
-              data={filteredApplications}
+              data={filteredApplications.slice((appPage - 1) * 5, appPage * 5)}
               module="volunteers"
               serverMode={true}
               totalCount={filteredApplications.length}
+              page={appPage}
+              pageSize={5}
+              onPageChange={setAppPage}
               searchValue={searchQuery}
               onSearchChange={setSearchQuery}
+              onRowClick={(row: any) => {
+                setSelectedVolunteer(row);
+                setIsProfileModalOpen(true);
+              }}
               leftHeaderControls={
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -1262,7 +1274,7 @@ const VolunteerManagement = () => {
           {volLoading ? (
             <p style={{ color: "#64748B", padding: "20px 0" }}>Loading active volunteers roster...</p>
           ) : (
-            <DataTable columns={activeVolColumns} data={activeVolunteersList} module="volunteers" />
+            <DataTable columns={activeVolColumns} data={activeVolunteersList} module="volunteers" onRowClick={(row: any) => void handleOpenServiceSummary(row.id || row.profile_id)} />
           )}
         </div>
       )}
@@ -1298,7 +1310,7 @@ const VolunteerManagement = () => {
           {shiftLoading ? (
             <p style={{ color: "#64748B", padding: "20px 0" }}>Loading scheduled shifts from backend...</p>
           ) : (
-            <DataTable columns={shiftColumns} data={shifts} module="volunteers" />
+            <DataTable columns={shiftColumns} data={shifts} module="volunteers" onRowClick={(row: any) => void handleOpenAttendance(row)} />
           )}
         </div>
       )}

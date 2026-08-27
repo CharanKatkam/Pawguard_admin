@@ -238,6 +238,11 @@ const VehicleManagement = () => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [driverFilter, setDriverFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, typeFilter, driverFilter]);
 
   // --- MODAL STATES ---
   const [selectedVehicle, setSelectedVehicle] = useState<FormattedVehicle | null>(null);
@@ -914,7 +919,7 @@ const VehicleManagement = () => {
 
       {/* VEHICLES DATA TABLE */}
       <DataTable
-        data={filteredVehicles}
+        data={filteredVehicles.slice((page - 1) * 5, page * 5)}
         columns={columns}
         loading={loading}
         error={error}
@@ -923,6 +928,9 @@ const VehicleManagement = () => {
         module="vehicles"
         serverMode={true}
         totalCount={filteredVehicles.length}
+        page={page}
+        pageSize={5}
+        onPageChange={setPage}
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
         leftHeaderControls={

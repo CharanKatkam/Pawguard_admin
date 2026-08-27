@@ -19,6 +19,7 @@ import reminderService from "../../services/reminderService";
 import dogService from "../../services/dogService";
 import notificationService from "../../services/notificationService";
 import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
+import { getCurrentUserRole } from "../../utils/roleUtils";
 
 type Row = Record<string, unknown>;
 
@@ -173,11 +174,14 @@ const VaccinationReminders = () => {
       setRxError(null);
       setRemLoading(true);
       setRemError(null);
+      const isShelterManager = getCurrentUserRole() === "shelter_manager";
       const [vacc, rx, admin, rem] = await Promise.all([
         reminderService.getVaccinations({ dog_id: dogId, page: 1, page_size: 20 }),
         reminderService.getPrescriptions({ dog_id: dogId, page: 1, page_size: 20 }),
         reminderService.getDogAdministrations(dogId),
-        reminderService.getPetReminders(dogId),
+        isShelterManager
+          ? reminderService.getPetReminders(dogId).catch(() => ({ data: [] }))
+          : reminderService.getPetReminders(dogId),
       ]);
       setVaccinations(Array.isArray(vacc?.data) ? vacc.data : []);
       setPrescriptions(Array.isArray(rx?.data) ? rx.data : []);

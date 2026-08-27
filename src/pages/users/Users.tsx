@@ -137,6 +137,12 @@ const RESCUE_ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendR
   { value: "rescue_staff", label: "Rescue Staff", backendRoles: ["rescue_staff"] },
 ];
 
+const SHELTER_ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backendRoles: string[] }> = [
+  { value: "all", label: "All Shelter Staff", backendRoles: ["shelter_manager"] },
+  { value: "shelter_manager", label: "Shelter Manager", backendRoles: ["shelter_manager"] },
+];
+
+
 /**
  * Checks if any of the user's assigned roles are authorized for Admin Portal access.
  */
@@ -444,13 +450,21 @@ const Users = () => {
   const currentUserRole = getCurrentUserRole();
   const isRescueCentreAdmin = currentUserRole === "rescue_centre_admin";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const isShelterManager = currentUserRole === "shelter_manager";
   const currentRescueCentreId = (currentUser as any)?.rescue_centre_id || (currentUser as any)?.rescue_center_id || (currentUser as any)?.rescue_facility_id || (currentUser as any)?.facility_id || (currentUser as any)?.organization_id || (currentUser as any)?.id;
+  const currentShelterId = (currentUser as any)?.shelter_id || (currentUser as any)?.shelterId || (currentUser as any)?.facility_id || (currentUser as any)?.facilityId || (currentUser as any)?.organization_id;
+
 
   // Filter state for summary cards: "staff" (default internal accounts) or "public" (non-staff registrations)
   const [activeFilter, setActiveFilter] = useState<"staff" | "public">("staff");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter, roleFilter, statusFilter, searchTerm]);
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(() => searchParams.get("action") === "add");
@@ -709,6 +723,9 @@ const Users = () => {
       const queryParams: Record<string, unknown> = { page_size: 100 };
       if (isRescueCentreAdmin && currentRescueCentreId) {
         queryParams.rescue_centre_id = currentRescueCentreId;
+      } else if (isShelterManager && currentShelterId) {
+        queryParams.shelter_id = currentShelterId;
+        queryParams.facility_id = currentShelterId;
       }
 
       const response = await userService.getUsers(queryParams);
@@ -743,6 +760,47 @@ const Users = () => {
 
           const uCentreId = user.rescue_centre_id || (user as any).rescue_center_id || (user as any).facility_id || (user as any).organization_id;
           if (uCentreId && currentRescueCentreId && String(uCentreId) !== String(currentRescueCentreId)) {
+            return false;
+          }
+
+          return true;
+        });
+      }
+
+      // Enforce Shelter Manager scope when accessed by Shelter Manager
+      if (isShelterManager) {
+        userList = userList.filter((user: UserPayload) => {
+          const roles = Array.isArray(user.roles)
+            ? user.roles
+            : Array.isArray(user.role_names)
+            ? user.role_names
+            : user.role
+            ? [user.role]
+            : [];
+
+          const hasShelterRole = roles.some((r) => {
+            const norm = normalizeRole(r) || String(r).toLowerCase().trim();
+            // Exclude unrelated system roles
+            const isUnrelated = [
+              "super_admin",
+              "rescue_centre_admin",
+              "rescue_coordinator",
+              "rescue_agent",
+              "veterinarian",
+              "adoption_coordinator",
+              "foster_coordinator",
+              "volunteer_coordinator",
+              "inventory_manager",
+              "finance_user",
+              "volunteer"
+            ].includes(norm);
+            return !isUnrelated;
+          });
+
+          if (!hasShelterRole) return false;
+
+          const uShelterId = user.rescue_centre_id || (user as any).rescue_center_id || (user as any).shelter_id || (user as any).shelterId || (user as any).facility_id || (user as any).facilityId || (user as any).organization_id;
+          if (uShelterId && currentShelterId && String(uShelterId) !== String(currentShelterId)) {
             return false;
           }
 
@@ -802,7 +860,7 @@ const Users = () => {
     } finally {
       setLoading(false);
     }
-  }, [isRescueCentreAdmin, currentRescueCentreId]);
+  }, [isRescueCentreAdmin, currentRescueCentreId, isShelterManager, currentShelterId]);
 
   useEffect(() => {
     fetchUsers();
@@ -825,6 +883,11 @@ const Users = () => {
         addToast("Access Denied: Rescue Centre Admins can only onboard rescue personnel.", "error");
         return;
       }
+    } else if (isShelterManager) {
+      if (formData.role !== "shelter_manager") {
+        addToast("Access Denied: Shelter Managers can only onboard shelter manager staff.", "error");
+        return;
+      }
     } else if (!isSuperAdmin && formData.role === "super_admin") {
       addToast("Access Denied: Only a Super Administrator can assign Super Admin privileges.", "error");
       return;
@@ -845,6 +908,10 @@ const Users = () => {
       };
       if (isRescueCentreAdmin && currentRescueCentreId) {
         createPayload.rescue_centre_id = currentRescueCentreId;
+      } else if (isShelterManager && currentShelterId) {
+        createPayload.rescue_centre_id = currentShelterId;
+        (createPayload as any).facility_id = currentShelterId;
+        (createPayload as any).shelter_id = currentShelterId;
       }
       await userService.createUser(createPayload);
       addToast(`User ${formData.name} provisioned successfully!`, "success");
@@ -866,6 +933,12 @@ const Users = () => {
     if (!isSuperAdmin && (formData.role.includes("super_admin") || selectedUser.roles.includes("super_admin"))) {
       addToast("Access Denied: Only a Super Administrator can modify Super Admin accounts or roles.", "error");
       return;
+    }
+    if (isShelterManager) {
+      if (formData.role !== "shelter_manager") {
+        addToast("Access Denied: Shelter Managers can only assign shelter manager staff role.", "error");
+        return;
+      }
     }
 
     try {
@@ -907,7 +980,11 @@ const Users = () => {
     }
   };
 
-  const activeRoleFilterOptions = isRescueCentreAdmin ? RESCUE_ROLE_FILTER_OPTIONS : ROLE_FILTER_OPTIONS;
+  const activeRoleFilterOptions = isRescueCentreAdmin
+    ? RESCUE_ROLE_FILTER_OPTIONS
+    : isShelterManager
+    ? SHELTER_ROLE_FILTER_OPTIONS
+    : ROLE_FILTER_OPTIONS;
 
   const matchesRoleFilter = useCallback(
     (userRoles: string[], filterValue: string): boolean => {
@@ -924,13 +1001,19 @@ const Users = () => {
     if (isRescueCentreAdmin) {
       return users.filter((u) => u.roles.some((r) => RESCUE_PERMITTED_ROLES.includes(normalizeRole(r) || String(r).toLowerCase().trim())));
     }
+    if (isShelterManager) {
+      return users.filter((u) => u.roles.some((r) => {
+        const norm = normalizeRole(r) || String(r).toLowerCase().trim();
+        return norm === "shelter_manager";
+      }));
+    }
     return users.filter((u) => hasAdminPortalAccess(u.roles));
-  }, [users, isRescueCentreAdmin]);
+  }, [users, isRescueCentreAdmin, isShelterManager]);
 
   const publicUsers = useMemo(() => {
-    if (isRescueCentreAdmin) return [];
+    if (isRescueCentreAdmin || isShelterManager) return [];
     return users.filter((u) => !hasAdminPortalAccess(u.roles));
-  }, [users, isRescueCentreAdmin]);
+  }, [users, isRescueCentreAdmin, isShelterManager]);
 
   // Statistics cards dynamically calculated from backend data
   const stats = useMemo(() => {
@@ -995,6 +1078,56 @@ const Users = () => {
             document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
           },
           selected: activeFilter === "staff" && roleFilter === "rescue_centre_admin",
+        },
+      ];
+    }
+
+    if (isShelterManager) {
+      return [
+        {
+          title: "Total Shelter Staff",
+          value: loading ? "..." : `${staffUsers.length} Staff`,
+          trend: "Shelter Personnel",
+          color: "#2563EB",
+          icon: <FaUsers />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setRoleFilter("all");
+            setStatusFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
+        },
+        {
+          title: "Active Shelter Staff",
+          value: loading ? "..." : `${staffUsers.filter((u) => u.isActive).length} Active`,
+          trend: "Operational Access Enabled",
+          color: "#059669",
+          icon: <FaCheckCircle />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setStatusFilter("active");
+            setRoleFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && statusFilter === "active",
+        },
+        {
+          title: "Inactive Shelter Staff",
+          value: loading ? "..." : `${staffUsers.filter((u) => !u.isActive).length} Inactive`,
+          trend: "Access Suspended",
+          color: "#EF4444",
+          icon: <FaTimesCircle />,
+          onClick: () => {
+            setActiveFilter("staff");
+            setStatusFilter("inactive");
+            setRoleFilter("all");
+            setSearchTerm("");
+            document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          selected: activeFilter === "staff" && statusFilter === "inactive",
         },
       ];
     }
@@ -1076,7 +1209,7 @@ const Users = () => {
         selected: activeFilter === "public",
       },
     ];
-  }, [staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm, isRescueCentreAdmin]);
+  }, [staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm, isRescueCentreAdmin, isShelterManager]);
 
   // Table rows filtered according to active filter tab, role filter, status filter, and search
   const filteredUsers = useMemo(() => {
@@ -1112,6 +1245,16 @@ const Users = () => {
       if (statusFilter === "active") return "Active Rescue Centre Personnel";
       if (statusFilter === "inactive") return "Inactive Rescue Centre Personnel";
       return "Rescue Centre Personnel & Staff";
+    }
+
+    if (isShelterManager) {
+      if (roleFilter !== "all") {
+        const option = SHELTER_ROLE_FILTER_OPTIONS.find((opt) => opt.value === roleFilter);
+        if (option) return `${option.label} Staff`;
+      }
+      if (statusFilter === "active") return "Active Shelter Staff";
+      if (statusFilter === "inactive") return "Inactive Shelter Staff";
+      return "Shelter Staff Accounts";
     }
 
     if (activeFilter === "public") return "Public Registered Users (Read-Only Reference)";
@@ -1183,11 +1326,13 @@ const Users = () => {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 800 }}>
-          {isRescueCentreAdmin ? "Staff & Users" : "User Management & Personnel"}
+          {isRescueCentreAdmin ? "Staff & Users" : isShelterManager ? "Shelter Staff" : "User Management & Personnel"}
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "14px" }}>
           {isRescueCentreAdmin
             ? "Manage Rescue Centre personnel, roles, and access."
+            : isShelterManager
+            ? "Manage shelter personnel, roles, and access."
             : "Manage PawGuard internal user accounts, staff roles, permissions, and Admin Portal access."}
         </p>
       </div>
@@ -1356,10 +1501,13 @@ const Users = () => {
         <div id="users-table">
           <DataTable
             columns={columns}
-            data={filteredUsers}
+            data={filteredUsers.slice((page - 1) * 5, page * 5)}
             module="users"
             serverMode={true}
             totalCount={filteredUsers.length}
+            page={page}
+            pageSize={5}
+            onPageChange={setPage}
             searchValue={searchTerm}
             onSearchChange={setSearchTerm}
             onRowClick={(row) => {
@@ -1373,6 +1521,13 @@ const Users = () => {
               if (!isSuperAdmin && target.roles.includes("super_admin")) {
                 addToast("Access Denied: Only a Super Administrator can edit Super Admin accounts.", "error");
                 return;
+              }
+              if (isShelterManager) {
+                const uShelterId = target.rescue_centre_id || (target as any).rescue_center_id || target.shelter_id || (target as any).shelterId || (target as any).facility_id || (target as any).facilityId || (target as any).organization_id;
+                if (uShelterId && currentShelterId && String(uShelterId) !== String(currentShelterId)) {
+                  addToast("Access Denied: You can only edit staff from your own shelter.", "error");
+                  return;
+                }
               }
               setSelectedUser(target);
               setFormData({
@@ -1388,6 +1543,13 @@ const Users = () => {
               if (!isSuperAdmin && target.roles.includes("super_admin")) {
                 addToast("Access Denied: Only a Super Administrator can delete Super Admin accounts.", "error");
                 return;
+              }
+              if (isShelterManager) {
+                const uShelterId = target.rescue_centre_id || (target as any).rescue_center_id || target.shelter_id || (target as any).shelterId || (target as any).facility_id || (target as any).facilityId || (target as any).organization_id;
+                if (uShelterId && currentShelterId && String(uShelterId) !== String(currentShelterId)) {
+                  addToast("Access Denied: You can only delete staff from your own shelter.", "error");
+                  return;
+                }
               }
               setSelectedUser(target);
               setIsDeleteModalOpen(true);
@@ -1958,6 +2120,10 @@ const Users = () => {
                   <option value="rescue_staff">Rescue Staff</option>
                   <option value="rescue_centre_admin">Rescue Centre Admin</option>
                 </>
+              ) : isShelterManager ? (
+                <>
+                  <option value="shelter_manager">Shelter Manager</option>
+                </>
               ) : (
                 <>
                   {isSuperAdmin && <option value="super_admin">Super Admin (Full System Privileges)</option>}
@@ -2032,6 +2198,10 @@ const Users = () => {
                   <option value="rescue_coordinator">Rescue Coordinator</option>
                   <option value="rescue_staff">Rescue Staff</option>
                   <option value="rescue_centre_admin">Rescue Centre Admin</option>
+                </>
+              ) : isShelterManager ? (
+                <>
+                  <option value="shelter_manager">Shelter Manager</option>
                 </>
               ) : (
                 <>

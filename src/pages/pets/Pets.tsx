@@ -213,20 +213,24 @@ const Pets = () => {
 
   const dogId = (dog: any) => dog?.dog_id || dog?.id || dog?.original_dog_id || dog?.companion_pet?.original_dog_id || dog?.companion_pet_id || dog?.companion_pet?.id || "";
 
-  const formatDog = (dog: any) => ({
-    ...dog,
-    registration_number: dog.registration_number || dog.id || "-",
-    name: dog.name || "-",
-    photo_url: getDogPhotoUrl(dog, dogPhotoMap),
-    breed: dog.breed || "-",
-    gender: dog.gender || "",
-    estimated_age: dog.estimated_age || dog.age || "-",
-    age_months: dog.age_months ?? "",
-    weight: dog.weight ?? "",
-    is_adoptable: !!dog.is_adoptable,
-    is_public_visible: dog.is_public_visible !== false,
-    status: dog.status || "-",
-  });
+  const formatDog = (dog: any) => {
+    const rawStatus = String(dog.status || "").toLowerCase();
+    const isFostered = rawStatus === "fostered" || (!!dog.foster_home_id && rawStatus !== "adopted");
+    return {
+      ...dog,
+      registration_number: dog.registration_number || dog.id || "-",
+      name: dog.name || "-",
+      photo_url: getDogPhotoUrl(dog, dogPhotoMap),
+      breed: dog.breed || "-",
+      gender: dog.gender || "",
+      estimated_age: dog.estimated_age || dog.age || "-",
+      age_months: dog.age_months ?? "",
+      weight: dog.weight ?? "",
+      is_adoptable: !!dog.is_adoptable,
+      is_public_visible: dog.is_public_visible !== false,
+      status: isFostered ? "fostered" : (dog.status || "-"),
+    };
+  };
 
   const handleMasterPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

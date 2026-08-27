@@ -611,6 +611,7 @@ const MedicalRecords = () => {
           pageSize={pageSize}
           onPageChange={(newPage) => setPage(newPage)}
           hideSearch={true}
+          onRowClick={(row) => void openMedicalProfile(row)}
           onDelete={(row) => {
             setSelectedRecord(row);
             setIsDeleteModalOpen(true);
