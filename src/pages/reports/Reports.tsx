@@ -42,7 +42,6 @@ import {
 } from "react-icons/fa";
 import volunteerService from "../../services/volunteerService";
 import fosterService from "../../services/fosterService";
-import reportsService from "../../services/reportsService";
 import shelterService from "../../services/shelterService";
 import dogService from "../../services/dogService";
 import reminderService from "../../services/reminderService";
@@ -348,7 +347,7 @@ const Reports = () => {
       // 8. Load Inventory Data (if Inventory Manager, Super Admin)
       if (isInventoryManager || isSuperAdmin) {
         try {
-          const invRes = await inventoryService.getItems({ page: 1, page_size: 100 });
+          const invRes = await inventoryService.getInventory({ page: 1, page_size: 100 });
           const rawItems = Array.isArray(invRes?.data) ? invRes.data : Array.isArray(invRes) ? invRes : [];
           setInventoryItems(rawItems.map(normalizeInventoryRow));
         } catch (e) {
@@ -408,13 +407,17 @@ const Reports = () => {
     });
 
     const now = new Date();
-    const points: { month: string; amount: number }[] = [];
+    const points: { month: string; revenue: number; expenses: number; net: number }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const revenue = revByMonth.get(key) || 0;
+      const expenses = 0;
       points.push({
         month: MONTHS[d.getMonth()],
-        amount: revByMonth.get(key) || 0,
+        revenue,
+        expenses,
+        net: revenue - expenses,
       });
     }
     return points;

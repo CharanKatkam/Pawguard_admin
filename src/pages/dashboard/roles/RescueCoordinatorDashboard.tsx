@@ -817,6 +817,95 @@ const RescueCoordinatorDashboard = () => {
           </div>
         )}
       </Modal>
+      {/* Transport Volunteer Roster & Review Table */}
+      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+            Transport Response Volunteers ({approvedTransportVols.length} Active, {pendingTransportVols.length} Pending Review)
+          </h3>
+          {volLoading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading volunteers...</span>}
+        </div>
+        <DataTable
+          columns={[
+            {
+              key: "name",
+              title: "Volunteer Name & Contact",
+              render: (_: unknown, row: any) => (
+                <div>
+                  <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.user?.full_name || row.full_name || row.emergency_contact_name || "Volunteer"}</div>
+                  <div style={{ fontSize: "12px", color: "#64748B" }}>{row.user?.email || row.email || `ID: ${String(row.id || "").slice(0, 8)}`}</div>
+                </div>
+              ),
+            },
+            {
+              key: "vehicle_type",
+              title: "Vehicle / Equipment",
+              render: (v: string, row: any) => <span style={{ color: "#475569", fontSize: "13px" }}>{v || row.vehicle || "Standard Rescue Transport"}</span>,
+            },
+            {
+              key: "status",
+              title: "Status",
+              render: (v: string) => <VolBadge status={v} />,
+            },
+            {
+              key: "actions",
+              title: "Actions",
+              render: (_: unknown, row: any) => (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setSelectedVol(row); setIsVolModalOpen(true); }}
+                  style={{ padding: "5px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#0F172A", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaEye /> Review
+                </button>
+              ),
+            },
+          ]}
+          data={transportVols}
+          loading={volLoading}
+          emptyMessage="No transport volunteers registered."
+          onRowClick={(row: any) => { setSelectedVol(row); setIsVolModalOpen(true); }}
+        />
+      </div>
+
+      {/* Transport Volunteer Review Modal */}
+      <Modal isOpen={isVolModalOpen} onClose={() => setIsVolModalOpen(false)} title="Transport Volunteer Application Review">
+        {selectedVol && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div><strong>Name:</strong> {selectedVol.user?.full_name || selectedVol.full_name || selectedVol.emergency_contact_name || "Volunteer"}</div>
+              <div><strong>Email:</strong> {selectedVol.user?.email || selectedVol.email || "N/A"}</div>
+              <div><strong>Phone:</strong> {selectedVol.user?.phone || selectedVol.phone || "N/A"}</div>
+              <div><strong>Status:</strong> <VolBadge status={selectedVol.status} /></div>
+              <div><strong>Vehicle Type:</strong> {selectedVol.vehicle_type || selectedVol.vehicle || "N/A"}</div>
+              <div><strong>License #:</strong> {selectedVol.driver_license_number || selectedVol.license || "N/A"}</div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              {isVolPending(selectedVol.status) && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isVolSubmitting}
+                    onClick={() => handleVolApprove(selectedVol)}
+                    style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaCheckCircle /> Approve Volunteer
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isVolSubmitting}
+                    onClick={() => handleVolReject(selectedVol)}
+                    style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#DC2626", color: "#FFF", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaTimesCircle /> Reject Volunteer
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

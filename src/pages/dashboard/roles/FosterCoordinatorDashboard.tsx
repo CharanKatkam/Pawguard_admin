@@ -334,6 +334,19 @@ const FosterCoordinatorDashboard = () => {
       title: "Status",
       render: (v: string) => <VolunteerStatusBadge status={v} />,
     },
+    {
+      key: "actions",
+      title: "Actions",
+      render: (_: string, row: any) => (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setSelectedVol(row); setIsViewModalOpen(true); }}
+          style={{ padding: "5px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#0F172A", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+        >
+          <FaEye /> Review
+        </button>
+      ),
+    },
   ];
 
   return (
@@ -374,6 +387,56 @@ const FosterCoordinatorDashboard = () => {
         </div>
         <DataTable columns={placementColumns} data={profiles} loading={loading} emptyMessage="No active foster profiles registered." onRowClick={(row: any) => { setSelectedVol(row); setIsViewModalOpen(true); }} />
       </div>
+
+      {/* Foster Volunteer Applicants Table */}
+      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, color: "#0F172A", fontSize: "16px", fontWeight: 700 }}>
+            Foster Volunteer Applications ({pendingFosterVols.length} Pending Review)
+          </h3>
+          {volLoading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading volunteers...</span>}
+        </div>
+        <DataTable columns={volunteerColumns} data={fosterVolunteers} loading={volLoading} emptyMessage="No foster volunteer applications found." onRowClick={(row: any) => { setSelectedVol(row); setIsViewModalOpen(true); }} />
+      </div>
+
+      {/* Volunteer Application Review Modal */}
+      <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Foster Caregiver Application Review">
+        {selectedVol && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div><strong>Name:</strong> {selectedVol.user?.full_name || selectedVol.full_name || selectedVol.emergency_contact_name || "Volunteer"}</div>
+              <div><strong>Email:</strong> {selectedVol.user?.email || selectedVol.email || "N/A"}</div>
+              <div><strong>Phone:</strong> {selectedVol.user?.phone || selectedVol.phone || "N/A"}</div>
+              <div><strong>Status:</strong> <VolunteerStatusBadge status={selectedVol.status} /></div>
+              <div><strong>Availability:</strong> {selectedVol.availability || "Flexible"}</div>
+              <div><strong>Experience:</strong> {selectedVol.animal_handling_experience || selectedVol.skills || "N/A"}</div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              {isPending(selectedVol.status) && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => handleApprove(selectedVol)}
+                    style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaCheckCircle /> Approve Application
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => handleReject(selectedVol)}
+                    style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#DC2626", color: "#FFF", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <FaTimesCircle /> Reject Application
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

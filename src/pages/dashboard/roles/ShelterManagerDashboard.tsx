@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
@@ -21,8 +21,7 @@ import {
   FaPlus,
   FaFileAlt,
   FaCopy,
-  FaCheckCircle,
-  FaTimesCircle,
+  FaExternalLinkAlt,
 } from "react-icons/fa";
 import shelterService from "../../../services/shelterService";
 import petService from "../../../services/petService";

@@ -12,7 +12,6 @@ import {
   FaEdit,
   FaTrash,
   FaExchangeAlt,
-  FaSearch,
   FaLayerGroup,
   FaPaw,
   FaCheckCircle,
