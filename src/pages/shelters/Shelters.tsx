@@ -381,15 +381,18 @@ export const Shelters = () => {
     const totalShelters = allShelters.length || totalCount;
     const activeShelters = allShelters.filter((s) => s.status === "active").length;
     const totalCapacity = allShelters.reduce((acc, s) => acc + (Number(s.total_capacity) || 0), 0);
+    const occupiedSpaces = allShelters.reduce((acc, s) => acc + (Number(s.occupied_spaces) || 0), 0);
+    const availableSpaces = allShelters.reduce((acc, s) => acc + (Number(s.available_spaces) || Math.max(0, totalCapacity - occupiedSpaces)), 0);
+    const occupancyPct = totalCapacity > 0 ? Math.round((occupiedSpaces / totalCapacity) * 100) : 0;
 
     return {
       totalShelters,
       activeShelters,
       totalCapacity: dashboardStats?.total_capacity ?? totalCapacity,
-      occupiedSpaces: dashboardStats?.occupied_spaces ?? 0,
-      availableSpaces: dashboardStats?.available_spaces ?? Math.max(0, totalCapacity - (dashboardStats?.occupied_spaces ?? 0)),
-      occupancyPct: dashboardStats?.occupancy_percentage ?? (totalCapacity > 0 ? Math.round(((dashboardStats?.occupied_spaces ?? 0) / totalCapacity) * 100) : 0),
-      animalsHoused: dashboardStats?.animals_housed ?? 0,
+      occupiedSpaces: dashboardStats?.occupied_spaces ?? occupiedSpaces,
+      availableSpaces: dashboardStats?.available_spaces ?? availableSpaces,
+      occupancyPct: dashboardStats?.occupancy_percentage ?? occupancyPct,
+      animalsHoused: dashboardStats?.animals_housed ?? occupiedSpaces,
       criticalCases: dashboardStats?.critical_cases ?? 0,
     };
   }, [allShelters, totalCount, dashboardStats]);
@@ -766,7 +769,7 @@ export const Shelters = () => {
         />
         <StatCard
           title="Total Capacity"
-          value={computedStats.totalCapacity || "∞"}
+          value={computedStats.totalCapacity}
           icon={<FaBed size={20} color="#0D9488" />}
           onClick={() => setActiveTab("facilities")}
         />

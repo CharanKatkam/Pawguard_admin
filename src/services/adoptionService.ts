@@ -221,6 +221,7 @@ export const adoptionService = {
     petName?: string
   ) => {
     const backendStatus = toAdoptionStatus(status);
+
     const response = await api.patch(`/adoptions/${id}/status`, {
       status: backendStatus,
     });

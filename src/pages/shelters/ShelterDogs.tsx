@@ -372,16 +372,24 @@ const ShelterDogs = () => {
       setLoading(true);
       setError(null);
 
-      const [facilitiesRes, dogsRes] = await Promise.all([
-        shelterService.getShelters({ page: 1, page_size: 20 }),
-        petService.getPets({ page, page_size: 20 }),
+      const [facilitiesRes, dogsRes] = await Promise.allSettled([
+        shelterService.getShelters({ page: 1, page_size: 50 }),
+        petService.getAllDogs(),
       ]);
 
-      const facList = unwrapList(facilitiesRes);
-      const rawDogs = unwrapList(dogsRes);
+      const facList = facilitiesRes.status === "fulfilled" ? unwrapList(facilitiesRes.value) : [];
+      const rawDogs = dogsRes.status === "fulfilled" ? unwrapList(dogsRes.value) : [];
       const dogList = rawDogs.map(formatDog);
 
-      const total = dogsRes?.meta?.total ?? dogsRes?.data?.meta?.total ?? dogList.length;
+      if (dogsRes.status === "rejected") {
+        const errDetail = (dogsRes.reason as any)?.response?.data?.detail || (dogsRes.reason as any)?.response?.data?.message || "Failed to load shelter dogs data.";
+        setError(`⚠️ ${errDetail}`);
+      }
+
+      const total = dogsRes.status === "fulfilled"
+        ? (dogsRes.value?.meta?.total ?? dogsRes.value?.data?.meta?.total ?? dogList.length)
+        : 0;
+
       setTotalCount(total);
       setFacilities(facList);
       setDogs(dogList);

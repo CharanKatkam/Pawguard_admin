@@ -22,27 +22,27 @@ export const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 const read = (key: string): string | null => {
   try {
     const session = sessionStorage.getItem(key);
-    if (session !== null) return session;
+    if (session && session !== "null" && session !== "undefined") return session;
   } catch {
     /* storage unavailable; ignore */
   }
   try {
-    return localStorage.getItem(key);
+    const local = localStorage.getItem(key);
+    if (local && local !== "null" && local !== "undefined") return local;
   } catch {
-    return null;
+    /* storage unavailable; ignore */
   }
+  return null;
 };
 
 const write = (key: string, value: string): void => {
-  const persistent = getRememberMe();
   try {
-    if (persistent) {
-      localStorage.setItem(key, value);
-      sessionStorage.removeItem(key);
-    } else {
-      sessionStorage.setItem(key, value);
-      localStorage.removeItem(key);
-    }
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable; ignore */
+  }
+  try {
+    localStorage.setItem(key, value);
   } catch {
     /* storage unavailable; ignore */
   }
@@ -148,11 +148,27 @@ export const setRememberedEmail = (email: string): void => {
 };
 
 export const getAccessToken = (): string | null => {
-  return read(AUTH_STORAGE_KEYS.accessToken);
+  const directToken =
+    read(AUTH_STORAGE_KEYS.accessToken) ||
+    read("token") ||
+    read("accessToken") ||
+    read("access_token") ||
+    read("auth_token");
+
+  if (directToken) return directToken;
+
+  const user = getStoredUser<Record<string, unknown>>();
+  if (user && typeof user === "object") {
+    if (typeof user.access_token === "string" && user.access_token) return user.access_token;
+    if (typeof user.token === "string" && user.token) return user.token;
+    if (typeof user.accessToken === "string" && user.accessToken) return user.accessToken;
+  }
+
+  return null;
 };
 
 export const getRefreshToken = (): string | null => {
-  return read(AUTH_STORAGE_KEYS.refreshToken);
+  return read(AUTH_STORAGE_KEYS.refreshToken) || read("refresh_token") || read("refreshToken");
 };
 
 export interface AuthData {

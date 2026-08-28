@@ -317,8 +317,8 @@ const Adoptions = () => {
     try {
       setIsSubmitting(true);
       await adoptionService.updateAdoptionStatus(appId, newStatus);
-      addToast(`Updated status to ${newStatus.toUpperCase()}!`, "success");
-      fetchAdoptions();
+      addToast(`Adoption application successfully transitioned to ${newStatus.toUpperCase()}!`, "success");
+      await fetchAdoptions();
       notifyDataChanged();
       setSelectedAdoption((prev) => {
         if (prev && String(prev.id) === appId) {
@@ -326,8 +326,12 @@ const Adoptions = () => {
         }
         return prev;
       });
+      if (newStatus === "approved" || newStatus === "rejected") {
+        setIsDetailsModalOpen(false);
+      }
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to update status.", "error");
+      const msg = err?.response?.data?.error?.message || err?.response?.data?.detail || err?.message || "Failed to update application status.";
+      addToast(`⚠️ ${msg}`, "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -844,7 +848,7 @@ const Adoptions = () => {
       </Modal>
 
       {/* Details Inspect Modal */}
-      <Modal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} title={`Adoption Record — ${selectedAdoption?.applicantName || "Applicant"}`} maxWidth="720px">
+      <Modal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} title={`Adoption Application Review — ${selectedAdoption?.applicantName || "Applicant"}`} maxWidth="720px">
         {selectedAdoption && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -852,8 +856,8 @@ const Adoptions = () => {
                 <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
                   {String(selectedAdoption.applicantName)} &bull; {String(selectedAdoption.petName)}
                 </h2>
-                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  App ID: <span style={{ fontFamily: "monospace" }}>{String(selectedAdoption.id)}</span>
+                <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
+                  App ID: <span style={{ fontFamily: "monospace" }}>{String(selectedAdoption.id)}</span> &bull; Submitted: {formatDateTime(String(selectedAdoption.date || selectedAdoption.created_at))}
                 </div>
               </div>
               <StatusBadge status={String(selectedAdoption.status || "")} />
@@ -861,24 +865,70 @@ const Adoptions = () => {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Housing &amp; Yard</div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Details</div>
                 <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  Status: {String(selectedAdoption.residential_status)} &bull; Fence: {selectedAdoption.has_yard_fence ? "Yes" : "No"}
+                  Name: {String(selectedAdoption.applicantName)}
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                  Email: {String(selectedAdoption.applicantEmail || "—")} &bull; Phone: {String(selectedAdoption.applicantPhone || "—")}
                 </div>
               </div>
+
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Home Visit Inspection</div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescue Dog Details</div>
                 <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  Scheduled: {selectedAdoption.home_inspection_scheduled_at ? formatDateTime(String(selectedAdoption.home_inspection_scheduled_at)) : "Not scheduled"}
+                  Name: {String(selectedAdoption.petName)} ({String(selectedAdoption.petBreed || "Canine")})
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                  Dog ID: <code style={{ fontSize: "11px" }}>{String(selectedAdoption.petId || selectedAdoption.dog_id || "—")}</code>
                 </div>
               </div>
             </div>
 
-            <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "16px" }}>
-              <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "8px" }}>Logged Candidate Scores</div>
-              {candidateScores.length === 0 ? (
-                <div style={{ fontSize: "12px", color: "#64748B" }}>No candidate scores registered yet.</div>
-              ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Submitted Application Questionnaire</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  Housing Status: {String(selectedAdoption.residential_status || "Owned")}
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                  Yard / Fence: {selectedAdoption.has_yard_fence ? "✓ Fenced Yard Available" : "No Fenced Yard"} &bull; Landlord Approval: {selectedAdoption.has_landlord_approval ? "✓ Approved" : "N/A"}
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                  Household Members: {String(selectedAdoption.household_members_count ?? 1)} person(s)
+                </div>
+              </div>
+
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Pet Care Experience &amp; Background</div>
+                <div style={{ fontSize: "12px", color: "#334155", marginTop: "4px" }}>
+                  Experience: <strong>{String(selectedAdoption.pet_care_experience || "None specified")}</strong>
+                </div>
+                {Boolean(selectedAdoption.existing_pets_medical_details) && (
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px" }}>
+                    Existing Pets: {String(selectedAdoption.existing_pets_medical_details)}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {Boolean(selectedAdoption.home_inspection_scheduled_at) && String(selectedAdoption.status).toLowerCase() !== "submitted" && (
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Home Visit Inspection</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
+                  Date: {formatDateTime(String(selectedAdoption.home_inspection_scheduled_at))}
+                </div>
+                {Boolean(selectedAdoption.home_inspection_notes) && (
+                  <div style={{ fontSize: "11px", color: "#64748B", marginTop: "4px", fontStyle: "italic" }}>
+                    Notes: {String(selectedAdoption.home_inspection_notes)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {candidateScores.length > 0 && (
+              <div style={{ background: "#F1F5F9", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "8px" }}>Logged Candidate Scores &amp; Evaluation</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {candidateScores.map((sc, idx) => (
                     <div key={idx} style={{ background: "#FFF", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>
@@ -886,31 +936,31 @@ const Adoptions = () => {
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-              {String(selectedAdoption.status).toLowerCase() !== "approved" && String(selectedAdoption.status).toLowerCase() !== "completed" && String(selectedAdoption.status).toLowerCase() !== "rejected" && (
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => void handleStatusChange(String(selectedAdoption.id), "approved")}
-                    style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
-                  >
-                    Accept/Approve
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => void handleStatusChange(String(selectedAdoption.id), "rejected")}
-                    style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+            {String(selectedAdoption.status).toLowerCase() !== "approved" && String(selectedAdoption.status).toLowerCase() !== "completed" && String(selectedAdoption.status).toLowerCase() !== "rejected" && (
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => void handleStatusChange(String(selectedAdoption.id), "approved")}
+                  style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                >
+                  {isSubmitting ? "Approving..." : "Approve"}
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => void handleStatusChange(String(selectedAdoption.id), "rejected")}
+                  style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                >
+                  {isSubmitting ? "Rejecting..." : "Reject"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* Safety Tag QR Modal */}

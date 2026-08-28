@@ -69,7 +69,7 @@ export const shelterService = {
       const response = await api.get("/shelter/facilities", { params });
       return response.data;
     } catch (err: any) {
-      if (err?.response?.status === 403) {
+      if (err?.response?.status === 403 || err?.response?.status === 404) {
         const fallback = await api.get("/rescue-centres", { params }).catch(() => null);
         if (fallback?.data) return fallback.data;
       }

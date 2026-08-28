@@ -64,23 +64,14 @@ const LoginForm = () => {
       setErrorMsg(null);
       updateLastActivity();
 
-      // Extract inline user from login response payload (if present)
+      // Extract inline user & tokens from login response payload
       const loginPayload = unifyAuthPayload(response);
       const inlineUser = resolveUserObject(loginPayload);
 
-      // 4. Retrieve authenticated user profile via GET /auth/me (browser automatically sends HttpOnly cookies)
-      let userObj: any = inlineUser;
-      try {
-        const meResponse = await authService.getMe();
-        const meData = meResponse?.data || meResponse;
-        const fetchedUser = resolveUserObject(meData);
-        if (fetchedUser && typeof fetchedUser === "object") {
-          userObj = { ...userObj, ...fetchedUser };
-        }
-      } catch {
-        // Fallback to inline login user object if /auth/me fails
-      }
+      const accessToken = loginPayload?.access_token || response?.data?.data?.access_token || response?.data?.access_token;
+      const refreshToken = loginPayload?.refresh_token || response?.data?.data?.refresh_token || response?.data?.refresh_token;
 
+      let userObj: any = inlineUser;
       if (!userObj || typeof userObj !== "object") {
         userObj = { email: email.trim() };
       } else if (!userObj.email) {
@@ -88,17 +79,12 @@ const LoginForm = () => {
       }
 
       const userRole = normalizeRole(userObj);
-
       if (!userRole) {
         throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
       }
-
       userObj.role = userRole;
 
-      const accessToken = loginPayload?.access_token || response?.data?.data?.access_token || response?.data?.access_token;
-      const refreshToken = loginPayload?.refresh_token || response?.data?.data?.refresh_token || response?.data?.refresh_token;
-
-      // 5. Store authenticated user session metadata & tokens needed by the UI
+      // 4. Store authenticated user session metadata & tokens needed by the UI BEFORE making further calls
       setAuthData(
         {
           user: userObj,
@@ -108,6 +94,28 @@ const LoginForm = () => {
         rememberMe
       );
       setRememberedEmail(rememberMe ? email.trim() : "");
+
+      // 5. Attempt live profile refresh via GET /auth/me (falls back gracefully if un-migrated)
+      try {
+        const meResponse = await authService.getMe();
+        if (meResponse) {
+          const meData = meResponse?.data || meResponse;
+          const fetchedUser = resolveUserObject(meData);
+          if (fetchedUser && typeof fetchedUser === "object") {
+            userObj = { ...userObj, ...fetchedUser, role: userRole };
+            setAuthData(
+              {
+                user: userObj,
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              },
+              rememberMe
+            );
+          }
+        }
+      } catch {
+        // Fallback to authenticated login user object
+      }
 
       // 6. Update auth state and navigate to correct dashboard
       notifyAuthChanged();

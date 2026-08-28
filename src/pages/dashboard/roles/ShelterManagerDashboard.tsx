@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable from "../../../components/common/DataTable";
@@ -10,7 +10,6 @@ import {
   FaBed,
   FaPaw,
   FaBoxes,
-  FaUsers,
   FaQrcode,
   FaStethoscope,
   FaEye,
@@ -19,7 +18,6 @@ import {
   FaPrint,
   FaSync,
   FaPlus,
-  FaFileAlt,
   FaCopy,
   FaExternalLinkAlt,
 } from "react-icons/fa";
@@ -98,6 +96,222 @@ const getRescueAgentName = (c: any) => {
     if (names.length > 0) return names.join(", ");
   }
   return "";
+};
+
+const DogRowActions = ({
+  row,
+  onView,
+  onEdit,
+  onQr,
+  onCage,
+  onMedical,
+}: {
+  row: any;
+  onView: () => void;
+  onEdit: () => void;
+  onQr: () => void;
+  onCage: () => void;
+  onMedical: () => void;
+}) => {
+  const [showMore, setShowMore] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const status = String(row.status || "").toLowerCase().trim();
+  const isAdopted = status === "adopted";
+  const hasCage = !!(row.kennel_id || row.cage_number);
+  const hasActiveTag = !!row.has_active_tag;
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMore(false);
+      }
+    };
+    if (showMore) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showMore]);
+
+  return (
+    <div ref={menuRef} style={{ position: "relative", display: "inline-block" }}>
+      {/* ONLY ONE compact "•••" button for every dog row */}
+      <button
+        type="button"
+        title="Actions Menu"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowMore(!showMore);
+        }}
+        style={{
+          padding: "6px 12px",
+          borderRadius: "6px",
+          border: "1px solid #CBD5E1",
+          background: showMore ? "#F1F5F9" : "#FFF",
+          color: "#475569",
+          fontSize: "13px",
+          fontWeight: 800,
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+        }}
+      >
+        •••
+      </button>
+
+      {showMore && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "100%",
+            marginTop: "4px",
+            background: "#FFF",
+            border: "1px solid #E2E8F0",
+            borderRadius: "8px",
+            boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)",
+            padding: "4px 0",
+            minWidth: "170px",
+            zIndex: 99,
+          }}
+        >
+          {/* 1. View Dog */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowMore(false);
+              onView();
+            }}
+            style={{
+              width: "100%",
+              padding: "8px 14px",
+              textAlign: "left",
+              border: "none",
+              background: "transparent",
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "#334155",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <FaEye color="#2563EB" /> View Dog
+          </button>
+
+          {/* 2. Edit Dog */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowMore(false);
+              onEdit();
+            }}
+            style={{
+              width: "100%",
+              padding: "8px 14px",
+              textAlign: "left",
+              border: "none",
+              background: "transparent",
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "#334155",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <FaEdit color="#059669" /> Edit Dog
+          </button>
+
+          {/* 3. Cage / Kennel Allocation */}
+          {!isAdopted && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowMore(false);
+                onCage();
+              }}
+              style={{
+                width: "100%",
+                padding: "8px 14px",
+                textAlign: "left",
+                border: "none",
+                background: "transparent",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#334155",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaBed color="#2563EB" /> {hasCage ? "Reassign Cage" : "Allocate Cage"}
+            </button>
+          )}
+
+          {/* 4. Safety Tag / QR */}
+          {(!isAdopted || hasActiveTag) && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowMore(false);
+                onQr();
+              }}
+              style={{
+                width: "100%",
+                padding: "8px 14px",
+                textAlign: "left",
+                border: "none",
+                background: "transparent",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#334155",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaQrcode color="#6D28D9" /> {hasActiveTag ? "View Safety Tag" : "Generate Safety Tag"}
+            </button>
+          )}
+
+          {/* 5. Medical Records */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowMore(false);
+              onMedical();
+            }}
+            style={{
+              width: "100%",
+              padding: "8px 14px",
+              textAlign: "left",
+              border: "none",
+              background: "transparent",
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "#334155",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <FaStethoscope color="#DC2626" /> Medical Records
+          </button>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const ShelterManagerDashboard = () => {
@@ -243,24 +457,62 @@ const ShelterManagerDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [facilitiesRes, dogsRes, rescueCasesRes] = await Promise.all([
-        shelterService.getShelters({ page: 1, page_size: 20 }),
-        petService.getPets({ page: 1, page_size: 20 }),
-        rescueService.getRescueCases({ page: 1, page_size: 20 }),
+      const [facilitiesRes, dogsRes, rescueCasesRes] = await Promise.allSettled([
+        shelterService.getShelters({ page: 1, page_size: 50 }),
+        petService.getAllDogs(),
+        rescueService.getRescueCases({ page: 1, page_size: 50 }),
       ]);
 
-      const facList = unwrapList(facilitiesRes);
-      const dogList = unwrapList(dogsRes).map(formatDog);
-      const rescueCases = unwrapList(rescueCasesRes);
+      const facList = facilitiesRes.status === "fulfilled" ? unwrapList(facilitiesRes.value) : [];
+      const dogList = dogsRes.status === "fulfilled" ? unwrapList(dogsRes.value).map(formatDog) : [];
+      const rescueCases = rescueCasesRes.status === "fulfilled" ? unwrapList(rescueCasesRes.value) : [];
+
+      if (dogsRes.status === "rejected") {
+        const errDetail = (dogsRes.reason as any)?.response?.data?.detail || (dogsRes.reason as any)?.response?.data?.message || "Failed to load dogs data.";
+        setError(`⚠️ ${errDetail}`);
+      }
 
       setFacilities(facList);
       setDogs(dogList);
       setAllRescues(rescueCases);
 
-      // Filter incoming rescued dogs ready for intake
+      // Collect all rescue case IDs that have already been registered into Dog Master / Shelter Dogs
+      const registeredRescueIds = new Set(
+        dogList
+          .map((d: any) => String(d.rescue_id || d.rescue_case_id || d.rescue_case?.id || "").trim())
+          .filter(Boolean)
+      );
+
+      // Filter incoming rescued dogs requiring Shelter Manager intake action (Pending Action Queue)
+      const seenCaseIds = new Set<string>();
       const incoming = rescueCases.filter((c: any) => {
-        const st = String(c.status || "").toLowerCase();
-        return st === "rescued" || st === "admitted" || st === "completed";
+        const caseId = String(c.id || c.rescue_case_id || "").trim();
+        if (seenCaseIds.has(caseId)) return false;
+
+        const st = String(c.status || "").toLowerCase().trim();
+
+        // If already registered in Dog Master File, intake is complete -> exclude from pending queue
+        if (caseId && registeredRescueIds.has(caseId)) return false;
+
+        // Exclude finalized/completed/closed/cancelled/admitted statuses
+        if (st === "admitted" || st === "completed" || st === "closed" || st === "cancelled" || st === "rejected") {
+          return false;
+        }
+
+        // Include active pending handover/intake statuses
+        const isPendingStatus =
+          st === "rescued" ||
+          st === "in_transit" ||
+          st === "dispatched" ||
+          st === "handover_pending" ||
+          st === "pending_intake" ||
+          st === "";
+
+        if (isPendingStatus) {
+          if (caseId) seenCaseIds.add(caseId);
+          return true;
+        }
+        return false;
       });
       setIncomingRescues(incoming);
 
@@ -904,10 +1156,10 @@ const ShelterManagerDashboard = () => {
   const occupancyText = total_capacity > 0 ? `${Math.round((in_shelter_dogs / total_capacity) * 100)}%` : "N/A";
 
   const stats = [
-    { title: "Shelter Dogs", value: loading ? "..." : dashboardData.total_dogs, trend: `${dashboardData.adoptable_dogs} Adoptable`, color: "#2563EB", icon: <FaHome />, onClick: () => navigate("/shelter-dogs") },
-    { title: "Kennels", value: loading ? "..." : dashboardData.total_kennels, trend: "Registered Kennels", color: "#10B981", icon: <FaBed /> },
-    { title: "Occupancy", value: loading ? "..." : occupancyText, trend: `${in_shelter_dogs} In Care / ${total_capacity} Capacity`, color: "#F59E0B", icon: <FaPaw /> },
-    { title: "Facilities", value: loading ? "..." : dashboardData.total_facilities, trend: "Shelter Centers", color: "#6366F1", icon: <FaUsers />, onClick: () => navigate("/shelters") },
+    { title: "Total Shelter Dogs", value: loading ? "..." : dashboardData.total_dogs, trend: `${dashboardData.adoptable_dogs} Adoptable`, color: "#2563EB", icon: <FaHome /> },
+    { title: "Dogs in Shelter Care", value: loading ? "..." : dashboardData.in_shelter_dogs, trend: "Rescued & Shelter Care", color: "#10B981", icon: <FaPaw /> },
+    { title: "Adoptable Dogs", value: loading ? "..." : dashboardData.adoptable_dogs, trend: "Ready for Adoption", color: "#059669", icon: <FaPaw /> },
+    { title: "Kennel Occupancy", value: loading ? "..." : occupancyText, trend: `${in_shelter_dogs} In Care / ${total_capacity || 20} Capacity`, color: "#F59E0B", icon: <FaBed /> },
   ];
 
   const dogColumns = [
@@ -1046,10 +1298,10 @@ const ShelterManagerDashboard = () => {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 800 }}>
-          Shelter Operations & Dog Intake Workspace
+          Shelter Operations Workspace
         </h1>
         <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "13px" }}>
-          Formally receive rescued animals, register intake details, provision authoritative Safety Tags & QR codes, assign cage allocations, and manage shelter care.
+          Formally receive rescued animals, register intake details into shelter care, assign cage allocations, manage shelter care, and provision authoritative Safety Tags & QR codes.
         </p>
       </div>
 
@@ -1060,12 +1312,10 @@ const ShelterManagerDashboard = () => {
       )}
 
       {/* Quick Action Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "12px", marginBottom: "24px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+        <QuickActionCard icon={<FaPlus />} title="Register Rescued Dog / Intake" subtitle="New intake entry" color="#10B981" onClick={() => { setPetForm({ ...emptyPetForm }); setIsRegisterModalOpen(true); }} />
         <QuickActionCard icon={<FaBed />} title="Allocate Cage" subtitle="Assign dog to kennel" color="#2563EB" onClick={() => openCageModal()} />
-        <QuickActionCard icon={<FaPlus />} title="Register Rescued Dog" subtitle="New intake entry" color="#10B981" onClick={() => { setPetForm({ ...emptyPetForm }); setIsRegisterModalOpen(true); }} />
         <QuickActionCard icon={<FaBoxes />} title="Request Supplies" subtitle="Food & Medicines" color="#F59E0B" onClick={() => setIsSupplyModalOpen(true)} />
-        <QuickActionCard icon={<FaUsers />} title="Staff Roster" subtitle="View Shelter Staff" color="#6366F1" onClick={() => navigate("/users?role=shelter_staff")} />
-        <QuickActionCard icon={<FaFileAlt />} title="Generate Report" subtitle="Operations summary" color="#8B5CF6" onClick={() => { setReportGeneratedText(null); setIsReportModalOpen(true); }} />
       </div>
 
       {/* Headline Stats */}
@@ -1076,7 +1326,7 @@ const ShelterManagerDashboard = () => {
       </div>
 
       {/* INCOMING RESCUED ANIMALS QUEUE */}
-      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px", overflow: "visible" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div>
             <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#0F172A" }}>
@@ -1100,7 +1350,7 @@ const ShelterManagerDashboard = () => {
             ✓ No pending rescued animals awaiting intake handover at this time.
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "14px", overflow: "visible" }}>
             {incomingRescues.map((c) => (
               <div key={c.id} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "12px", padding: "16px", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "12px", boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)" }}>
                 <div>
@@ -1191,81 +1441,32 @@ const ShelterManagerDashboard = () => {
           emptyMessage="No dogs registered in shelter care yet."
           onRowClick={(row: any) => { setSelectedDog(row); setIsViewMasterModalOpen(true); }}
           renderRowActions={(row: any) => (
-            <div style={{ display: "flex", gap: "6px" }}>
-              <button
-                type="button"
-                title="View Dog Master File"
-                onClick={() => { setSelectedDog(row); setIsViewMasterModalOpen(true); }}
-                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-              >
-                <FaEye color="#2563EB" /> View
-              </button>
-
-              <button
-                type="button"
-                title="Edit Dog Record"
-                onClick={() => {
-                  setSelectedDog(row);
-                  setEditPhotoFile(null);
-                  setEditPhotoUrl("");
-                  setPetForm({
-                    ...emptyPetForm,
-                    name: row.name || "",
-                    breed: row.breed || "",
-                    gender: row.gender || "male",
-                    estimated_age: row.estimated_age || "",
-                    age_months: row.age_months ? String(row.age_months) : "",
-                    weight: row.weight ? String(row.weight) : "",
-                    color: row.color || "",
-                    status: row.status || "shelter",
-                    is_adoptable: !!row.is_adoptable,
-                    photo_url: getDogPhotoUrl(row, dogPhotoMap) || "",
-                  });
-                  setIsEditModalOpen(true);
-                }}
-                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-              >
-                <FaEdit color="#059669" /> Edit
-              </button>
-
-              {row.has_active_tag ? (
-                <button
-                  type="button"
-                  title="View Active Safety Tag"
-                  onClick={() => openQrModal(row)}
-                  style={{ padding: "6px 10px", borderRadius: "6px", border: "none", background: "#6D28D9", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                >
-                  <FaQrcode /> View Safety Tag
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  title="Generate Safety Tag"
-                  onClick={() => openQrModal(row)}
-                  style={{ padding: "6px 10px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                >
-                  <FaQrcode /> Generate Safety Tag
-                </button>
-              )}
-
-              <button
-                type="button"
-                title={row.kennel_id ? "Reassign Cage" : "Allocate Cage"}
-                onClick={() => openCageModal(row)}
-                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#2563EB", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-              >
-                <FaBed /> {row.kennel_id ? "Reassign Cage" : "Allocate Cage"}
-              </button>
-
-              <button
-                type="button"
-                title="Medical Records"
-                onClick={() => navigate(`/medical-records?dogId=${dogId(row)}`)}
-                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#64748B", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-              >
-                <FaStethoscope color="#DC2626" /> Medical
-              </button>
-            </div>
+            <DogRowActions
+              row={row}
+              onView={() => { setSelectedDog(row); setIsViewMasterModalOpen(true); }}
+              onEdit={() => {
+                setSelectedDog(row);
+                setEditPhotoFile(null);
+                setEditPhotoUrl("");
+                setPetForm({
+                  ...emptyPetForm,
+                  name: row.name || "",
+                  breed: row.breed || "",
+                  gender: row.gender || "male",
+                  estimated_age: row.estimated_age || "",
+                  age_months: row.age_months ? String(row.age_months) : "",
+                  weight: row.weight ? String(row.weight) : "",
+                  color: row.color || "",
+                  status: row.status || "shelter",
+                  is_adoptable: !!row.is_adoptable,
+                  photo_url: getDogPhotoUrl(row, dogPhotoMap) || "",
+                });
+                setIsEditModalOpen(true);
+              }}
+              onQr={() => openQrModal(row)}
+              onCage={() => openCageModal(row)}
+              onMedical={() => navigate(`/medical-records?dogId=${dogId(row)}`)}
+            />
           )}
         />
       </div>

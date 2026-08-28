@@ -30,8 +30,12 @@ const login = async (payload: LoginPayload) => {
 };
 
 const getMe = async () => {
-  const response = await axios.get("/auth/me");
-  return response.data;
+  try {
+    const response = await axios.get("/auth/me");
+    return response.data;
+  } catch {
+    return null;
+  }
 };
 
 const refreshSession = async () => {
