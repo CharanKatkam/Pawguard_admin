@@ -11,11 +11,11 @@ import {
   FaUserCheck,
   FaClipboardCheck,
   FaPlus,
-  FaEye,
   FaHome,
   FaDog,
   FaStar,
   FaCheckDouble,
+  FaEllipsisV,
 } from "react-icons/fa";
 import adoptionService, {
   type AdoptionScoreCreatePayload,
@@ -25,55 +25,52 @@ import { generateQrDataUrl } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
+const menuItemStyle: React.CSSProperties = {
+  width: "100%",
+  textAlign: "left",
+  padding: "8px 14px",
+  fontSize: "13px",
+  fontWeight: 500,
+  color: "#1E293B",
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+};
+
 const StatusBadge = ({ status }: { status: string }) => {
   const s = String(status || "").toLowerCase();
-  let bg = "#EFF6FF";
-  let color = "#2563EB";
   let label = s.toUpperCase();
 
   if (s === "submitted") {
-    bg = "#EFF6FF";
-    color = "#2563EB";
     label = "Submitted";
   } else if (s === "screening") {
-    bg = "#F3E8FF";
-    color = "#7E22CE";
     label = "Screening";
   } else if (s === "interview") {
-    bg = "#FEF3C7";
-    color = "#D97706";
     label = "Interview";
   } else if (s === "home_check") {
-    bg = "#E0E7FF";
-    color = "#4338CA";
     label = "Home Visit";
   } else if (s === "approved") {
-    bg = "#D1FAE5";
-    color = "#047857";
     label = "Approved";
   } else if (s === "completed") {
-    bg = "#DCFCE7";
-    color = "#15803D";
     label = "Completed";
   } else if (s === "rejected") {
-    bg = "#FEE2E2";
-    color = "#B91C1C";
     label = "Rejected";
   } else if (s === "vetting") {
-    bg = "#E0F2FE";
-    color = "#0369A1";
     label = "Vetting";
   }
 
   return (
     <span
       style={{
-        backgroundColor: bg,
-        color,
+        backgroundColor: "#F1F5F9",
+        color: "#334155",
+        border: "1px solid #CBD5E1",
         padding: "4px 10px",
         borderRadius: "999px",
         fontSize: "12px",
-        fontWeight: 700,
+        fontWeight: 600,
         display: "inline-block",
       }}
     >
@@ -98,6 +95,7 @@ const Adoptions = () => {
   const [dogs, setDogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const { addToast } = useToast();
 
   // Search & Pagination & Filter
@@ -286,12 +284,12 @@ const Adoptions = () => {
         home_inspection_scheduled_at: scheduleForm.date ? new Date(scheduleForm.date).toISOString() : null,
         home_inspection_notes: scheduleForm.notes,
       });
-      addToast("Home inspection visit scheduled successfully!", "success");
+      addToast("Home verification visit scheduled successfully!", "success");
       setIsScheduleModalOpen(false);
       fetchAdoptions();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to schedule home inspection.", "error");
+      addToast(err?.response?.data?.detail || "Failed to schedule home verification visit.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -300,14 +298,31 @@ const Adoptions = () => {
   const handleScoreSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAdoption?.id) return;
+
+    const env = Number(scoreForm.home_environment_score);
+    const know = Number(scoreForm.pet_care_knowledge_score);
+    const fin = Number(scoreForm.financial_readiness_score);
+    const life = Number(scoreForm.lifestyle_compatibility_score);
+
+    if ([env, know, fin, life].some((val) => isNaN(val) || val < 1 || val > 5)) {
+      addToast("Please provide valid evaluation scores between 1 and 5 for all criteria.", "error");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
-      await adoptionService.addCandidateScore(String(selectedAdoption.id), scoreForm);
-      addToast("Candidate evaluation score logged successfully!", "success");
+      await adoptionService.addCandidateScore(String(selectedAdoption.id), {
+        ...scoreForm,
+        home_environment_score: env,
+        pet_care_knowledge_score: know,
+        financial_readiness_score: fin,
+        lifestyle_compatibility_score: life,
+      });
+      addToast("Candidate evaluation scores saved successfully!", "success");
       setIsScoreModalOpen(false);
       fetchAdoptions();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to log candidate score.", "error");
+      addToast(err?.response?.data?.detail || "Failed to save candidate scores.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -579,61 +594,131 @@ const Adoptions = () => {
               setSelectedAdoption(row);
               setIsDeleteModalOpen(true);
             }}
-            renderRowActions={(row: Record<string, unknown>) => (
-              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
-                <button
-                  onClick={() => void openInspectModal(row)}
-                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                >
-                  <FaEye /> Inspect
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedAdoption(row);
-                    setIsScheduleModalOpen(true);
-                  }}
-                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                >
-                  <FaHome /> Visit
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedAdoption(row);
-                    setIsScoreModalOpen(true);
-                  }}
-                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #FDE68A", background: "#FEF3C7", color: "#B45309", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                >
-                  <FaStar /> Score
-                </button>
-                {String(row.status).toLowerCase() !== "approved" && String(row.status).toLowerCase() !== "completed" && String(row.status).toLowerCase() !== "rejected" && (
-                  <>
-                    <button
-                      onClick={() => void handleStatusChange(String(row.id), "approved")}
-                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => void handleStatusChange(String(row.id), "rejected")}
-                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                    >
-                      Reject
-                    </button>
-                  </>
-                )}
-                {String(row.status).toLowerCase() === "approved" && (
+            renderRowActions={(row: Record<string, unknown>) => {
+              const rowId = String(row.id);
+              const isOpen = activeMenuId === rowId;
+              const statusStr = String(row.status || "").toLowerCase();
+
+              return (
+                <div style={{ position: "relative", display: "inline-block" }}>
                   <button
-                    onClick={() => {
-                      setSelectedAdoption(row);
-                      setIsCompleteModalOpen(true);
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveMenuId(isOpen ? null : rowId);
                     }}
-                    style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #818CF8", background: "#EEF2FF", color: "#4338CA", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      color: "#64748B",
+                      cursor: "pointer",
+                      fontSize: "15px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    title="Actions"
                   >
-                    Finalize
+                    <FaEllipsisV />
                   </button>
-                )}
-              </div>
-            )}
+
+                  {isOpen && (
+                    <>
+                      <div
+                        style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuId(null);
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          right: 0,
+                          top: "100%",
+                          marginTop: "4px",
+                          background: "#FFFFFF",
+                          border: "1px solid #E2E8F0",
+                          borderRadius: "8px",
+                          boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1)",
+                          zIndex: 100,
+                          minWidth: "150px",
+                          padding: "4px 0",
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                            setSelectedAdoption(row);
+                            setIsScheduleModalOpen(true);
+                          }}
+                          style={menuItemStyle}
+                        >
+                          <FaHome style={{ marginRight: "8px", color: "#64748B" }} /> Visit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                            setSelectedAdoption(row);
+                            setIsScoreModalOpen(true);
+                          }}
+                          style={menuItemStyle}
+                        >
+                          <FaStar style={{ marginRight: "8px", color: "#64748B" }} /> Score
+                        </button>
+                        {statusStr !== "approved" && statusStr !== "completed" && statusStr !== "rejected" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(null);
+                                void handleStatusChange(rowId, "approved");
+                              }}
+                              style={{ ...menuItemStyle, color: "#059669" }}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(null);
+                                void handleStatusChange(rowId, "rejected");
+                              }}
+                              style={{ ...menuItemStyle, color: "#DC2626" }}
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {statusStr === "approved" && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                              setSelectedAdoption(row);
+                              setIsCompleteModalOpen(true);
+                            }}
+                            style={menuItemStyle}
+                          >
+                            Finalize
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }}
           />
         </div>
       )}
@@ -766,17 +851,20 @@ const Adoptions = () => {
       {/* Schedule Home Inspection Modal */}
       <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Verification Visit">
         <form onSubmit={handleScheduleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
+            Schedule an upcoming home verification visit for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
+          </p>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Scheduled Date &amp; Time</label>
-            <input type="datetime-local" value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Scheduled Date &amp; Time *</label>
+            <input type="datetime-local" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspector Notes</label>
-            <textarea placeholder="e.g. Verify fence height and landlord permission." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspector Notes (Optional)</label>
+            <textarea placeholder="e.g. Check secure fencing height and landlord permissions during visit." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Scheduling..." : "Confirm Schedule"}</button>
+            <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}>{isSubmitting ? "Scheduling..." : "Confirm Schedule"}</button>
           </div>
         </form>
       </Modal>
@@ -784,37 +872,40 @@ const Adoptions = () => {
       {/* Score Candidate Modal */}
       <Modal isOpen={isScoreModalOpen} onClose={() => setIsScoreModalOpen(false)} title="Score Candidate Evaluation">
         <form onSubmit={handleScoreSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
+            Log evaluation scores (1 to 5) for candidate <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
+          </p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Home Environment (1-5)</label>
-              <input type="number" min="1" max="5" value={scoreForm.home_environment_score} onChange={(e) => setScoreForm({ ...scoreForm, home_environment_score: Number(e.target.value) })} style={inputStyle} />
+              <input type="number" min="1" max="5" required value={scoreForm.home_environment_score} onChange={(e) => setScoreForm({ ...scoreForm, home_environment_score: Number(e.target.value) })} style={inputStyle} />
             </div>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Pet Care Knowledge (1-5)</label>
-              <input type="number" min="1" max="5" value={scoreForm.pet_care_knowledge_score} onChange={(e) => setScoreForm({ ...scoreForm, pet_care_knowledge_score: Number(e.target.value) })} style={inputStyle} />
+              <input type="number" min="1" max="5" required value={scoreForm.pet_care_knowledge_score} onChange={(e) => setScoreForm({ ...scoreForm, pet_care_knowledge_score: Number(e.target.value) })} style={inputStyle} />
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Financial Readiness (1-5)</label>
-              <input type="number" min="1" max="5" value={scoreForm.financial_readiness_score} onChange={(e) => setScoreForm({ ...scoreForm, financial_readiness_score: Number(e.target.value) })} style={inputStyle} />
+              <input type="number" min="1" max="5" required value={scoreForm.financial_readiness_score} onChange={(e) => setScoreForm({ ...scoreForm, financial_readiness_score: Number(e.target.value) })} style={inputStyle} />
             </div>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Lifestyle Match (1-5)</label>
-              <input type="number" min="1" max="5" value={scoreForm.lifestyle_compatibility_score} onChange={(e) => setScoreForm({ ...scoreForm, lifestyle_compatibility_score: Number(e.target.value) })} style={inputStyle} />
+              <input type="number" min="1" max="5" required value={scoreForm.lifestyle_compatibility_score} onChange={(e) => setScoreForm({ ...scoreForm, lifestyle_compatibility_score: Number(e.target.value) })} style={inputStyle} />
             </div>
           </div>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Recommendation</label>
-            <input type="text" value={scoreForm.recommendation} onChange={(e) => setScoreForm({ ...scoreForm, recommendation: e.target.value })} style={inputStyle} />
+            <input type="text" placeholder="e.g. Recommended for placement after visit" value={scoreForm.recommendation} onChange={(e) => setScoreForm({ ...scoreForm, recommendation: e.target.value })} style={inputStyle} />
           </div>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Evaluation Notes</label>
-            <textarea value={scoreForm.notes || ""} onChange={(e) => setScoreForm({ ...scoreForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+            <textarea placeholder="Additional evaluator observations (optional)..." value={scoreForm.notes || ""} onChange={(e) => setScoreForm({ ...scoreForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsScoreModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#F59E0B", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Logging..." : "Save Scores"}</button>
+            <button type="button" onClick={() => setIsScoreModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}>{isSubmitting ? "Saving..." : "Save Scores"}</button>
           </div>
         </form>
       </Modal>
