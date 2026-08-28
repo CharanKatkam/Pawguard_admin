@@ -1,6 +1,6 @@
 import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
-import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser } from "../utils/authStorage";
+import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser, getAccessToken } from "../utils/authStorage";
 
 // Base API configuration: use relative /api/v1 (Vite dev proxy in local dev, Vercel rewrite proxy in production)
 const rawApiUrl = (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
@@ -15,18 +15,29 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Request Interceptor: Enforce 15-minute session inactivity timeout (browser automatically handles HttpOnly cookies)
+// Request Interceptor: Attach Bearer token and enforce 15-minute session inactivity timeout
 api.interceptors.request.use(
   (config) => {
-    const user = getStoredUser();
-    if (user) {
-      if (isSessionExpired()) {
-        clearAuthData();
-        notifyAuthChanged();
-        window.location.href = "/";
-        return Promise.reject(new axios.Cancel("Session expired due to 15 minutes of inactivity."));
+    const token = getAccessToken();
+    if (token && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    const isAuthEndpoint =
+      typeof config.url === "string" &&
+      (config.url.includes("/auth/login") || config.url.includes("/auth/register"));
+
+    if (!isAuthEndpoint) {
+      const user = getStoredUser();
+      if (user) {
+        if (isSessionExpired()) {
+          clearAuthData();
+          notifyAuthChanged();
+          window.location.href = "/";
+          return Promise.reject(new axios.Cancel("Session expired due to 15 minutes of inactivity."));
+        }
+        updateLastActivity();
       }
-      updateLastActivity();
     }
     return config;
   },
@@ -35,77 +46,10 @@ api.interceptors.request.use(
   }
 );
 
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (value?: unknown) => void;
-  reject: (reason?: unknown) => void;
-}> = [];
-
-const processQueue = (error: unknown) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve();
-    }
-  });
-  failedQueue = [];
-};
-
-// Response Interceptor: Global 401 authorization & single-retry refresh handler
+// Response Interceptor: Global response handler (rejects errors to caller without wiping user session)
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error?.config;
-
-    if (axios.isAxiosError(error) && error.response && originalRequest) {
-      const status = error.response.status;
-
-      const publicPaths = ["/", "/reset-password", "/403", "/public-scan", "/scan-pet", "/scan"];
-      const isPublicPath = publicPaths.some(
-        (p) => window.location.pathname === p || window.location.pathname.startsWith(p + "/")
-      );
-
-      const isAuthEndpoint =
-        typeof originalRequest.url === "string" &&
-        (originalRequest.url.includes("/auth/login") || originalRequest.url.includes("/auth/refresh"));
-
-      if (status === 401 && !isPublicPath && !isAuthEndpoint) {
-        if (originalRequest._retry) {
-          clearAuthData();
-          notifyAuthChanged();
-          window.location.href = "/";
-          return Promise.reject(error);
-        }
-
-        if (isRefreshing) {
-          return new Promise((resolve, reject) => {
-            failedQueue.push({ resolve, reject });
-          })
-            .then(() => api(originalRequest))
-            .catch((err) => Promise.reject(err));
-        }
-
-        originalRequest._retry = true;
-        isRefreshing = true;
-
-        try {
-          // Attempt session renewal via backend-controlled HttpOnly cookie refresh
-          await api.post("/auth/refresh", {});
-          processQueue(null);
-          return api(originalRequest);
-        } catch (refreshErr) {
-          processQueue(refreshErr);
-          clearAuthData();
-          notifyAuthChanged();
-          window.location.href = "/";
-          return Promise.reject(refreshErr);
-        } finally {
-          isRefreshing = false;
-        }
-      }
-    }
-
+  (error) => {
     return Promise.reject(error);
   }
 );

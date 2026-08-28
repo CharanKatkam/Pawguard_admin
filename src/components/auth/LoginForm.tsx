@@ -7,7 +7,7 @@ import ForgotPasswordModal from "./ForgotPasswordModal";
 import authService from "../../services/auth/authService";
 import { getDashboardPathForRole, normalizeRole } from "../../utils/roleUtils";
 import { notifyAuthChanged } from "../../utils/dataSync";
-import { getRememberMe, getRememberedEmail, setAuthData, setRememberedEmail } from "../../utils/authStorage";
+import { getRememberMe, getRememberedEmail, setAuthData, setRememberedEmail, updateLastActivity } from "../../utils/authStorage";
 
 const LoginForm = () => {
   const [email, setEmail] = useState<string>(() => getRememberedEmail());
@@ -60,8 +60,9 @@ const LoginForm = () => {
         password,
       });
 
-      // 3. HTTP 200 received -> clear error explicitly
+      // 3. HTTP 200 received -> clear error explicitly and initialize fresh activity timestamp
       setErrorMsg(null);
+      updateLastActivity();
 
       // Extract inline user from login response payload (if present)
       const loginPayload = unifyAuthPayload(response);
@@ -94,10 +95,15 @@ const LoginForm = () => {
 
       userObj.role = userRole;
 
-      // 5. Store authenticated user session metadata needed by the UI
+      const accessToken = loginPayload?.access_token || response?.data?.data?.access_token || response?.data?.access_token;
+      const refreshToken = loginPayload?.refresh_token || response?.data?.data?.refresh_token || response?.data?.refresh_token;
+
+      // 5. Store authenticated user session metadata & tokens needed by the UI
       setAuthData(
         {
           user: userObj,
+          access_token: accessToken,
+          refresh_token: refreshToken,
         },
         rememberMe
       );

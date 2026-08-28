@@ -12,39 +12,12 @@ export const AUTH_STORAGE_KEYS = {
   rememberMe: "remember_me",
   rememberEmail: "remember_email",
   lastActivity: "last_activity",
+  accessToken: "access_token",
+  refreshToken: "refresh_token",
 } as const;
 
 /** Exact 900 seconds (15 minutes) session inactivity timeout. */
 export const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
-
-/**
- * One-time migration & cleanup to remove any legacy JWT tokens from browser storage.
- */
-export const clearObsoleteTokens = (): void => {
-  const legacyKeys = [
-    "access_token",
-    "refresh_token",
-    "pg_access_token",
-    "pg_refresh_token",
-    "pawguard.access_token",
-    "pawguard.refresh_token",
-  ];
-  legacyKeys.forEach((key) => {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      /* ignore */
-    }
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      /* ignore */
-    }
-  });
-};
-
-// Execute legacy token cleanup immediately upon module initialization
-clearObsoleteTokens();
 
 const read = (key: string): string | null => {
   try {
@@ -174,8 +147,18 @@ export const setRememberedEmail = (email: string): void => {
   }
 };
 
+export const getAccessToken = (): string | null => {
+  return read(AUTH_STORAGE_KEYS.accessToken);
+};
+
+export const getRefreshToken = (): string | null => {
+  return read(AUTH_STORAGE_KEYS.refreshToken);
+};
+
 export interface AuthData {
   user: unknown;
+  access_token?: string;
+  refresh_token?: string;
 }
 
 /**
@@ -187,6 +170,12 @@ export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
   if (data.user) {
     write(AUTH_STORAGE_KEYS.user, JSON.stringify(data.user));
   }
+  if (data.access_token) {
+    write(AUTH_STORAGE_KEYS.accessToken, data.access_token);
+  }
+  if (data.refresh_token) {
+    write(AUTH_STORAGE_KEYS.refreshToken, data.refresh_token);
+  }
   updateLastActivity();
 };
 
@@ -194,5 +183,7 @@ export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
 export const clearAuthData = (): void => {
   remove(AUTH_STORAGE_KEYS.user);
   remove(AUTH_STORAGE_KEYS.lastActivity);
+  remove(AUTH_STORAGE_KEYS.accessToken);
+  remove(AUTH_STORAGE_KEYS.refreshToken);
 };
 
