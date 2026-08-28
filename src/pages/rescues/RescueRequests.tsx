@@ -1097,12 +1097,6 @@ const RescueRequests = () => {
                   Select Vehicle & Dispatch
                 </button>
               )}
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
-              >
-                Close
-              </button>
             </>
           ) : null
         }

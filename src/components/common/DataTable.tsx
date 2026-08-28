@@ -587,66 +587,50 @@ function DataTable<T = any>({
           maxWidth="600px"
           footer={
             modalMode === "view" ? (
-              <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
-                {canEdit && (
-                  <button
-                    onClick={handleStartEdit}
-                    style={{
-                      background: "#2563EB",
-                      color: "#FFFFFF",
-                      border: "none",
-                      padding: "9px 18px",
-                      borderRadius: "8px",
-                      fontWeight: 600,
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <FaEdit /> Edit
-                  </button>
-                )}
-                {canDelete && (
-                  <button
-                    onClick={() => setIsDeleteConfirmOpen(true)}
-                    style={{
-                      background: "#EF4444",
-                      color: "#FFFFFF",
-                      border: "none",
-                      padding: "9px 18px",
-                      borderRadius: "8px",
-                      fontWeight: 600,
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <FaTrash /> Delete
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    setModalMode(null);
-                    setSelectedRow(null);
-                  }}
-                  style={{
-                    background: "#F1F5F9",
-                    color: "#475569",
-                    border: "1px solid #CBD5E1",
-                    padding: "9px 18px",
-                    borderRadius: "8px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
+              (canEdit || canDelete) ? (
+                <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
+                  {canEdit && (
+                    <button
+                      onClick={handleStartEdit}
+                      style={{
+                        background: "#2563EB",
+                        color: "#FFFFFF",
+                        border: "none",
+                        padding: "9px 18px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <FaEdit /> Edit
+                    </button>
+                  )}
+                  {canDelete && (
+                    <button
+                      onClick={() => setIsDeleteConfirmOpen(true)}
+                      style={{
+                        background: "#EF4444",
+                        color: "#FFFFFF",
+                        border: "none",
+                        padding: "9px 18px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <FaTrash /> Delete
+                    </button>
+                  )}
+                </div>
+              ) : undefined
             ) : (
               <div style={{ display: "flex", gap: "10px", width: "100%", justifyContent: "flex-end" }}>
                 <button

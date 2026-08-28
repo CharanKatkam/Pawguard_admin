@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import DataTable, { type Column } from "../../components/common/DataTable";
 import QuickActionCard from "../../components/dashboard/QuickActionCard";
 import StatCard from "../../components/dashboard/StatCard";
@@ -91,6 +92,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 const Adoptions = () => {
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<"queue" | "scoring" | "completed">("queue");
   const [adoptions, setAdoptions] = useState<Record<string, unknown>[]>([]);
   const [dogs, setDogs] = useState<any[]>([]);
@@ -104,6 +106,29 @@ const Adoptions = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const pageSize = 20;
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    const statusParam = searchParams.get("status");
+    const appIdParam = searchParams.get("appId");
+
+    if (tabParam === "queue" || tabParam === "scoring" || tabParam === "completed") {
+      setActiveTab(tabParam);
+    }
+    if (statusParam) {
+      setStatusFilter(statusParam);
+    }
+
+    if (appIdParam && adoptions.length > 0) {
+      const found = adoptions.find(
+        (a) => String(a.id || a.applicationId || "").toLowerCase() === appIdParam.toLowerCase()
+      );
+      if (found) {
+        setSelectedAdoption(found);
+        setIsDetailsModalOpen(true);
+      }
+    }
+  }, [searchParams, adoptions]);
 
   // Debounce search (300ms)
   useEffect(() => {
@@ -864,9 +889,8 @@ const Adoptions = () => {
               )}
             </div>
 
-             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               {String(selectedAdoption.status).toLowerCase() !== "approved" && String(selectedAdoption.status).toLowerCase() !== "completed" && String(selectedAdoption.status).toLowerCase() !== "rejected" && (
-                <>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
                   <button
                     type="button"
                     disabled={isSubmitting}
@@ -883,12 +907,10 @@ const Adoptions = () => {
                   >
                     Reject
                   </button>
-                </>
+                </div>
               )}
-              <button type="button" onClick={() => setIsDetailsModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", cursor: "pointer" }}>Close</button>
             </div>
-          </div>
-        )}
+          )}
       </Modal>
 
       {/* Safety Tag QR Modal */}
@@ -904,9 +926,6 @@ const Adoptions = () => {
           ) : (
             <div>Could not generate QR code.</div>
           )}
-          <div style={{ marginTop: "16px" }}>
-            <button type="button" onClick={() => setIsQrModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #CBD5E1" }}>Close</button>
-          </div>
         </div>
       </Modal>
     </div>

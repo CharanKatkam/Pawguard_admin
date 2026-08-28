@@ -217,33 +217,37 @@ export const petService = {
     return response.data;
   },
 
-  // GET /dogs/{dog_id}/public-scan - privacy-safe public dog QR scan
+  // GET /dogs/{dog_id}/public-scan or POST /companion-pets/safety-tag/scan - authoritative token & dog public scan
   getPublicDogScan: async (identifier: string) => {
-    let clean = String(identifier || "").trim();
+    const clean = String(identifier || "").trim();
     if (!clean) {
-      throw new Error("Dog identifier is required");
-    }
-    if (clean.toUpperCase().startsWith("PG-")) {
-      clean = clean.slice(3).trim();
+      throw new Error("Safety Tag token or Dog identifier is required.");
     }
 
     const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-    let targetDogId = clean;
 
-    if (!uuidRegex.test(clean)) {
-      try {
-        const listRes = await api.get("/dogs", { params: { registration_number: clean } });
-        const items = listRes.data?.data || listRes.data?.items || (Array.isArray(listRes.data) ? listRes.data : []);
-        if (items.length > 0 && items[0]?.id) {
-          targetDogId = items[0].id;
-        }
-      } catch {
-        /* fall back to direct call */
-      }
+    // 1. If identifier is a valid Dog Master UUID, query direct /dogs/{dog_id}/public-scan
+    if (uuidRegex.test(clean)) {
+      const response = await api.get(`/dogs/${clean}/public-scan`);
+      return response.data;
     }
 
-    const response = await api.get(`/dogs/${targetDogId}/public-scan`);
-    return response.data;
+    // 2. Query authoritative public token scan endpoint /companion-pets/safety-tag/scan
+    try {
+      const scanRes = await api.post(`/companion-pets/safety-tag/scan`, { token: clean });
+      if (scanRes.data) {
+        return scanRes.data;
+      }
+    } catch (err: any) {
+      const apiMsg =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message;
+      throw new Error(apiMsg || `Safety Tag token "${clean}" could not be verified or is invalid.`);
+    }
+
+    throw new Error(`Safety Tag token "${clean}" could not be verified or is invalid.`);
   },
 
   /**

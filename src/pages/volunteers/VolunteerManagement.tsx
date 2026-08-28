@@ -1561,7 +1561,6 @@ const VolunteerManagement = () => {
                   </button>
                 )}
               </div>
-              <button onClick={() => setIsProfileModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", fontWeight: 600 }}>Close</button>
             </div>
           </div>
         )}
@@ -1594,10 +1593,6 @@ const VolunteerManagement = () => {
                   {serviceSummaryData.status || "ACTIVE"}
                 </div>
               </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={() => setIsSummaryModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", fontWeight: 600 }}>Close</button>
             </div>
           </div>
         )}
@@ -1660,10 +1655,6 @@ const VolunteerManagement = () => {
                 ))}
               </div>
             )}
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={() => setIsAttendanceModalOpen(false)} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", fontWeight: 600 }}>Close</button>
-            </div>
           </div>
         )}
       </Modal>

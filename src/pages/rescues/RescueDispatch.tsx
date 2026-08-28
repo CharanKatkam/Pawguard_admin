@@ -834,14 +834,6 @@ const RescueDispatch = () => {
         onClose={() => setIsViewModalOpen(false)}
         title={`Dispatch Details${selectedDispatch?.ticket ? ` — ${selectedDispatch.ticket}` : ""}`}
         size="lg"
-        footer={
-          <button
-            onClick={() => setIsViewModalOpen(false)}
-            style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
-          >
-            Close
-          </button>
-        }
       >
         {selectedDispatch && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>

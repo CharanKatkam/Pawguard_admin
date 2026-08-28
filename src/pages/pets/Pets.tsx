@@ -644,18 +644,22 @@ const Pets = () => {
         setQrBlob(blob);
         localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
         setTagStatus("ACTIVE");
+      } else {
+        // Staff QR Image Fallback using backend GET /api/v1/dogs/{dog_id}/qr-image
+        try {
+          const qrImageBlob = await petService.getDogQrImage(id);
+          if (qrImageBlob) {
+            const url = URL.createObjectURL(qrImageBlob);
+            setQrImageUrl(url);
+            setQrBlob(qrImageBlob);
+          }
+        } catch {
+          /* unprovisioned state handled */
+        }
       }
 
       // Fetch metadata from GET /api/v1/dogs/{dog_id}/safety-tag
       try {
-        console.log("[SAFETY TAG FINAL DEBUG]", {
-          dogId: dog?.id,
-          dog_id: (dog as any)?.dog_id,
-          original_dog_id: (dog as any)?.original_dog_id,
-          registration_number: dog?.registration_number,
-          resolvedId: id,
-          resolvedIdLength: String(id).length
-        });
         const metaRes = await petService.getSafetyTagMetadata(id);
         const metaData = metaRes?.data || metaRes;
         if (metaData) {
@@ -759,7 +763,6 @@ const Pets = () => {
         throw new Error("Backend provisioning response did not include data.raw_token.");
       }
 
-      // Store raw_token across all dog key aliases in persistent storage
       setRawToken(token);
       const keysToStore = [
         id,
@@ -774,7 +777,6 @@ const Pets = () => {
         localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
       }
 
-      // Generate client-side QR image directly encoding raw_token
       const qrDataUrl = await generateQrDataUrl(token);
       const blob = await generateQrBlob(token);
 
@@ -838,71 +840,54 @@ const Pets = () => {
     if (e) e.preventDefault();
     const query = inputToken.trim();
     if (!query) {
-      setLookupError("Please enter a safety token or code to verify.");
+      setLookupError("Please enter a Safety Tag token to verify.");
       setVerifiedDog(null);
       return;
     }
     setLookupLoading(true);
     setLookupError(null);
     setVerifiedDog(null);
+
     try {
-      // Normalize query (supports "PG-DOG-2026-0001", "DOG-2026-0001", or UUID)
-      const rawUpper = query.toUpperCase().trim();
-      const strippedUpper = rawUpper.replace(/^PG-/, "").trim();
+      const scanResponse = await petService.getPublicDogScan(query);
+      const scanData = scanResponse?.data || scanResponse;
 
-      // Check loaded dogs list first
-      const matched = allDogs.find((d) => {
-        const token = petService.formatSafetyToken(d).toUpperCase();
-        const reg = String(d.registration_number || "").toUpperCase();
-        const idStr = String(d.id || "").toUpperCase();
-        const chip = String(d.microchip_id || "").toUpperCase();
-        return (
-          token === rawUpper ||
-          token === `PG-${strippedUpper}` ||
-          reg === strippedUpper ||
-          reg === rawUpper ||
-          idStr === strippedUpper ||
-          idStr === rawUpper ||
-          (chip && (chip === strippedUpper || chip === rawUpper))
-        );
-      });
-
-      if (matched) {
-        setVerifiedDog(matched);
+      if (!scanData || (!scanData.id && !scanData.dog_id && !scanData.name)) {
+        setLookupError(`Safety Tag token "${query}" could not be authoritatively resolved.`);
         return;
       }
 
-      // Try API lookup by ID / registration
-      try {
-        const response = await petService.getPetById(strippedUpper);
-        const data = response?.data || response;
-        if (data && (data.id || data.registration_number)) {
-          const formatted = formatDog(data);
-          setVerifiedDog(formatted);
-          return;
-        }
-      } catch {
-        // Fallback to public scan endpoint
-        try {
-          const scanResponse = await petService.getPublicDogScan(strippedUpper);
-          const scanData = scanResponse?.data || scanResponse;
-          if (scanData && (scanData.name || scanData.registration_number)) {
-            const formatted = formatDog({
-              ...scanData,
-              id: strippedUpper,
-              status: scanData.current_status || scanData.status || "shelter",
-            });
-            setVerifiedDog(formatted);
-            return;
-          }
-        } catch {
-          /* fail to lookupError */
-        }
+      const isActive = scanData.is_active !== false && String(scanData.status || "").toLowerCase() !== "inactive";
+      if (!isActive) {
+        setLookupError(`Safety Tag token "${query}" is INACTIVE or REVOKED.`);
+        return;
       }
 
-      setLookupError("No dog found for this safety token. Please check the code and try again.");
-    } catch {
-      setLookupError("Failed to verify safety token. Please check connection and try again.");
+      const dogIdVal = scanData.dog_id || scanData.id || scanData.pet_id;
+      const matched = allDogs.find(
+        (d) => String(d.id || "").toLowerCase() === String(dogIdVal || "").toLowerCase()
+      );
+
+      if (matched) {
+        setVerifiedDog(matched);
+      } else {
+        setVerifiedDog(
+          formatDog({
+            ...scanData,
+            id: dogIdVal || query,
+            status: scanData.current_status || scanData.status || "shelter",
+          })
+        );
+      }
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message ||
+        `Safety Tag token "${query}" could not be verified.`;
+      setLookupError(msg);
+      setVerifiedDog(null);
     } finally {
       setLookupLoading(false);
     }

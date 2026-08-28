@@ -480,6 +480,18 @@ const ShelterDogs = () => {
         setQrBlob(blob);
         localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
         setTagStatus("ACTIVE");
+      } else {
+        // Staff QR Image Fallback using backend GET /api/v1/dogs/{dog_id}/qr-image
+        try {
+          const qrImageBlob = await petService.getDogQrImage(id);
+          if (qrImageBlob) {
+            const url = URL.createObjectURL(qrImageBlob);
+            setQrImageUrl(url);
+            setQrBlob(qrImageBlob);
+          }
+        } catch {
+          /* unprovisioned state handled */
+        }
       }
 
       try {
@@ -1248,13 +1260,6 @@ const ShelterDogs = () => {
                   style={{ padding: "9px 14px", borderRadius: "8px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#1D4ED8", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <FaBed /> Allocate Cage
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsViewMasterModalOpen(false)}
-                  style={{ padding: "9px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFF", color: "#334155", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
-                >
-                  Close
                 </button>
               </div>
             </div>
