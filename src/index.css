@@ -201,10 +201,12 @@ button:active {
   to { transform: rotate(360deg); }
 }
 
-/* Global Mobile Responsiveness & Overflow Prevention */
+/* Global Mobile & Desktop Responsiveness & Overflow Prevention */
 html, body, #root {
+  width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 img, video, canvas, svg {
@@ -215,6 +217,7 @@ img, video, canvas, svg {
 .table-responsive-container {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -222,6 +225,20 @@ img, video, canvas, svg {
 .word-break-all {
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* Flex & Grid layout safety overrides to enforce 100% zoom viewport fit */
+main > div, main section, .page-container {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1440px) {
+  .master-module-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
 }
 
 @media (max-width: 767px) {

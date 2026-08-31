@@ -63,8 +63,10 @@ const AdminLayout = () => {
         height: "100vh",
         display: "flex",
         width: "100%",
+        maxWidth: "100vw",
         overflow: "hidden",
         position: "relative",
+        boxSizing: "border-box",
       }}
     >
       {/* Sidebar */}
@@ -81,10 +83,13 @@ const AdminLayout = () => {
           marginLeft: `${marginLeft}px`,
           height: "100vh",
           width: containerWidth,
+          maxWidth: containerWidth,
+          minWidth: 0,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          transition: "margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+          transition: "margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+          boxSizing: "border-box",
         }}
       >
         {/* Header */}
@@ -109,6 +114,8 @@ const AdminLayout = () => {
               borderBottom: "1px solid #BFDBFE",
               fontSize: "13px",
               color: "#1E40AF",
+              width: "100%",
+              boxSizing: "border-box",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
@@ -151,11 +158,12 @@ const AdminLayout = () => {
         <main
           style={{
             flex: 1,
-            padding: isMobileScreen ? "12px" : "24px",
+            padding: isMobileScreen ? "12px" : "20px 24px",
             overflowY: "auto",
             overflowX: "hidden",
-            maxWidth: "1600px",
             width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
             boxSizing: "border-box",
             margin: "0 auto",
           }}

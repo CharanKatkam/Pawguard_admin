@@ -162,7 +162,25 @@ interface ApiErrorShape {
 
 const getErrorMessage = (err: unknown, fallback: string): string => {
   const e = err as ApiErrorShape;
-  if (e?.response?.data?.detail) return String(e.response.data.detail);
+  const detail = e?.response?.data?.detail;
+  if (detail) {
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const msgs: string[] = (detail as any[])
+        .map((d: any) =>
+          typeof d === "string"
+            ? d
+            : d?.msg
+            ? `${Array.isArray(d.loc) ? d.loc.filter((l: any) => l !== "body" && l !== "query").join(".") : ""}: ${d.msg}`
+            : JSON.stringify(d)
+        )
+        .filter(Boolean);
+      if (msgs.length > 0) return `Validation Error: ${msgs.join("; ")}`;
+    }
+    if (typeof detail === "object") {
+      return (detail as any).message || (detail as any).msg || JSON.stringify(detail);
+    }
+  }
   if (e?.response?.data?.message) return String(e.response.data.message);
   const status = e?.response?.status;
   if (status === 401) return "Your session has expired. Please sign in again.";
@@ -170,6 +188,9 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
     return "You don't have permission to manage user accounts. Contact a Super Administrator to grant access.";
   }
   if (status === 404) return "User account endpoint not found. Please try again later.";
+  if (status === 422) {
+    return "Validation error: The request format did not match backend OpenAPI schema.";
+  }
   if (status !== undefined && status >= 500) {
     return "The server encountered an error. Please try again later.";
   }
@@ -724,15 +745,7 @@ const Users = () => {
     try {
       setError(null);
 
-      const queryParams: Record<string, unknown> = { page_size: 100 };
-      if (isRescueCentreAdmin && currentRescueCentreId) {
-        queryParams.rescue_centre_id = currentRescueCentreId;
-      } else if (isShelterManager && currentShelterId) {
-        queryParams.shelter_id = currentShelterId;
-        queryParams.facility_id = currentShelterId;
-      }
-
-      const response = await userService.getUsers(queryParams);
+      const response = await userService.getUsers();
       const rawBody = response as unknown;
       const rawData = (rawBody as { data?: unknown })?.data;
       const rawItems = (rawData as { items?: unknown })?.items;

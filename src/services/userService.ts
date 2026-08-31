@@ -73,16 +73,9 @@ export const extractPermissionCodes = (raw: unknown): string[] => {
 };
 
 export const userService = {
-  getUsers: async (params?: Record<string, unknown>) => {
+  getUsers: async (_params?: Record<string, unknown>) => {
     try {
-      const queryParams: Record<string, unknown> = { ...params };
-      if (typeof queryParams.page_size === "number" && queryParams.page_size > 100) {
-        queryParams.page_size = 100;
-      }
-      if (typeof queryParams.limit === "number" && queryParams.limit > 100) {
-        queryParams.limit = 100;
-      }
-      const response = await api.get("/admin/users", { params: queryParams });
+      const response = await api.get("/admin/users");
       return response.data;
     } catch (err: unknown) {
       const e = err as { response?: { status?: number } };
@@ -96,7 +89,7 @@ export const userService = {
 
   createUser: async (data: UserPayload) => {
     const payload: Record<string, unknown> = {
-      email: data.email,
+      email: data.email.trim(),
       password: data.password,
       full_name: data.full_name || data.name,
       role_names: Array.isArray(data.role_names)
@@ -105,9 +98,9 @@ export const userService = {
           ? [data.role]
           : [],
     };
-    if (data.phone !== undefined) payload.phone = data.phone;
-    if (data.rescue_centre_id !== undefined) payload.rescue_centre_id = data.rescue_centre_id;
-    if (data.organization_id !== undefined) payload.organization_id = data.organization_id;
+    if (data.phone && String(data.phone).trim()) {
+      payload.phone = String(data.phone).trim();
+    }
     const response = await api.post("/admin/users", payload);
     await publishActionEvent({
       module: "user",
@@ -130,9 +123,7 @@ export const userService = {
     if (fullName !== undefined) payload.full_name = fullName;
     if (data.phone !== undefined) payload.phone = data.phone;
     if (data.is_active !== undefined) payload.is_active = data.is_active;
-    if (data.is_verified !== undefined) payload.is_verified = data.is_verified;
-    if (data.status !== undefined) payload.status = data.status;
-    if (data.rejection_reason !== undefined) payload.rejection_reason = data.rejection_reason;
+    if (data.password !== undefined && data.password !== "") payload.password = data.password;
     const roleNames =
       data.role_names !== undefined
         ? data.role_names

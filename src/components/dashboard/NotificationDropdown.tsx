@@ -156,16 +156,17 @@ const NotificationDropdown = () => {
         <div
           style={{
             position: "absolute",
-            top: "50px",
-            right: 0,
-            width: "400px",
-            maxWidth: "calc(100vw - 32px)",
+            top: "calc(100% + 8px)",
+            right: "-90px",
+            width: "380px",
+            maxWidth: "calc(100vw - 24px)",
             background: "#FFFFFF",
             borderRadius: "16px",
             boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
             border: "1px solid #E2E8F0",
             zIndex: 1000,
             overflow: "hidden",
+            boxSizing: "border-box",
             animation: "slideDown 0.2s ease-out",
           }}
         >
@@ -221,7 +222,7 @@ const NotificationDropdown = () => {
           </div>
 
           {/* Content */}
-          <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+          <div style={{ maxHeight: "320px", overflowY: "auto", overflowX: "hidden" }}>
             {loading && !notifications.length ? (
               <div style={{ padding: "30px 20px", textAlign: "center", color: "#94A3B8" }}>
                 <FaSpinner size={20} style={{ animation: "spin 1s linear infinite", marginBottom: "12px" }} />
@@ -305,16 +306,16 @@ const NotificationDropdown = () => {
                   >
                     {getIcon(item.type)}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "3px", gap: "8px" }}>
+                      <span style={{ fontSize: "13px", fontWeight: 700, color: "#0F172A", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                         {item.title}
                       </span>
-                      <span style={{ fontSize: "11px", color: "#94A3B8", marginLeft: "8px", flexShrink: 0 }}>
+                      <span style={{ fontSize: "11px", color: "#94A3B8", flexShrink: 0 }}>
                         {formatTime(item)}
                       </span>
                     </div>
-                    <p style={{ margin: 0, fontSize: "12px", color: "#64748B", lineHeight: 1.4 }}>
+                    <p style={{ margin: 0, fontSize: "12px", color: "#64748B", lineHeight: 1.4, overflowWrap: "anywhere", wordBreak: "break-word" }}>
                       {item.message}
                     </p>
                   </div>

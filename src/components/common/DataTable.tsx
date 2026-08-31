@@ -297,11 +297,11 @@ function DataTable<T = any>({
       )}
 
       {/* Responsive Table Wrapper */}
-      <div style={{ overflowX: "auto", width: "100%", maxWidth: "100%", WebkitOverflowScrolling: "touch" }}>
+      <div className="table-responsive-container" style={{ overflowX: "auto", width: "100%", maxWidth: "100%", minWidth: 0, WebkitOverflowScrolling: "touch" }}>
         <table
           style={{
             width: "100%",
-            minWidth: "max-content",
+            minWidth: "100%",
             tableLayout: "auto",
             borderCollapse: "separate",
             borderSpacing: 0,
