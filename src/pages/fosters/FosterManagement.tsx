@@ -16,6 +16,7 @@ import {
   FaHeart,
   FaBoxOpen,
   FaHistory,
+  FaStethoscope,
 } from "react-icons/fa";
 import fosterService, {
   type FosterProfileUpdatePayload,
@@ -24,6 +25,7 @@ import fosterService, {
   type FosterSupplyDispatchPayload,
 } from "../../services/fosterService";
 import petService from "../../services/petService";
+import vetService from "../../services/vetService";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
@@ -331,10 +333,31 @@ const FosterManagement = () => {
       addToast("Foster family and dog selection are required.", "error");
       return;
     }
+
+    const targetFoster = fosters.find((f) => f.id === placeTargetProfileId);
+    if (targetFoster && targetFoster.active_count >= targetFoster.max_capacity) {
+      addToast(`Cannot place dog: Foster family "${targetFoster.foster_family}" is at maximum capacity (${targetFoster.active_count}/${targetFoster.max_capacity}).`, "error");
+      return;
+    }
+
+    const existingPlacement = activePlacements.find(
+      (p) => String(p.dog_id || p.dog?.id) === placeForm.dog_id && (p.is_active || !p.returned_at)
+    );
+    if (existingPlacement) {
+      addToast(`Cannot place dog: This animal is already placed in active foster care with family "${existingPlacement.foster_family}".`, "error");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await fosterService.placeDog(placeTargetProfileId, placeForm);
-      addToast("Animal placed in foster home successfully!", "success");
+      await petService.updatePet(placeForm.dog_id, {
+        status: "fostered",
+        shelter_status: "In Foster Care",
+        is_adoptable: true,
+      }).catch(() => null);
+
+      addToast("Animal placed in foster home & Dog Master Profile updated!", "success");
       setIsPlaceModalOpen(false);
       setPlaceForm({ dog_id: "", notes: "" });
       setPlaceTargetProfileId("");
@@ -377,10 +400,18 @@ const FosterManagement = () => {
   const handleReturnSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPlacement?.id) return;
+    const dogId = String(selectedPlacement.dog_id || selectedPlacement.dog?.id || "");
     try {
       setIsSubmitting(true);
       await fosterService.returnDog(selectedPlacement.id, returnNotes);
-      addToast("Dog returned from foster care to shelter!", "success");
+      if (dogId) {
+        await petService.updatePet(dogId, {
+          status: "shelter_care",
+          shelter_status: "In Shelter",
+          is_adoptable: true,
+        }).catch(() => null);
+      }
+      addToast("Dog returned from foster care to shelter & Dog Master updated!", "success");
       setIsReturnModalOpen(false);
       setSelectedPlacement(null);
       setReturnNotes("");
@@ -430,16 +461,42 @@ const FosterManagement = () => {
     }
   };
 
-  const handleConvertToAdopt = async (placementId: string) => {
+  const handleConvertToAdopt = async (placementId: string, dogId?: string) => {
     try {
       setIsSubmitting(true);
       await fosterService.convertToAdopt(placementId);
-      addToast("Placement converted into permanent adoption!", "success");
+      if (dogId) {
+        await petService.updatePet(dogId, {
+          status: "adopted",
+          shelter_status: "Adopted",
+          is_adoptable: false,
+        }).catch(() => null);
+      }
+      addToast("Placement converted into permanent adoption & Dog Master updated!", "success");
       fetchFosters();
       notifyDataChanged();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.response?.data?.message || "Failed to convert to adoption.";
       addToast(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRequestMedical = async (dogId: string, notes?: string) => {
+    if (!dogId) return;
+    try {
+      setIsSubmitting(true);
+      await vetService.bookAppointment({
+        pet_id: dogId,
+        appointment_type: "Foster Care Medical Check",
+        notes: notes || "Medical evaluation requested for fostered animal.",
+        scheduled_at: new Date().toISOString(),
+      });
+      addToast("Veterinary medical check request booked successfully!", "success");
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to book medical evaluation.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -799,7 +856,13 @@ const FosterManagement = () => {
                       <FaBoxOpen /> Log Supply
                     </button>
                     <button
-                      onClick={() => void handleConvertToAdopt(p.id)}
+                      onClick={() => void handleRequestMedical(String(p.dog_id || p.dog?.id || ""))}
+                      style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #6EE7B7", background: "#ECFDF5", color: "#047857", fontWeight: 600, fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <FaStethoscope /> Request Vet Check
+                    </button>
+                    <button
+                      onClick={() => void handleConvertToAdopt(p.id, String(p.dog_id || p.dog?.id || ""))}
                       style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #F472B6", background: "#FDF2F8", color: "#DB2777", fontWeight: 600, fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
                     >
                       <FaHeart /> Convert to Adopt

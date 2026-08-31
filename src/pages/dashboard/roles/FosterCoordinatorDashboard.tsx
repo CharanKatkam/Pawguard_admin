@@ -62,6 +62,10 @@ const FosterCoordinatorDashboard = () => {
   const [selectedVol, setSelectedVol] = useState<any | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
 
+  // Foster Profile Inspect Modal
+  const [selectedFosterProfile, setSelectedFosterProfile] = useState<any | null>(null);
+  const [isFosterInspectModalOpen, setIsFosterInspectModalOpen] = useState(false);
+
   const fetchDashboard = useCallback(async () => {
     try {
       setLoading(true);
@@ -385,7 +389,16 @@ const FosterCoordinatorDashboard = () => {
           </h3>
           {loading && <span style={{ fontSize: "13px", color: "#2563EB", fontWeight: 600 }}>Loading foster data...</span>}
         </div>
-        <DataTable columns={placementColumns} data={profiles} loading={loading} emptyMessage="No active foster profiles registered." onRowClick={(row: any) => { setSelectedVol(row); setIsViewModalOpen(true); }} />
+        <DataTable
+          columns={placementColumns}
+          data={profiles}
+          loading={loading}
+          emptyMessage="No active foster profiles registered."
+          onRowClick={(row: any) => {
+            setSelectedFosterProfile(row);
+            setIsFosterInspectModalOpen(true);
+          }}
+        />
       </div>
 
       {/* Foster Volunteer Applicants Table */}
@@ -398,6 +411,66 @@ const FosterCoordinatorDashboard = () => {
         </div>
         <DataTable columns={volunteerColumns} data={fosterVolunteers} loading={volLoading} emptyMessage="No foster volunteer applications found." onRowClick={(row: any) => { setSelectedVol(row); setIsViewModalOpen(true); }} />
       </div>
+
+      {/* Foster Profile & Placement Inspect Modal */}
+      <Modal isOpen={isFosterInspectModalOpen} onClose={() => setIsFosterInspectModalOpen(false)} title="Foster Caregiver Profile & Placements">
+        {selectedFosterProfile && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontWeight: 800, fontSize: "18px", color: "#0F172A" }}>
+                {selectedFosterProfile.user?.full_name || selectedFosterProfile.user?.name || selectedFosterProfile.foster_name || "Foster Family"}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
+                Email: {selectedFosterProfile.user?.email || "—"} &bull; Profile ID: <span style={{ fontFamily: "monospace" }}>{String(selectedFosterProfile.id || "").slice(0, 8)}</span>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Caregiver Status &amp; Availability</div>
+                <div style={{ fontWeight: 700, color: selectedFosterProfile.is_available ? "#047857" : "#1E40AF", marginTop: "4px" }}>
+                  {selectedFosterProfile.is_available ? "✓ Available for Placement" : "Busy / Max Capacity Reached"}
+                </div>
+              </div>
+              <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Care Capacity &amp; Placements</div>
+                <div style={{ fontWeight: 700, color: "#2563EB", marginTop: "4px" }}>
+                  {selectedFosterProfile.active_count ?? 0} Active Placements / {selectedFosterProfile.max_capacity ?? 1} Max Capacity
+                </div>
+              </div>
+            </div>
+
+            {selectedFosterProfile.preferences && (
+              <div style={{ fontSize: "13px", color: "#334155", background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <strong>Preferences / Experience:</strong> {selectedFosterProfile.preferences}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFosterInspectModalOpen(false);
+                  navigate(`/fosters?action=place&profileId=${encodeURIComponent(selectedFosterProfile.id)}`);
+                }}
+                style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <FaPaw /> Place Dog in Home
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFosterInspectModalOpen(false);
+                  navigate("/fosters");
+                }}
+                style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#0F172A", fontWeight: 700, cursor: "pointer" }}
+              >
+                Go to Foster Workspace
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Volunteer Application Review Modal */}
       <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Foster Caregiver Application Review">

@@ -21,6 +21,7 @@ import Finance from "./pages/finance/Finance";
 import AuditLogs from "./pages/audit/AuditLogs";
 import Certificates from "./pages/certificates/Certificates";
 import RolesPermissions from "./pages/permissions/RolesPermissions";
+import SystemSettings from "./pages/settings/SystemSettings";
 
 import RescueManagement from "./pages/rescues/RescueManagement";
 import RescueRequests from "./pages/rescues/RescueRequests";
@@ -53,6 +54,9 @@ import VolunteerCoordinatorDashboard from "./pages/dashboard/roles/VolunteerCoor
 import VolunteerDashboard from "./pages/dashboard/roles/VolunteerDashboard";
 import InventoryManagerDashboard from "./pages/dashboard/roles/InventoryManagerDashboard";
 import FinanceUserDashboard from "./pages/dashboard/roles/FinanceUserDashboard";
+import FosterFamilyDashboard from "./pages/dashboard/roles/FosterFamilyDashboard";
+import DonorDashboard from "./pages/dashboard/roles/DonorDashboard";
+import GeneralPublicDashboard from "./pages/dashboard/roles/GeneralPublicDashboard";
 
 import AdminLayout from "./layouts/AdminLayout";
 import ProtectedRoute from "./components/layout/ProtectedRoute/ProtectedRoute";
@@ -122,6 +126,18 @@ function App() {
 
             <Route element={<ProtectedRoute allowedRoles={["volunteer", "super_admin"]} />}>
               <Route path="/dashboard/volunteer" element={<VolunteerDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["foster_family", "super_admin"]} />}>
+              <Route path="/dashboard/foster-family" element={<FosterFamilyDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["donor", "super_admin"]} />}>
+              <Route path="/dashboard/donor" element={<DonorDashboard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute allowedRoles={["general_public_user", "super_admin"]} />}>
+              <Route path="/dashboard/general-public" element={<GeneralPublicDashboard />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={["inventory_manager", "super_admin"]} />}>
@@ -397,6 +413,15 @@ function App() {
               }
             >
               <Route path="/audit-logs" element={<AuditLogs />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute permission={["view_settings", "manage_settings"]} allowedRoles={["super_admin"]} />
+              }
+            >
+              <Route path="/system-settings" element={<SystemSettings />} />
+              <Route path="/settings" element={<SystemSettings />} />
             </Route>
 
             <Route

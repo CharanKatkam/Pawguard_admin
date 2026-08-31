@@ -17,6 +17,11 @@ const LoginForm = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [forgotOpen, setForgotOpen] = useState(false);
 
+  // MFA 2-step state
+  const [mfaStep, setMfaStep] = useState(false);
+  const [preAuthToken, setPreAuthToken] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+
   const navigate = useNavigate();
 
   const resolveUserObject = (payload: unknown): any => {
@@ -40,10 +45,62 @@ const LoginForm = () => {
     return response?.data?.data || response?.data || response;
   };
 
+  const processAuthenticatedSession = async (loginPayload: any, response: any) => {
+    const inlineUser = resolveUserObject(loginPayload);
+    const accessToken = loginPayload?.access_token || response?.data?.data?.access_token || response?.data?.access_token;
+    const refreshToken = loginPayload?.refresh_token || response?.data?.data?.refresh_token || response?.data?.refresh_token;
+
+    let userObj: any = inlineUser;
+    if (!userObj || typeof userObj !== "object") {
+      userObj = { email: email.trim() };
+    } else if (!userObj.email) {
+      userObj.email = email.trim();
+    }
+
+    const userRole = normalizeRole(userObj);
+    if (!userRole) {
+      throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
+    }
+    userObj.role = userRole;
+
+    setAuthData(
+      {
+        user: userObj,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      },
+      rememberMe
+    );
+    setRememberedEmail(rememberMe ? email.trim() : "");
+
+    try {
+      const meResponse = await authService.getMe();
+      if (meResponse) {
+        const meData = meResponse?.data || meResponse;
+        const fetchedUser = resolveUserObject(meData);
+        if (fetchedUser && typeof fetchedUser === "object") {
+          userObj = { ...userObj, ...fetchedUser, role: userRole };
+          setAuthData(
+            {
+              user: userObj,
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            },
+            rememberMe
+          );
+        }
+      }
+    } catch {
+      // Fallback to authenticated login user object
+    }
+
+    notifyAuthChanged();
+    navigate(getDashboardPathForRole(userRole), { replace: true });
+  };
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    // 1. Immediately clear any previous login error when a new attempt begins
     setErrorMsg(null);
 
     if (!email || !password) {
@@ -54,72 +111,24 @@ const LoginForm = () => {
     try {
       setLoading(true);
 
-      // 2. POST /auth/login (HttpOnly cookies set automatically by browser)
       const response = await authService.login({
         email: email.trim(),
         password,
       });
 
-      // 3. HTTP 200 received -> clear error explicitly and initialize fresh activity timestamp
       setErrorMsg(null);
       updateLastActivity();
 
-      // Extract inline user & tokens from login response payload
       const loginPayload = unifyAuthPayload(response);
-      const inlineUser = resolveUserObject(loginPayload);
 
-      const accessToken = loginPayload?.access_token || response?.data?.data?.access_token || response?.data?.access_token;
-      const refreshToken = loginPayload?.refresh_token || response?.data?.data?.refresh_token || response?.data?.refresh_token;
-
-      let userObj: any = inlineUser;
-      if (!userObj || typeof userObj !== "object") {
-        userObj = { email: email.trim() };
-      } else if (!userObj.email) {
-        userObj.email = email.trim();
+      // Check if TOTP MFA step is required by backend
+      if (loginPayload?.mfa_required || loginPayload?.requires_mfa || loginPayload?.pre_auth_token) {
+        setPreAuthToken(loginPayload.pre_auth_token || "");
+        setMfaStep(true);
+        return;
       }
 
-      const userRole = normalizeRole(userObj);
-      if (!userRole) {
-        throw new Error("Access Denied: The Admin Portal is restricted to authorized internal staff only.");
-      }
-      userObj.role = userRole;
-
-      // 4. Store authenticated user session metadata & tokens needed by the UI BEFORE making further calls
-      setAuthData(
-        {
-          user: userObj,
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        },
-        rememberMe
-      );
-      setRememberedEmail(rememberMe ? email.trim() : "");
-
-      // 5. Attempt live profile refresh via GET /auth/me (falls back gracefully if un-migrated)
-      try {
-        const meResponse = await authService.getMe();
-        if (meResponse) {
-          const meData = meResponse?.data || meResponse;
-          const fetchedUser = resolveUserObject(meData);
-          if (fetchedUser && typeof fetchedUser === "object") {
-            userObj = { ...userObj, ...fetchedUser, role: userRole };
-            setAuthData(
-              {
-                user: userObj,
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              },
-              rememberMe
-            );
-          }
-        }
-      } catch {
-        // Fallback to authenticated login user object
-      }
-
-      // 6. Update auth state and navigate to correct dashboard
-      notifyAuthChanged();
-      navigate(getDashboardPathForRole(userRole), { replace: true });
+      await processAuthenticatedSession(loginPayload, response);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         if (!error.response) {
@@ -144,6 +153,131 @@ const LoginForm = () => {
       setLoading(false);
     }
   };
+
+  const handleVerifyMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaCode || mfaCode.trim().length !== 6) {
+      setErrorMsg("Please enter a valid 6-digit TOTP authentication code.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+      const response = await authService.verifyMfa(preAuthToken, mfaCode);
+      const verifyPayload = unifyAuthPayload(response);
+      await processAuthenticatedSession(verifyPayload, response);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        const backendErr = error.response?.data?.error;
+        const msg =
+          backendErr?.message ||
+          error.response?.data?.message ||
+          error.response?.data?.detail ||
+          "Invalid MFA TOTP verification code. Please try again.";
+        setErrorMsg(String(msg));
+      } else if (error instanceof Error) {
+        setErrorMsg(error.message);
+      } else {
+        setErrorMsg("MFA verification failed. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (mfaStep) {
+    return (
+      <form onSubmit={handleVerifyMfaSubmit} style={{ width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: "0 0 6px 0", fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
+            🔐 Two-Factor Authentication
+          </h3>
+          <p style={{ margin: 0, fontSize: "13px", color: "#64748B" }}>
+            Enter the 6-digit TOTP security code from your authenticator app.
+          </p>
+        </div>
+
+        {errorMsg && (
+          <div
+            style={{
+              background: "#FEF2F2",
+              border: "1px solid #FCA5A5",
+              color: "#991B1B",
+              padding: "8px 12px",
+              borderRadius: "8px",
+              fontSize: "12.5px",
+              marginBottom: "12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              lineHeight: 1.4,
+            }}
+          >
+            ⚠️ <span>{errorMsg}</span>
+          </div>
+        )}
+
+        <div style={{ marginBottom: "16px" }}>
+          <label htmlFor="mfa-code" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+            6-Digit TOTP Security Code *
+          </label>
+          <input
+            id="mfa-code"
+            type="text"
+            maxLength={6}
+            placeholder="e.g. 123456"
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, ""))}
+            style={{
+              width: "100%",
+              padding: "12px",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
+              fontSize: "18px",
+              letterSpacing: "4px",
+              textAlign: "center",
+              fontWeight: 700,
+            }}
+            required
+            autoFocus
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setMfaStep(false);
+              setMfaCode("");
+              setErrorMsg(null);
+            }}
+            style={{
+              flex: 1,
+              padding: "10px",
+              borderRadius: "8px",
+              border: "1px solid #CBD5E1",
+              background: "#FFFFFF",
+              color: "#475569",
+              fontWeight: 600,
+              fontSize: "14px",
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="login-button"
+            disabled={loading}
+            style={{ flex: 2 }}
+          >
+            {loading ? "Verifying..." : "Verify Code"}
+          </button>
+        </div>
+      </form>
+    );
+  }
 
   return (
     <form onSubmit={handleLogin} style={{ width: "100%" }}>

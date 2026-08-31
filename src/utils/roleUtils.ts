@@ -14,6 +14,9 @@ export const ALLOWED_INTERNAL_ROLES: UserRole[] = [
   "inventory_manager",
   "finance_user",
   "volunteer",
+  "foster_family",
+  "donor",
+  "general_public_user",
 ];
 
 /**
@@ -95,16 +98,30 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
     return "super_admin";
   }
 
-  // Explicitly reject public-facing roles
+  // 12. Foster Family
   if (
-    lower.includes("public") ||
-    lower.includes("donor") ||
-    lower === "volunteer" ||
     lower.includes("foster_family") ||
     lower.includes("foster.family") ||
-    lower.includes("fosterfamily")
+    lower.includes("fosterfamily") ||
+    lower.includes("foster_caregiver") ||
+    lower === "foster"
   ) {
-    return null;
+    return "foster_family";
+  }
+
+  // 13. Donor
+  if (lower.includes("donor")) {
+    return "donor";
+  }
+
+  // 14. General Public User
+  if (
+    lower.includes("public") ||
+    lower.includes("general_public") ||
+    lower === "public_user" ||
+    lower === "general_public_user"
+  ) {
+    return "general_public_user";
   }
 
   // 2. Rescue Centre Admin
@@ -171,6 +188,10 @@ export const normalizeRole = (rawInput?: unknown): UserRole | null => {
     lower.includes("fostercoordinator")
   ) {
     return "foster_coordinator";
+  }
+
+  if (lower.includes("foster")) {
+    return "foster_family";
   }
 
   // 9. Volunteer Coordinator
@@ -246,6 +267,12 @@ export const getDashboardPathForRole = (role?: string | UserRole | null): string
       return "/dashboard/volunteer-coordinator";
     case "volunteer":
       return "/dashboard/volunteer";
+    case "foster_family":
+      return "/dashboard/foster-family";
+    case "donor":
+      return "/dashboard/donor";
+    case "general_public_user":
+      return "/dashboard/general-public";
     case "inventory_manager":
       return "/dashboard/inventory-manager";
     case "finance_user":
@@ -266,6 +293,9 @@ export const ROLE_DASHBOARD_PATHS: Array<{ path: string; role: UserRole }> = [
   { path: "/dashboard/foster-coordinator", role: "foster_coordinator" },
   { path: "/dashboard/volunteer-coordinator", role: "volunteer_coordinator" },
   { path: "/dashboard/volunteer", role: "volunteer" },
+  { path: "/dashboard/foster-family", role: "foster_family" },
+  { path: "/dashboard/donor", role: "donor" },
+  { path: "/dashboard/general-public", role: "general_public_user" },
   { path: "/dashboard/inventory-manager", role: "inventory_manager" },
   { path: "/dashboard/finance", role: "finance_user" },
 ];
@@ -358,6 +388,12 @@ export const getRoleTitle = (role?: string | UserRole | null): string => {
       return "Volunteer Coordinator";
     case "volunteer":
       return "Volunteer";
+    case "foster_family":
+      return "Foster Family";
+    case "donor":
+      return "Donor";
+    case "general_public_user":
+      return "General Public User";
     case "inventory_manager":
       return "Inventory Manager";
     case "finance_user":
@@ -469,6 +505,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Reports & Analytics", path: "/reports", iconType: "reports" },
         { name: "Audit Logs", path: "/audit-logs", iconType: "audit" },
         { name: "Certificates", path: "/certificates", iconType: "certificates" },
+        { name: "System Settings", path: "/system-settings", iconType: "settings" },
         { name: "Notifications", path: "/notifications", iconType: "notifications" },
       ];
 
@@ -522,7 +559,7 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
 
     case "shelter_manager":
       return [
-        { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
+        { name: "Overview", path: dashboardPath, iconType: "dashboard" },
         { name: "Shelter Facilities", path: "/shelters", iconType: "shelters" },
         { name: "Shelter Dogs", path: "/shelter-dogs", iconType: "pets" },
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
@@ -563,6 +600,21 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
       ];
 
     case "volunteer":
+      return [
+        { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
+      ];
+
+    case "foster_family":
+      return [
+        { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
+      ];
+
+    case "donor":
+      return [
+        { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
+      ];
+
+    case "general_public_user":
       return [
         { name: "Dashboard", path: dashboardPath, iconType: "dashboard" },
       ];

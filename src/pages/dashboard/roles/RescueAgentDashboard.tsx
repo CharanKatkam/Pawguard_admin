@@ -14,10 +14,13 @@ import {
   FaExternalLinkAlt,
   FaDog,
   FaCompass,
+  FaExclamationTriangle,
+  FaLocationArrow,
 } from "react-icons/fa";
 import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import petService from "../../../services/petService";
+import storageService from "../../../services/storageService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { getCurrentUser } from "../../../utils/roleUtils";
 import { rescueStatusBadge } from "../../../utils/rescueStatus.tsx";
@@ -135,14 +138,118 @@ const RescueAgentDashboard = () => {
     });
   };
 
+  // Real GPS Telemetry State
+  const [watchId, setWatchId] = useState<number | null>(null);
+  const [currentGps, setCurrentGps] = useState<{
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    speed: number | null;
+    timestamp: number;
+  } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<"idle" | "active" | "denied" | "error">("idle");
+  const [gpsErrorMsg, setGpsErrorMsg] = useState<string | null>(null);
+
+  // Offline Queue State
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [offlineQueue, setOfflineQueue] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem("pg_rescue_offline_queue");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const queueOfflineAction = (action: { type: string; caseId: string; payload: any }) => {
+    setOfflineQueue((prev) => {
+      const next = [...prev, { ...action, timestamp: new Date().toISOString() }];
+      try {
+        localStorage.setItem("pg_rescue_offline_queue", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    addToast(`Offline mode: Action queued locally (${action.type}). Will sync when online.`, "info");
+  };
+
+  const startGpsTracking = (caseId?: string) => {
+    if (!navigator.geolocation) {
+      setGpsStatus("error");
+      setGpsErrorMsg("Geolocation is not supported by this device/browser.");
+      addToast("Device location is unavailable.", "error");
+      return;
+    }
+
+    setGpsStatus("active");
+    setGpsErrorMsg(null);
+
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          speed: pos.coords.speed,
+          timestamp: pos.timestamp,
+        };
+        setCurrentGps(coords);
+        setGpsStatus("active");
+
+        if (caseId) {
+          rescueService.startTracking(caseId).catch(() => {});
+        }
+      },
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          setGpsStatus("denied");
+          setGpsErrorMsg("Location permission denied by user.");
+        } else {
+          setGpsStatus("error");
+          setGpsErrorMsg(err.message || "GPS signal weak/lost.");
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+
+    setWatchId(id);
+  };
+
+  const stopGpsTracking = (caseId?: string) => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      setWatchId(null);
+    }
+    setGpsStatus("idle");
+    if (caseId) {
+      rescueService.stopTracking(caseId).catch(() => {});
+    }
+  };
+
   // Modal States
   const [selectedCase, setSelectedCase] = useState<Record<string, unknown> | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+
+  // Decline Modal
+  const [isDeclineModalOpen, setIsDeclineModalOpen] = useState(false);
+  const [declineCaseId, setDeclineCaseId] = useState("");
+  const [declineReason, setDeclineReason] = useState("");
+
+  // Field Observation Modal
+  const [isObservationModalOpen, setIsObservationModalOpen] = useState(false);
+  const [observationCaseId, setObservationCaseId] = useState("");
+  const [observationNotes, setObservationNotes] = useState("");
+  const [animalCondition, setAnimalCondition] = useState("Injured");
+
+  // Escalation Modal
+  const [isEscalateModalOpen, setIsEscalateModalOpen] = useState(false);
+  const [escalateCaseId, setEscalateCaseId] = useState("");
+  const [escalateReason, setEscalateReason] = useState("");
 
   // Quick Action Modals
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadCaseId, setUploadCaseId] = useState("");
   const [photoUrl, setPhotoUrl] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [statusCaseId, setStatusCaseId] = useState("");
@@ -162,6 +269,65 @@ const RescueAgentDashboard = () => {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const fetchAssignedCases = useCallback(async () => {
+    try {
+      const response = await rescueService.getRescueCases({ assigned_to_me: true });
+      setAssignedCases(unwrapList(response).map((c) => formatAssigned(c, localStatuses)));
+    } catch {
+      setAssignedCases([]);
+    }
+  }, [localStatuses]);
+
+  const syncOfflineQueue = useCallback(async () => {
+    const queue = [...offlineQueue];
+    if (queue.length === 0) return;
+
+    addToast(`Syncing ${queue.length} offline field actions to backend...`, "info");
+    const remaining = [];
+
+    for (const item of queue) {
+      try {
+        if (item.type === "status") {
+          await rescueService.updateRescueCase(item.caseId, item.payload);
+        } else if (item.type === "locate") {
+          await rescueService.markRescueLocated(item.caseId);
+        } else if (item.type === "secure") {
+          await rescueService.markRescueSecured(item.caseId);
+        } else if (item.type === "admit") {
+          await rescueService.markRescueAdmitted(item.caseId);
+        }
+      } catch {
+        remaining.push(item);
+      }
+    }
+
+    setOfflineQueue(remaining);
+    try {
+      localStorage.setItem("pg_rescue_offline_queue", JSON.stringify(remaining));
+    } catch {}
+
+    if (remaining.length === 0) {
+      addToast("All offline field actions synced successfully!", "success");
+      fetchAssignedCases();
+    }
+  }, [offlineQueue, fetchAssignedCases]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncOfflineQueue();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [syncOfflineQueue]);
 
   const handleRegisterDogSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,15 +373,6 @@ const RescueAgentDashboard = () => {
       setIsSubmitting(false);
     }
   };
-
-  const fetchAssignedCases = useCallback(async () => {
-    try {
-      const response = await rescueService.getRescueCases();
-      setAssignedCases(unwrapList(response).map((c) => formatAssigned(c, localStatuses)));
-    } catch {
-      setAssignedCases([]);
-    }
-  }, [localStatuses]);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -358,6 +515,12 @@ const RescueAgentDashboard = () => {
   const handleMarkLocated = async (caseId: string) => {
     try {
       setIsSubmitting(true);
+      if (!navigator.onLine) {
+        queueOfflineAction({ type: "locate", caseId, payload: {} });
+        addToast("Animal marked as located locally (offline).", "info");
+        setIsViewModalOpen(false);
+        return;
+      }
       await rescueService.markRescueLocated(caseId);
       addToast("Animal marked as located on scene!", "info");
       
@@ -377,6 +540,12 @@ const RescueAgentDashboard = () => {
   const handleMarkSecured = async (caseId: string) => {
     try {
       setIsSubmitting(true);
+      if (!navigator.onLine) {
+        queueOfflineAction({ type: "secure", caseId, payload: {} });
+        addToast("Animal marked as secured locally (offline).", "info");
+        setIsViewModalOpen(false);
+        return;
+      }
       await rescueService.markRescueSecured(caseId);
       addToast("Animal marked as secured!", "info");
       
@@ -396,8 +565,16 @@ const RescueAgentDashboard = () => {
   const handleMarkAdmitted = async (caseId: string) => {
     try {
       setIsSubmitting(true);
+      stopGpsTracking(caseId);
+      if (!navigator.onLine) {
+        queueOfflineAction({ type: "admit", caseId, payload: {} });
+        addToast("🐕 Delivery confirmed locally (offline). Will sync when online.", "success");
+        setIsViewModalOpen(false);
+        setIsDeliveryModalOpen(false);
+        return;
+      }
       await rescueService.markRescueAdmitted(caseId);
-      addToast("🐕 Dog rescued successfully!", "success");
+      addToast("🐕 Dog rescued and admitted successfully!", "success");
       
       clearLocalStatus(caseId);
       
@@ -413,6 +590,73 @@ const RescueAgentDashboard = () => {
     }
   };
 
+  const handleDeclineSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!declineCaseId) return;
+    try {
+      setIsSubmitting(true);
+      await rescueService.rejectRescueRequest(declineCaseId, declineReason || "Agent unavailable");
+      addToast("Assignment declined.", "info");
+      setIsDeclineModalOpen(false);
+      setDeclineReason("");
+      setDeclineCaseId("");
+      fetchAssignedCases();
+      fetchDashboard();
+    } catch {
+      addToast("Failed to decline assignment.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleObservationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!observationCaseId || !observationNotes.trim()) {
+      addToast("Please enter field observation notes.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const target = assignedCases.find((c) => String(c.id) === observationCaseId);
+      const existingNotes = String((target?.raw as any)?.notes || "");
+      const updatedNotes = existingNotes
+        ? `${existingNotes}\n[Observation - ${animalCondition}]: ${observationNotes.trim()}`
+        : `[Observation - ${animalCondition}]: ${observationNotes.trim()}`;
+
+      await rescueService.updateRescueCase(observationCaseId, { notes: updatedNotes });
+      addToast("Field observation notes saved!", "success");
+      setIsObservationModalOpen(false);
+      setObservationNotes("");
+      setObservationCaseId("");
+      fetchAssignedCases();
+    } catch {
+      addToast("Failed to save observation notes.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEscalationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!escalateCaseId || !escalateReason.trim()) {
+      addToast("Please describe the emergency back-up requirement.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await rescueService.escalateRescue(escalateCaseId, "emergency_backup", escalateReason.trim());
+      addToast("🚨 Emergency back-up request sent to Rescue Coordinator!", "info");
+      setIsEscalateModalOpen(false);
+      setEscalateReason("");
+      setEscalateCaseId("");
+      fetchAssignedCases();
+    } catch {
+      addToast("Failed to send escalation request.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Quick Action Modal Submitters
   const handleUploadPhotoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -420,20 +664,34 @@ const RescueAgentDashboard = () => {
       addToast("Please select an assigned rescue case.", "error");
       return;
     }
-    if (!photoUrl.trim()) {
-      addToast("Please provide an image URL or photo link.", "error");
-      return;
-    }
+
     try {
       setIsSubmitting(true);
+      let finalPhotoUrl = photoUrl.trim();
+
+      if (selectedFile) {
+        addToast("Uploading photo file to storage...", "info");
+        finalPhotoUrl = await storageService.uploadFile(selectedFile, {
+          folder: "rescues",
+          entity_type: "rescue_case",
+          entity_id: uploadCaseId,
+        });
+      }
+
+      if (!finalPhotoUrl) {
+        addToast("Please select a photo file or provide an image URL.", "error");
+        return;
+      }
+
       const target = assignedCases.find((c) => String(c.id) === uploadCaseId);
       const existingMedia = Array.isArray(target?.media) ? (target.media as string[]) : [];
       await rescueService.updateRescueCase(uploadCaseId, {
-        media_evidence: [...existingMedia, photoUrl.trim()],
+        media_evidence: [...existingMedia, finalPhotoUrl],
       });
       addToast("Rescue photo evidence attached successfully!", "success");
       setIsUploadModalOpen(false);
       setPhotoUrl("");
+      setSelectedFile(null);
       setUploadCaseId("");
       fetchAssignedCases();
       notifyDataChanged();
@@ -644,15 +902,27 @@ const RescueAgentDashboard = () => {
       const dispatchStatus = rawDispatch?.status || "";
       if (dispatchStatus === "dispatched" || !dispatchStatus) {
         return (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleAcceptDispatch(caseId);
-            }}
-            style={{ padding: "5px 10px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-          >
-            Accept Dispatch
-          </button>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAcceptDispatch(caseId);
+              }}
+              style={{ padding: "5px 10px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+            >
+              Accept Dispatch
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeclineCaseId(caseId);
+                setIsDeclineModalOpen(true);
+              }}
+              style={{ padding: "5px 8px", background: "#EF4444", color: "#FFF", borderRadius: "6px", border: "none", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+            >
+              Decline
+            </button>
+          </div>
         );
       }
       return (
@@ -716,7 +986,7 @@ const RescueAgentDashboard = () => {
 
   return (
     <div>
-      {/* Hero Banner */}
+      {/* Hero Banner with Live Telemetry Badges */}
       <div
         style={{
           marginBottom: "20px",
@@ -726,12 +996,55 @@ const RescueAgentDashboard = () => {
           color: "#fff",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 800 }}>
-          Field Rescue Agent Console
-        </h1>
-        <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "13px" }}>
-          View assigned rescue requests, update field status, upload rescue photos and complete shelter handover.
-        </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 800 }}>
+              Field Rescue Agent Console
+            </h1>
+            <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "13px" }}>
+              View assigned rescue requests, update field status, upload rescue photos and complete shelter handover.
+            </p>
+          </div>
+
+          {/* Field Status & Telemetry Indicators */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            {/* Network Connection Badge */}
+            <span style={{ fontSize: "11px", fontWeight: 800, padding: "4px 10px", borderRadius: "999px", background: isOnline ? "rgba(16, 185, 129, 0.2)" : "rgba(239, 68, 68, 0.2)", color: isOnline ? "#34D399" : "#FCA5A5", border: isOnline ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(239, 68, 68, 0.4)" }}>
+              {isOnline ? "🌐 Online" : `📶 Offline Mode (${offlineQueue.length} queued)`}
+            </span>
+
+            {/* GPS Telemetry Badge & Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                if (gpsStatus === "active") stopGpsTracking();
+                else startGpsTracking();
+              }}
+              style={{
+                fontSize: "11.5px",
+                fontWeight: 700,
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "none",
+                background: gpsStatus === "active" ? "#10B981" : gpsStatus === "denied" || gpsStatus === "error" ? "#DC2626" : "#2563EB",
+                color: "#FFFFFF",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FaLocationArrow />
+              {gpsStatus === "active" && currentGps
+                ? `GPS Active (${currentGps.latitude.toFixed(4)}, ${currentGps.longitude.toFixed(4)})`
+                : gpsStatus === "denied"
+                ? "GPS Denied"
+                : gpsStatus === "error"
+                ? `GPS Error (${gpsErrorMsg || "Signal Lost"})`
+                : "Broadcast Live GPS"}
+            </button>
+          </div>
+        </div>
       </div>
 
       {error && (
@@ -803,6 +1116,28 @@ const RescueAgentDashboard = () => {
             if (rescuable) setDeliveryCaseId(String(rescuable.id));
             else if (assignedCases.length > 0) setDeliveryCaseId(String(assignedCases[0].id));
             setIsDeliveryModalOpen(true);
+          }}
+        />
+
+        <QuickActionCard
+          icon={<FaCompass />}
+          title="Field Observation"
+          subtitle="Log Animal Condition & Notes"
+          color="#0891B2"
+          onClick={() => {
+            if (assignedCases.length > 0) setObservationCaseId(String(assignedCases[0].id));
+            setIsObservationModalOpen(true);
+          }}
+        />
+
+        <QuickActionCard
+          icon={<FaExclamationTriangle />}
+          title="Emergency Back-up"
+          subtitle="Escalate to Coordinator"
+          color="#DC2626"
+          onClick={() => {
+            if (assignedCases.length > 0) setEscalateCaseId(String(assignedCases[0].id));
+            setIsEscalateModalOpen(true);
           }}
         />
       </div>
@@ -1110,11 +1445,11 @@ const RescueAgentDashboard = () => {
         )}
       </Modal>
 
-      {/* Upload Photos Modal */}
+      {/* Upload Photos Modal with Camera File Picker */}
       <Modal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
-        title="Upload Rescue Photos / Evidence"
+        title="Upload Rescue Photos / Field Evidence"
         size="md"
         footer={
           <>
@@ -1136,10 +1471,22 @@ const RescueAgentDashboard = () => {
             </select>
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600 }}>Photo Image URL / Evidence Link *</label>
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "4px" }}>📷 Take Photo / Choose File (Device Camera)</label>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                if (e.target.files?.[0]) setSelectedFile(e.target.files[0]);
+              }}
+              style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#F8FAFC" }}
+            />
+          </div>
+          <div style={{ textAlign: "center", fontSize: "12px", color: "#64748B", fontWeight: 600 }}>— OR —</div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Photo Image URL / Evidence Link</label>
             <input
               type="text"
-              required
               value={photoUrl}
               placeholder="https://example.com/rescue-photo.jpg"
               onChange={(e) => setPhotoUrl(e.target.value)}
@@ -1313,6 +1660,171 @@ const RescueAgentDashboard = () => {
 
           <div style={{ background: "#EFF6FF", padding: "10px 12px", borderRadius: "8px", border: "1px solid #BFDBFE", fontSize: "12px", color: "#1D4ED8" }}>
             ℹ️ <strong>Backend Dog UUID & Safety Tag Provisioning:</strong> Submitting will invoke the existing <code>petService.createPet</code> API to generate a permanent Dog UUID and automatically provision a PawGuard Safety Tag / QR code.
+          </div>
+        </form>
+      </Modal>
+
+      {/* Decline Assignment Modal */}
+      <Modal
+        isOpen={isDeclineModalOpen}
+        onClose={() => setIsDeclineModalOpen(false)}
+        title="Decline Rescue Assignment"
+      >
+        <form onSubmit={handleDeclineSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>
+            Please state why you are declining this rescue dispatch.
+          </p>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#991B1B", marginBottom: "4px" }}>
+              Decline Reason *
+            </label>
+            <textarea
+              rows={3}
+              required
+              placeholder="e.g. Currently handling another emergency, vehicle breakdown, out of service area..."
+              value={declineReason}
+              onChange={(e) => setDeclineReason(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #FCA5A5", fontSize: "13px" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+            <button
+              type="button"
+              onClick={() => setIsDeclineModalOpen(false)}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: "#DC2626", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+            >
+              {isSubmitting ? "Declining..." : "Decline Assignment"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Field Observation Modal */}
+      <Modal
+        isOpen={isObservationModalOpen}
+        onClose={() => setIsObservationModalOpen(false)}
+        title="Log Field Observation / Notes"
+      >
+        <form onSubmit={handleObservationSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Select Case *</label>
+            <select
+              required
+              value={observationCaseId}
+              onChange={(e) => setObservationCaseId(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+            >
+              <option value="">Select assigned case...</option>
+              {assignedCases.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.ticket)} — {String(c.location)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Observed Animal Condition</label>
+            <select
+              value={animalCondition}
+              onChange={(e) => setAnimalCondition(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+            >
+              <option value="Injured">Injured / Requires Immediate Medical Attention</option>
+              <option value="Aggressive">Aggressive / High Risk</option>
+              <option value="Trapped">Trapped / Requires Net/Grasper</option>
+              <option value="Scared">Scared / Skittish</option>
+              <option value="Stable">Stable Condition</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Field Notes &amp; Remarks *</label>
+            <textarea
+              rows={3}
+              required
+              placeholder="Record physical condition, hazards, or capture details..."
+              value={observationNotes}
+              onChange={(e) => setObservationNotes(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+            <button
+              type="button"
+              onClick={() => setIsObservationModalOpen(false)}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+            >
+              {isSubmitting ? "Saving..." : "Save Field Observation"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Emergency Escalation Modal */}
+      <Modal
+        isOpen={isEscalateModalOpen}
+        onClose={() => setIsEscalateModalOpen(false)}
+        title="🚨 Request Emergency Back-Up / Escalation"
+      >
+        <form onSubmit={handleEscalationSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#991B1B", fontWeight: 600 }}>
+            Submit an emergency escalation to notify the Rescue Coordinator for immediate assistance or back-up.
+          </p>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Select Case *</label>
+            <select
+              required
+              value={escalateCaseId}
+              onChange={(e) => setEscalateCaseId(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", marginTop: "4px" }}
+            >
+              <option value="">Select active case...</option>
+              {assignedCases.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.ticket)} — {String(c.location)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600 }}>Emergency Reason &amp; Back-up Details *</label>
+            <textarea
+              rows={3}
+              required
+              placeholder="e.g. Hostile environment, animal trapped under structure, additional handler required..."
+              value={escalateReason}
+              onChange={(e) => setEscalateReason(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #FCA5A5", fontSize: "13px", marginTop: "4px" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+            <button
+              type="button"
+              onClick={() => setIsEscalateModalOpen(false)}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: "#7C3AED", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+            >
+              {isSubmitting ? "Submitting..." : "Send Escalation"}
+            </button>
           </div>
         </form>
       </Modal>

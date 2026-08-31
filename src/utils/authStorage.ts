@@ -148,23 +148,26 @@ export const setRememberedEmail = (email: string): void => {
 };
 
 export const getAccessToken = (): string | null => {
-  const directToken =
+  let raw: string | null =
     read(AUTH_STORAGE_KEYS.accessToken) ||
     read("token") ||
     read("accessToken") ||
     read("access_token") ||
     read("auth_token");
 
-  if (directToken) return directToken;
-
-  const user = getStoredUser<Record<string, unknown>>();
-  if (user && typeof user === "object") {
-    if (typeof user.access_token === "string" && user.access_token) return user.access_token;
-    if (typeof user.token === "string" && user.token) return user.token;
-    if (typeof user.accessToken === "string" && user.accessToken) return user.accessToken;
+  if (!raw) {
+    const user = getStoredUser<Record<string, unknown>>();
+    if (user && typeof user === "object") {
+      if (typeof user.access_token === "string" && user.access_token) raw = user.access_token;
+      else if (typeof user.token === "string" && user.token) raw = user.token;
+      else if (typeof user.accessToken === "string" && user.accessToken) raw = user.accessToken;
+    }
   }
 
-  return null;
+  if (!raw) return null;
+
+  const clean = raw.trim().replace(/^["']|["']$/g, "").trim();
+  return clean || null;
 };
 
 export const getRefreshToken = (): string | null => {

@@ -38,6 +38,52 @@ import DogLifecycleTimelineModal from "../../components/pets/DogLifecycleTimelin
 const DOG_STATUSES = ["rescued", "clinic", "shelter", "fostered", "adopted"];
 const GENDERS = ["male", "female", "unknown"];
 
+export const EAR_SHAPES = [
+  { value: "unknown", label: "Unknown / Not recorded" },
+  { value: "pricked", label: "Pricked" },
+  { value: "floppy", label: "Floppy" },
+  { value: "semi_pricked", label: "Semi-Pricked" },
+  { value: "rose", label: "Rose" },
+  { value: "button", label: "Button" },
+];
+
+export const TAIL_TYPES = [
+  { value: "unknown", label: "Unknown / Not recorded" },
+  { value: "straight", label: "Straight" },
+  { value: "curled", label: "Curled" },
+  { value: "docked", label: "Docked" },
+  { value: "long", label: "Long" },
+  { value: "bobtail", label: "Bobtail" },
+];
+
+export const formatEarShape = (val?: string | null): string => {
+  if (!val) return "Not recorded";
+  const s = String(val).toLowerCase().trim();
+  switch (s) {
+    case "pricked": return "Pricked";
+    case "floppy": return "Floppy";
+    case "semi_pricked": return "Semi-Pricked";
+    case "rose": return "Rose";
+    case "button": return "Button";
+    case "unknown": return "Not recorded";
+    default: return val.charAt(0).toUpperCase() + val.slice(1);
+  }
+};
+
+export const formatTailType = (val?: string | null): string => {
+  if (!val) return "Not recorded";
+  const s = String(val).toLowerCase().trim();
+  switch (s) {
+    case "straight": return "Straight";
+    case "curled": return "Curled";
+    case "docked": return "Docked";
+    case "long": return "Long";
+    case "bobtail": return "Bobtail";
+    case "unknown": return "Not recorded";
+    default: return val.charAt(0).toUpperCase() + val.slice(1);
+  }
+};
+
 export const getDogPhotoUrl = (dog: any, photoMap?: Record<string, string>): string => {
   if (!dog) return "";
   const dId = dog?.id || dog?.dog_id || dog?.registration_number;
@@ -103,6 +149,8 @@ const emptyPetForm = {
   estimated_age: "",
   age_months: "",
   weight: "",
+  ear_shape: "unknown",
+  tail_type: "unknown",
   is_adoptable: false,
   status: "shelter",
   rescue_case_id: "",
@@ -491,6 +539,8 @@ const Pets = () => {
           estimated_age: petForm.estimated_age,
           age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
           weight: petForm.weight ? Number(petForm.weight) : undefined,
+          ear_shape: petForm.ear_shape && petForm.ear_shape !== "unknown" ? petForm.ear_shape : undefined,
+          tail_type: petForm.tail_type && petForm.tail_type !== "unknown" ? petForm.tail_type : undefined,
           is_adoptable: petForm.is_adoptable,
           rescue_case_id: petForm.rescue_case_id || undefined,
         })
@@ -963,6 +1013,8 @@ const Pets = () => {
           estimated_age: petForm.estimated_age,
           age_months: petForm.age_months ? Number(petForm.age_months) : undefined,
           weight: petForm.weight ? Number(petForm.weight) : undefined,
+          ear_shape: petForm.ear_shape && petForm.ear_shape !== "unknown" ? petForm.ear_shape : undefined,
+          tail_type: petForm.tail_type && petForm.tail_type !== "unknown" ? petForm.tail_type : undefined,
           is_adoptable: petForm.is_adoptable,
           status: DOG_STATUSES.includes(petForm.status) ? petForm.status : undefined,
         })
@@ -1379,6 +1431,38 @@ const Pets = () => {
             </div>
           </div>
 
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Ear Shape</label>
+              <select
+                value={petForm.ear_shape || "unknown"}
+                onChange={(e) => setPetForm({ ...petForm, ear_shape: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {EAR_SHAPES.map((es) => (
+                  <option key={es.value} value={es.value}>
+                    {es.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Tail Type</label>
+              <select
+                value={petForm.tail_type || "unknown"}
+                onChange={(e) => setPetForm({ ...petForm, tail_type: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {TAIL_TYPES.map((tt) => (
+                  <option key={tt.value} value={tt.value}>
+                    {tt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Linked Rescue Case</label>
             <select
@@ -1589,6 +1673,38 @@ const Pets = () => {
                 onChange={(e) => setPetForm({ ...petForm, age_months: e.target.value })}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
               />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Ear Shape</label>
+              <select
+                value={petForm.ear_shape || "unknown"}
+                onChange={(e) => setPetForm({ ...petForm, ear_shape: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {EAR_SHAPES.map((es) => (
+                  <option key={es.value} value={es.value}>
+                    {es.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Tail Type</label>
+              <select
+                value={petForm.tail_type || "unknown"}
+                onChange={(e) => setPetForm({ ...petForm, tail_type: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {TAIL_TYPES.map((tt) => (
+                  <option key={tt.value} value={tt.value}>
+                    {tt.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -2976,6 +3092,16 @@ const Pets = () => {
               <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Microchip ID</div>
                 <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px", fontFamily: "monospace" }}>{selectedViewDog.microchip_id || "Not Microchipped"}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Ear Shape</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{formatEarShape(selectedViewDog.ear_shape)}</div>
+              </div>
+
+              <div style={{ background: "#FFFFFF", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Tail Type</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#0F172A", marginTop: "2px" }}>{formatTailType(selectedViewDog.tail_type)}</div>
               </div>
             </div>
 

@@ -20,6 +20,9 @@ import {
   FaPlus,
   FaCopy,
   FaExternalLinkAlt,
+  FaExchangeAlt,
+  FaExclamationTriangle,
+  FaCheckCircle,
 } from "react-icons/fa";
 import shelterService from "../../../services/shelterService";
 import petService from "../../../services/petService";
@@ -31,6 +34,7 @@ import { getDogPhotoUrl } from "../../pets/Pets";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import { generateQrDataUrl, generateQrBlob } from "../../../utils/qrGenerator";
 import { formatDateTime } from "../../../utils/dateUtils";
+import { getCurrentUser, getCurrentUserRole } from "../../../utils/roleUtils";
 
 
 
@@ -105,6 +109,8 @@ const DogRowActions = ({
   onQr,
   onCage,
   onMedical,
+  onTransfer,
+  onAdoptionReadiness,
 }: {
   row: any;
   onView: () => void;
@@ -112,6 +118,8 @@ const DogRowActions = ({
   onQr: () => void;
   onCage: () => void;
   onMedical: () => void;
+  onTransfer?: () => void;
+  onAdoptionReadiness?: () => void;
 }) => {
   const [showMore, setShowMore] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -308,6 +316,60 @@ const DogRowActions = ({
           >
             <FaStethoscope color="#DC2626" /> Medical Records
           </button>
+
+          {/* 6. Facility Transfer */}
+          {onTransfer && !isAdopted && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowMore(false);
+                onTransfer();
+              }}
+              style={{
+                width: "100%",
+                padding: "8px 14px",
+                textAlign: "left",
+                border: "none",
+                background: "transparent",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#334155",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaExchangeAlt color="#2563EB" /> Facility Transfer
+            </button>
+          )}
+
+          {/* 7. Mark Ready for Adoption */}
+          {onAdoptionReadiness && !row.is_adoptable && !isAdopted && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowMore(false);
+                onAdoptionReadiness();
+              }}
+              style={{
+                width: "100%",
+                padding: "8px 14px",
+                textAlign: "left",
+                border: "none",
+                background: "transparent",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#334155",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaCheckCircle color="#059669" /> Ready for Adoption
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -330,6 +392,15 @@ const ShelterManagerDashboard = () => {
   const [activeRescueForIntake, setActiveRescueForIntake] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+
+  const [transfersList, setTransfersList] = useState<any[]>([]);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferForm, setTransferForm] = useState({
+    dogId: "",
+    fromFacilityId: "",
+    toFacilityId: "",
+    notes: "",
+  });
 
   const [dashboardData, setDashboardData] = useState({
     total_facilities: 0,
@@ -457,24 +528,38 @@ const ShelterManagerDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [facilitiesRes, dogsRes, rescueCasesRes] = await Promise.allSettled([
+      const [facilitiesRes, dogsRes, rescueCasesRes, transfersRes] = await Promise.allSettled([
         shelterService.getShelters({ page: 1, page_size: 50 }),
         petService.getAllDogs(),
         rescueService.getRescueCases({ page: 1, page_size: 50 }),
+        shelterService.getTransfers({ page: 1, page_size: 50 }),
       ]);
 
-      const facList = facilitiesRes.status === "fulfilled" ? unwrapList(facilitiesRes.value) : [];
-      const dogList = dogsRes.status === "fulfilled" ? unwrapList(dogsRes.value).map(formatDog) : [];
+      const currentUser = getCurrentUser();
+      const userRole = getCurrentUserRole();
+      const isShelterMgr = userRole === "shelter_manager";
+      const currentShelterId = (currentUser as any)?.shelter_id || (currentUser as any)?.shelterId || (currentUser as any)?.facility_id || (currentUser as any)?.facilityId || (currentUser as any)?.organization_id;
+
+      let facList = facilitiesRes.status === "fulfilled" ? unwrapList(facilitiesRes.value) : [];
+      let dogList = dogsRes.status === "fulfilled" ? unwrapList(dogsRes.value).map(formatDog) : [];
       const rescueCases = rescueCasesRes.status === "fulfilled" ? unwrapList(rescueCasesRes.value) : [];
+      const rawTransfers = transfersRes.status === "fulfilled" ? unwrapList(transfersRes.value) : [];
 
       if (dogsRes.status === "rejected") {
         const errDetail = (dogsRes.reason as any)?.response?.data?.detail || (dogsRes.reason as any)?.response?.data?.message || "Failed to load dogs data.";
         setError(`⚠️ ${errDetail}`);
       }
 
+      // Facility scoping for Shelter Manager if shelter_id is defined
+      if (isShelterMgr && currentShelterId) {
+        facList = facList.filter((f: any) => String(f.id || f.facility_id) === String(currentShelterId));
+        dogList = dogList.filter((d: any) => !d.shelter_id || String(d.shelter_id) === String(currentShelterId) || String(d.shelter_facility_id) === String(currentShelterId));
+      }
+
       setFacilities(facList);
       setDogs(dogList);
       setAllRescues(rescueCases);
+      setTransfersList(rawTransfers);
 
       // Collect all rescue case IDs that have already been registered into Dog Master / Shelter Dogs
       const registeredRescueIds = new Set(
@@ -1062,6 +1147,15 @@ const ShelterManagerDashboard = () => {
       addToast("Please select both a kennel and a dog.", "error");
       return;
     }
+    const targetKennel = cageKennels.find((k: any) => String(k.id || k.kennel_id) === String(cageSel.kennelId));
+    if (targetKennel) {
+      const cap = Number(targetKennel.capacity) || 1;
+      const occ = Number(targetKennel.current_occupancy) || 0;
+      if (occ >= cap) {
+        addToast(`Cannot assign: Kennel "${targetKennel.identifier || targetKennel.name || "unit"}" is at maximum capacity (${occ}/${cap}).`, "error");
+        return;
+      }
+    }
     try {
       setCageLoading(true);
       await shelterService.assignDogToKennel(cageSel.kennelId, cageSel.dogId);
@@ -1119,6 +1213,56 @@ const ShelterManagerDashboard = () => {
     }
   };
 
+  // Facility Transfer Placement Handler
+  const handleCreateTransferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferForm.dogId || !transferForm.toFacilityId) {
+      addToast("Please select both a dog and target facility.", "error");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await shelterService.createTransfer({
+        dog_id: transferForm.dogId,
+        from_facility_id: transferForm.fromFacilityId || facilities[0]?.id || "",
+        to_facility_id: transferForm.toFacilityId,
+        notes: transferForm.notes,
+      });
+      addToast("Facility transfer placement requested successfully!", "success");
+      setIsTransferModalOpen(false);
+      setTransferForm({ dogId: "", fromFacilityId: "", toFacilityId: "", notes: "" });
+      fetchDashboard();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.response?.data?.message || "Failed to create transfer request.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Adoption Readiness Handoff Handler
+  const handleMarkReadyForAdoption = async (dog: any) => {
+    const id = dogId(dog);
+    if (!id) return;
+    try {
+      setIsSubmitting(true);
+      await petService.updatePet(id, {
+        is_adoptable: true,
+        adoption_status: "Ready for Adoption",
+        status: "shelter",
+      });
+      setDogs((prev) =>
+        prev.map((d) => (dogId(d) === id ? { ...d, is_adoptable: true, adoption_status: "Ready for Adoption" } : d))
+      );
+      addToast(`Dog "${dog.name}" is now marked Ready for Adoption!`, "success");
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast("Failed to update adoption readiness status.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Report Generator Handler
   const handleGenerateReportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1160,6 +1304,7 @@ const ShelterManagerDashboard = () => {
     { title: "Dogs in Shelter Care", value: loading ? "..." : dashboardData.in_shelter_dogs, trend: "Rescued & Shelter Care", color: "#10B981", icon: <FaPaw /> },
     { title: "Adoptable Dogs", value: loading ? "..." : dashboardData.adoptable_dogs, trend: "Ready for Adoption", color: "#059669", icon: <FaPaw /> },
     { title: "Kennel Occupancy", value: loading ? "..." : occupancyText, trend: `${in_shelter_dogs} In Care / ${total_capacity || 20} Capacity`, color: "#F59E0B", icon: <FaBed /> },
+    { title: "Active Transfers", value: loading ? "..." : transfersList.length, trend: "Facility Placements", color: "#6366F1", icon: <FaExchangeAlt /> },
   ];
 
   const dogColumns = [
@@ -1311,10 +1456,35 @@ const ShelterManagerDashboard = () => {
         </div>
       )}
 
+      {/* OPERATIONAL CAPACITY & INTAKE ALERTS BANNER */}
+      {((total_capacity > 0 && in_shelter_dogs / total_capacity >= 0.85) || incomingRescues.length > 0) && (
+        <div style={{ marginBottom: "20px", padding: "14px 18px", borderRadius: "12px", background: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <FaExclamationTriangle size={20} color="#D97706" />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: "14px" }}>Operational Shelter Alert</div>
+              <div style={{ fontSize: "12px", color: "#B45309", marginTop: "2px" }}>
+                {total_capacity > 0 && in_shelter_dogs / total_capacity >= 0.85
+                  ? `High Occupancy Warning: Shelter is operating at ${Math.round((in_shelter_dogs / total_capacity) * 100)}% capacity (${in_shelter_dogs}/${total_capacity} dogs).`
+                  : `${incomingRescues.length} rescued animal(s) handed over awaiting intake & kennel allocation.`}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => openCageModal()}
+            style={{ padding: "8px 14px", borderRadius: "8px", border: "none", background: "#D97706", color: "#FFF", fontWeight: 700, fontSize: "12px", cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            Manage Allocations
+          </button>
+        </div>
+      )}
+
       {/* Quick Action Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         <QuickActionCard icon={<FaPlus />} title="Register Rescued Dog / Intake" subtitle="New intake entry" color="#10B981" onClick={() => { setPetForm({ ...emptyPetForm }); setIsRegisterModalOpen(true); }} />
         <QuickActionCard icon={<FaBed />} title="Allocate Cage" subtitle="Assign dog to kennel" color="#2563EB" onClick={() => openCageModal()} />
+        <QuickActionCard icon={<FaExchangeAlt />} title="Facility Placement" subtitle="Request internal transfer" color="#6366F1" onClick={() => setIsTransferModalOpen(true)} />
         <QuickActionCard icon={<FaBoxes />} title="Request Supplies" subtitle="Food & Medicines" color="#F59E0B" onClick={() => setIsSupplyModalOpen(true)} />
       </div>
 
@@ -1466,6 +1636,16 @@ const ShelterManagerDashboard = () => {
               onQr={() => openQrModal(row)}
               onCage={() => openCageModal(row)}
               onMedical={() => navigate(`/medical-records?dogId=${dogId(row)}`)}
+              onTransfer={() => {
+                setTransferForm({
+                  dogId: dogId(row),
+                  fromFacilityId: row.shelter_id || facilities[0]?.id || "",
+                  toFacilityId: "",
+                  notes: "",
+                });
+                setIsTransferModalOpen(true);
+              }}
+              onAdoptionReadiness={() => handleMarkReadyForAdoption(row)}
             />
           )}
         />
@@ -2356,6 +2536,84 @@ const ShelterManagerDashboard = () => {
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* FACILITY PLACEMENT & TRANSFER MODAL */}
+      <Modal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        title="Request Internal Shelter / Facility Transfer"
+        maxWidth="500px"
+      >
+        <form onSubmit={handleCreateTransferSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Select Dog to Transfer *
+            </label>
+            <select
+              required
+              value={transferForm.dogId}
+              onChange={(e) => setTransferForm({ ...transferForm, dogId: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
+            >
+              <option value="">-- Choose Dog --</option>
+              {dogs.map((d: any) => (
+                <option key={dogId(d)} value={dogId(d)}>
+                  {d.name} (ID: {d.registration_number}) - {d.breed || "Dog"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Destination Shelter / Facility *
+            </label>
+            <select
+              required
+              value={transferForm.toFacilityId}
+              onChange={(e) => setTransferForm({ ...transferForm, toFacilityId: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
+            >
+              <option value="">-- Choose Destination Facility --</option>
+              {facilities.map((f: any) => (
+                <option key={f.id || f.facility_id} value={f.id || f.facility_id}>
+                  {f.name} ({f.facility_type || "Shelter"}) - Capacity: {f.total_capacity || "Unspecified"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Transfer Rationale &amp; Operational Notes
+            </label>
+            <textarea
+              rows={3}
+              value={transferForm.notes}
+              onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
+              placeholder="Reason for transfer (e.g. specialized medical isolation, capacity rebalancing, adoption prep)..."
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+            <button
+              type="button"
+              onClick={() => setIsTransferModalOpen(false)}
+              style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{ padding: "10px 20px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 700, fontSize: "13px" }}
+            >
+              {isSubmitting ? "Submitting..." : "Submit Placement Transfer"}
+            </button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

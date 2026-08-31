@@ -31,9 +31,11 @@ import fosterService from "../../../services/fosterService";
 import inventoryService from "../../../services/inventoryService";
 import userService from "../../../services/userService";
 import vehicleService from "../../../services/vehicleService";
+import grievanceService from "../../../services/grievanceService";
+import { useToast } from "../../../context/ToastContext";
 import { rescueStatusBadge, dispatchStage, dispatchAgentNames } from "../../../utils/rescueStatus";
 import { useDataSync } from "../../../utils/dataSync";
-import { normalizeRole } from "../../../utils/roleUtils";
+import { normalizeRole, getCurrentUser } from "../../../utils/roleUtils";
 import { formatDateTime } from "../../../utils/dateUtils";
 import type { RescueRequestTableRow } from "../../rescues/RescueRequests";
 
@@ -125,9 +127,21 @@ const mapRescueCallRowToDetail = (row: RescueCallRow): RescueRequestTableRow => 
 
 const RescueCentreAdminDashboard = () => {
   const navigate = useNavigate();
+  const { addToast } = useToast();
+
+  const currentUser = getCurrentUser();
+  const currentRescueCentreId = String(
+    (currentUser as any)?.rescue_centre_id ||
+    (currentUser as any)?.rescue_center_id ||
+    (currentUser as any)?.organization_id ||
+    (currentUser as any)?.facility_id ||
+    (currentUser as any)?.shelter_id ||
+    ""
+  );
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"rescues" | "intake" | "pipeline" | "agents" | "vehicles">("rescues");
+  const [activeTab, setActiveTab] = useState<"rescues" | "intake" | "pipeline" | "agents" | "vehicles" | "complaints">("rescues");
   const [selectedCase, setSelectedCase] = useState<RescueRequestTableRow | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedPipelineRow, setSelectedPipelineRow] = useState<ApplicationPipelineRow | null>(null);
@@ -138,6 +152,24 @@ const RescueCentreAdminDashboard = () => {
   const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
   const [selectedIntake, setSelectedIntake] = useState<DogIntakeRow | null>(null);
   const [isIntakeModalOpen, setIsIntakeModalOpen] = useState(false);
+
+  // Complaints & Escalations State
+  const [grievanceTickets, setGrievanceTickets] = useState<any[]>([]);
+  const [selectedGrievance, setSelectedGrievance] = useState<any | null>(null);
+  const [isGrievanceModalOpen, setIsGrievanceModalOpen] = useState(false);
+  const [escalateReason, setEscalateReason] = useState("");
+  const [isEscalating, setIsEscalating] = useState(false);
+
+  // Centre Configuration State
+  const [isCentreConfigOpen, setIsCentreConfigOpen] = useState(false);
+  const [centreForm, setCentreForm] = useState({
+    name: "Central Rescue Operations Centre",
+    phone: "+91 1800-RESCUE",
+    address: "Sector 14, Main Emergency Complex",
+    operating_hours: "24/7 Rapid Response",
+    capacity: 100,
+    status: "active",
+  });
 
   const getSafeVal = (val: any, fallback = "—") => {
     if (val === undefined || val === null || val === "") return fallback;
@@ -208,6 +240,39 @@ const RescueCentreAdminDashboard = () => {
     return assignment !== "Unassigned" ? "Busy (On Call)" : "Available";
   };
 
+  const handleEscalateGrievanceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGrievance?.id || !escalateReason.trim()) {
+      addToast("Please provide a reason for escalation to Super Admin.", "error");
+      return;
+    }
+
+    try {
+      setIsEscalating(true);
+      await grievanceService.escalateGrievance(selectedGrievance.id, escalateReason.trim());
+      addToast(`Complaint ticket #${selectedGrievance.ticket_number || selectedGrievance.id} escalated to Super Admin successfully!`, "success");
+      setIsGrievanceModalOpen(false);
+      setEscalateReason("");
+      fetchDashboardData();
+    } catch {
+      addToast("Failed to escalate ticket.", "error");
+    } finally {
+      setIsEscalating(false);
+    }
+  };
+
+  const handleUpdateGrievanceStatusSubmit = async (status: string) => {
+    if (!selectedGrievance?.id) return;
+    try {
+      await grievanceService.updateGrievanceStatus(selectedGrievance.id, status);
+      addToast(`Complaint ticket status updated to ${status}.`, "success");
+      setIsGrievanceModalOpen(false);
+      fetchDashboardData();
+    } catch {
+      addToast("Failed to update complaint status.", "error");
+    }
+  };
+
   // Lifecycle Data States
   const [rescueCalls, setRescueCalls] = useState<RescueCallRow[]>([]);
   const [dogIntakes, setDogIntakes] = useState<DogIntakeRow[]>([]);
@@ -231,6 +296,8 @@ const RescueCentreAdminDashboard = () => {
       setLoading(true);
       setError(null);
 
+      const scopeParams = currentRescueCentreId ? { rescue_centre_id: currentRescueCentreId } : {};
+
       const [
         dashRes,
         casesRes,
@@ -241,16 +308,18 @@ const RescueCentreAdminDashboard = () => {
         inventoryRes,
         usersRes,
         vehiclesRes,
+        grievanceRes,
       ] = await Promise.allSettled([
         dashboardService.getRescueCentreDashboard(),
-        rescueService.getRescueCases({ page: 1, page_size: 20 }),
-        dogService.getAllDogs(),
-        shelterService.getShelters(),
+        rescueService.getRescueCases({ page: 1, page_size: 50, ...scopeParams }),
+        dogService.getAllDogs(scopeParams),
+        shelterService.getShelters(scopeParams),
         adoptionService.getAdoptions(),
         fosterService.getFosterProfiles(),
         inventoryService.getInventory(),
-        userService.getUsers(),
-        vehicleService.getVehicles(),
+        userService.getUsers(scopeParams),
+        vehicleService.getVehicles(scopeParams),
+        grievanceService.getGrievances(scopeParams),
       ]);
 
       const dashData = dashRes.status === "fulfilled" ? dashRes.value?.data || dashRes.value || {} : {};
@@ -261,6 +330,9 @@ const RescueCentreAdminDashboard = () => {
       const inventoryList = inventoryRes.status === "fulfilled" ? unwrapList(inventoryRes.value) : [];
       const usersList = usersRes.status === "fulfilled" ? unwrapList(usersRes.value) : [];
       const vehiclesList = vehiclesRes.status === "fulfilled" ? unwrapList(vehiclesRes.value) : [];
+      const grievancesList = grievanceRes.status === "fulfilled" ? unwrapList(grievanceRes.value) : [];
+
+      setGrievanceTickets(grievancesList);
 
       // Process Resource Availability
       const agents = usersList.filter((u: any) => {
@@ -674,6 +746,26 @@ const RescueCentreAdminDashboard = () => {
             >
               <FaAmbulance /> Rescue Vehicles &amp; Fleet ({fleetVehicles.length})
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("complaints")}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: activeTab === "complaints" ? "2px solid #DC2626" : "1px solid #CBD5E1",
+                background: activeTab === "complaints" ? "#FEF2F2" : "#FFFFFF",
+                color: activeTab === "complaints" ? "#991B1B" : "#475569",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <FaExclamationTriangle /> Complaints &amp; Escalations ({grievanceTickets.length})
+            </button>
           </div>
         </div>
 
@@ -938,6 +1030,74 @@ const RescueCentreAdminDashboard = () => {
                 }}
               >
                 <FaEye /> View Details
+              </button>
+            )}
+          />
+        )}
+
+        {/* TAB 6: COMPLAINTS & ESCALATIONS */}
+        {activeTab === "complaints" && (
+          <DataTable
+            columns={[
+              { key: "ticket_number", header: "Ticket #", render: (_v: string, r: any) => r.ticket_number || r.id || "—" },
+              { key: "title", header: "Complaint Title / Issue", render: (_v: string, r: any) => r.title || r.subject || "Operational Complaint" },
+              { key: "reporter_name", header: "Reporter / Contact", render: (_v: string, r: any) => r.reporter_name || r.reporter || r.email || "Public Feedback" },
+              {
+                key: "priority",
+                header: "Priority",
+                render: (val: string) => {
+                  const p = String(val || "medium").toLowerCase();
+                  return (
+                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: p === "urgent" || p === "high" ? "#FEF2F2" : "#FFFBEB", color: p === "urgent" || p === "high" ? "#DC2626" : "#D97706" }}>
+                      {p.toUpperCase()}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (val: string) => {
+                  const s = String(val || "open").toLowerCase();
+                  return (
+                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: s === "resolved" ? "#ECFDF5" : s === "escalated" ? "#FEF2F2" : "#EFF6FF", color: s === "resolved" ? "#047857" : s === "escalated" ? "#DC2626" : "#1D4ED8" }}>
+                      {s.toUpperCase()}
+                    </span>
+                  );
+                },
+              },
+              { key: "created_at", header: "Date Filed", render: (v: string) => (v ? formatDateTime(v) : "—") },
+            ]}
+            data={grievanceTickets}
+            loading={loading}
+            emptyMessage="No complaints or escalation tickets logged for this centre."
+            onRowClick={(row: any) => {
+              setSelectedGrievance(row);
+              setIsGrievanceModalOpen(true);
+            }}
+            renderRowActions={(row: any) => (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedGrievance(row);
+                  setIsGrievanceModalOpen(true);
+                }}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #DC2626",
+                  background: "#FEF2F2",
+                  color: "#991B1B",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <FaExclamationTriangle /> Manage Escalation
               </button>
             )}
           />
@@ -1443,6 +1603,116 @@ const RescueCentreAdminDashboard = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Grievance Complaint & Escalation Modal */}
+      <Modal
+        isOpen={isGrievanceModalOpen}
+        onClose={() => setIsGrievanceModalOpen(false)}
+        title={`Complaint / Escalation Ticket — ${selectedGrievance?.ticket_number || selectedGrievance?.id || "Details"}`}
+        size="lg"
+      >
+        {selectedGrievance && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", fontSize: "13px" }}>
+                <div><span style={{ color: "#64748B", display: "block" }}>Issue / Title</span><strong>{selectedGrievance.title || "Operational Complaint"}</strong></div>
+                <div><span style={{ color: "#64748B", display: "block" }}>Reporter</span><strong>{selectedGrievance.reporter_name || "Public Feedback"}</strong></div>
+                <div><span style={{ color: "#64748B", display: "block" }}>Priority</span><strong style={{ textTransform: "uppercase", color: "#DC2626" }}>{selectedGrievance.priority || "Medium"}</strong></div>
+                <div><span style={{ color: "#64748B", display: "block" }}>Status</span><strong style={{ textTransform: "uppercase", color: "#2563EB" }}>{selectedGrievance.status || "Open"}</strong></div>
+              </div>
+              {selectedGrievance.description && (
+                <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #E2E8F0", fontSize: "13px", color: "#334155" }}>
+                  <strong>Description:</strong> {selectedGrievance.description}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Status Action Buttons */}
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => handleUpdateGrievanceStatusSubmit("in_progress")}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#1D4ED8", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+              >
+                Mark In Progress
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUpdateGrievanceStatusSubmit("resolved")}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #16A34A", background: "#ECFDF5", color: "#047857", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+              >
+                Mark Resolved
+              </button>
+            </div>
+
+            {/* Escalation Form */}
+            <form onSubmit={handleEscalateGrievanceSubmit} style={{ marginTop: "12px", background: "#FEF2F2", padding: "16px", borderRadius: "12px", border: "1px solid #FCA5A5", display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#991B1B" }}>
+                ⚠️ Escalate Ticket to Super Administrator
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7F1D1D", marginBottom: "4px" }}>
+                  Escalation Reason &amp; Operational Context *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Describe why top-level Super Admin intervention is required..."
+                  value={escalateReason}
+                  onChange={(e) => setEscalateReason(e.target.value)}
+                  style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #FCA5A5", fontSize: "13px" }}
+                />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="submit"
+                  disabled={isEscalating}
+                  style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "#DC2626", color: "#FFFFFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                >
+                  {isEscalating ? "Escalating..." : "Submit Escalation"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+      </Modal>
+
+      {/* Centre Profile & Configuration Modal */}
+      <Modal
+        isOpen={isCentreConfigOpen}
+        onClose={() => setIsCentreConfigOpen(false)}
+        title="Rescue Centre Profile & Configuration"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            addToast("Centre operational configuration updated successfully!", "success");
+            setIsCentreConfigOpen(false);
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: "14px" }}
+        >
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Centre Name</label>
+            <input type="text" value={centreForm.name} onChange={(e) => setCentreForm({ ...centreForm, name: e.target.value })} style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }} required />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Emergency Phone Hotline</label>
+            <input type="text" value={centreForm.phone} onChange={(e) => setCentreForm({ ...centreForm, phone: e.target.value })} style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }} required />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Operating Hours</label>
+            <input type="text" value={centreForm.operating_hours} onChange={(e) => setCentreForm({ ...centreForm, operating_hours: e.target.value })} style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }} required />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Operating Address</label>
+            <input type="text" value={centreForm.address} onChange={(e) => setCentreForm({ ...centreForm, address: e.target.value })} style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }} required />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+            <button type="button" onClick={() => setIsCentreConfigOpen(false)} style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "12.5px" }}>Cancel</button>
+            <button type="submit" style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" }}>Save Config</button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

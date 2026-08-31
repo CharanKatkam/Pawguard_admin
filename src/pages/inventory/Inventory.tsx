@@ -283,10 +283,32 @@ const Inventory = () => {
       addToast("Select an inventory item to record movement.", "error");
       return;
     }
+
+    const targetItem = inventory.find((i) => i.id === movementForm.item_id);
+    if (
+      targetItem &&
+      ["consumption", "check_out"].includes(movementForm.movement_type) &&
+      movementForm.quantity > targetItem.quantity
+    ) {
+      addToast(
+        `Cannot issue stock: Requested quantity (${movementForm.quantity} ${targetItem.unit}) exceeds current available stock (${targetItem.quantity} ${targetItem.unit}).`,
+        "error"
+      );
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await inventoryService.recordMovement(movementForm);
-      addToast("Stock movement logged!", "success");
+
+      if (targetItem && ["consumption", "check_out"].includes(movementForm.movement_type)) {
+        const remaining = targetItem.quantity - movementForm.quantity;
+        if (targetItem.reorder_threshold > 0 && remaining <= targetItem.reorder_threshold) {
+          addToast(`⚠️ Low Stock Alert: Remaining balance for ${targetItem.itemName} is ${remaining} ${targetItem.unit}.`, "info");
+        }
+      }
+
+      addToast("Stock movement logged successfully!", "success");
       setIsIssueModalOpen(false);
       fetchInventoryData();
       notifyDataChanged();
@@ -309,6 +331,7 @@ const Inventory = () => {
       addToast("Purchase requisition order generated!", "success");
       setIsPoModalOpen(false);
       fetchInventoryData();
+      notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to issue requisition.", "error");
     } finally {
@@ -320,8 +343,22 @@ const Inventory = () => {
     try {
       setIsSubmitting(true);
       await inventoryService.updateRequisitionStatus(reqId, status);
-      addToast(`Requisition ${status.toUpperCase()}!`, "success");
+
+      if (status === "received") {
+        const targetReq = requisitions.find((r) => String(r.id) === String(reqId));
+        if (targetReq && targetReq.item_id && targetReq.quantity) {
+          await inventoryService.recordMovement({
+            item_id: targetReq.item_id,
+            movement_type: "check_in",
+            quantity: Number(targetReq.quantity),
+            notes: `Received fulfilled requisition PO #${String(reqId).slice(0, 8)}`,
+          }).catch(() => null);
+        }
+      }
+
+      addToast(`Requisition ${status.toUpperCase()} & Stock Updated!`, "success");
       fetchInventoryData();
+      notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to update requisition status.", "error");
     } finally {

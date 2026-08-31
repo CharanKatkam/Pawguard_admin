@@ -91,6 +91,18 @@ const RescueDispatch = () => {
   const [selectedDispatch, setSelectedDispatch] = useState<EnrichedDispatch | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Specialized Capture Equipment Options
+  const CAPTURE_EQUIPMENT_OPTIONS = [
+    "Catch Poles & Graspers",
+    "Heavy Duty Animal Cages & Crates",
+    "Net Gun & Catch Nets",
+    "Tranquilizer Dart Kit (Veterinary Controlled)",
+    "Heavy Kevlar Bite Shield Gloves & Helmets",
+    "Emergency Veterinary First Aid Kit",
+  ];
+
+  const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
+
   // Form states
   const [newDispatchForm, setNewDispatchForm] = useState({
     case_id: "",
@@ -274,19 +286,24 @@ const RescueDispatch = () => {
 
     try {
       setIsSubmitting(true);
+      const equipmentNotes = selectedEquipment.length > 0
+        ? `Equipment: ${selectedEquipment.join("; ")}.${newDispatchForm.notes ? ` Notes: ${newDispatchForm.notes}` : ""}`
+        : newDispatchForm.notes;
+
       const payload: Record<string, unknown> = {
         case_id: newDispatchForm.case_id,
         assigned_vehicle_id: newDispatchForm.vehicle_id,
         agent_ids: newDispatchForm.agent_ids,
-        notes: newDispatchForm.notes || undefined,
+        notes: equipmentNotes || undefined,
       };
       if (isRescueCentreAdmin && currentRescueCentreId) {
         payload.rescue_centre_id = currentRescueCentreId;
       }
       await rescueService.createDispatch(payload as any);
-      addToast("Rescue team dispatched successfully!", "success");
+      addToast("Rescue team & equipment dispatched successfully!", "success");
       setIsAddModalOpen(false);
       setNewDispatchForm({ case_id: "", agent_ids: [], vehicle_id: "", notes: "" });
+      setSelectedEquipment([]);
       fetchAll();
       notifyDataChanged();
     } catch (err: unknown) {
@@ -807,10 +824,37 @@ const RescueDispatch = () => {
           </div>
 
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Dispatch Notes / Equipment</label>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
+              Specialized Capture Equipment Required
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", background: "#F8FAFC", padding: "10px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+              {CAPTURE_EQUIPMENT_OPTIONS.map((item) => {
+                const isChecked = selectedEquipment.includes(item);
+                return (
+                  <label key={item} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "#334155", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedEquipment([...selectedEquipment, item]);
+                        } else {
+                          setSelectedEquipment(selectedEquipment.filter((x) => x !== item));
+                        }
+                      }}
+                    />
+                    {item}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Dispatch Notes / Special Instructions</label>
             <textarea
-              rows={3}
-              placeholder="Add optional dispatch notes or required equipment..."
+              rows={2}
+              placeholder="Add optional dispatch notes or operational context..."
               value={newDispatchForm.notes}
               onChange={(e) => setNewDispatchForm({ ...newDispatchForm, notes: e.target.value })}
               style={{ width: "100%", padding: "9px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }}

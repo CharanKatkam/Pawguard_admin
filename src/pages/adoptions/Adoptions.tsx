@@ -16,11 +16,13 @@ import {
   FaStar,
   FaCheckDouble,
   FaEllipsisV,
+  FaExclamationTriangle,
 } from "react-icons/fa";
 import adoptionService, {
   type AdoptionScoreCreatePayload,
 } from "../../services/adoptionService";
 import petService from "../../services/petService";
+import storageService from "../../services/storageService";
 import { generateQrDataUrl } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
@@ -155,6 +157,7 @@ const Adoptions = () => {
   const [selectedAdoption, setSelectedAdoption] = useState<Record<string, unknown> | null>(null);
   const [candidateScores, setCandidateScores] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadingAgreement, setUploadingAgreement] = useState(false);
 
   // Forms
   const [newAppForm, setNewAppForm] = useState({
@@ -170,6 +173,7 @@ const Adoptions = () => {
   const [scheduleForm, setScheduleForm] = useState({
     date: "",
     notes: "",
+    visitType: "home_check" as "home_check" | "interview",
   });
 
   const [scoreForm, setScoreForm] = useState<AdoptionScoreCreatePayload>({
@@ -279,17 +283,18 @@ const Adoptions = () => {
     if (!selectedAdoption?.id) return;
     try {
       setIsSubmitting(true);
+      const targetStatus = scheduleForm.visitType || "home_check";
       await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
-        status: "home_check",
+        status: targetStatus,
         home_inspection_scheduled_at: scheduleForm.date ? new Date(scheduleForm.date).toISOString() : null,
-        home_inspection_notes: scheduleForm.notes,
+        home_inspection_notes: `${targetStatus === "interview" ? "Meet & Greet Visit: " : "Home Inspection: "}${scheduleForm.notes || ""}`,
       });
-      addToast("Home verification visit scheduled successfully!", "success");
+      addToast(`${targetStatus === "interview" ? "Meet-and-Greet" : "Home verification"} visit scheduled successfully!`, "success");
       setIsScheduleModalOpen(false);
       fetchAdoptions();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to schedule home verification visit.", "error");
+      addToast(err?.response?.data?.detail || "Failed to schedule visit.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -329,6 +334,26 @@ const Adoptions = () => {
   };
 
   const handleStatusChange = async (appId: string, newStatus: string) => {
+    if (newStatus === "approved") {
+      const targetApp = adoptions.find((a) => String(a.id) === appId);
+      const targetDogId = String(targetApp?.dog_id || targetApp?.petId || "");
+      if (targetDogId) {
+        const existingClaimed = adoptions.find(
+          (a) =>
+            String(a.dog_id || a.petId) === targetDogId &&
+            String(a.id) !== appId &&
+            ["approved", "completed"].includes(String(a.status).toLowerCase())
+        );
+        if (existingClaimed) {
+          addToast(
+            `Cannot approve: Dog is already claimed by approved application (App ID: ${String(existingClaimed.id).slice(0, 8)}).`,
+            "error"
+          );
+          return;
+        }
+      }
+    }
+
     try {
       setIsSubmitting(true);
       await adoptionService.updateAdoptionStatus(appId, newStatus);
@@ -354,13 +379,22 @@ const Adoptions = () => {
 
   const handleCompleteAdoption = async () => {
     if (!selectedAdoption?.id) return;
+    const petId = String(selectedAdoption.dog_id || selectedAdoption.petId || "");
     try {
       setIsSubmitting(true);
       // 1. Update status to completed
       await adoptionService.updateAdoptionStatus(String(selectedAdoption.id), "completed");
       // 2. Create Companion Pet
       await adoptionService.createCompanionPetFromAdoption(String(selectedAdoption.id));
-      addToast("Adoption completed and registered as Companion Pet!", "success");
+      // 3. Update Dog Master Profile status to adopted
+      if (petId) {
+        await petService.updatePet(petId, {
+          status: "adopted",
+          is_adoptable: false,
+          adoption_status: "Adopted",
+        }).catch(() => null);
+      }
+      addToast("Adoption completed! Dog Master Profile updated & registered as Companion Pet.", "success");
       setIsCompleteModalOpen(false);
       fetchAdoptions();
       notifyDataChanged();
@@ -382,6 +416,59 @@ const Adoptions = () => {
       notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to delete record.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUploadAgreement = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedAdoption?.id) return;
+    try {
+      setUploadingAgreement(true);
+      const agreementUrl = await storageService.uploadFile(file, {
+        folder: "agreements",
+        entity_type: "adoption_agreement",
+        entity_id: String(selectedAdoption.id),
+      });
+      if (agreementUrl) {
+        await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
+          adoption_agreement_url: agreementUrl,
+        });
+        setSelectedAdoption((prev) => (prev ? { ...prev, adoption_agreement_url: agreementUrl } : prev));
+        addToast("Legal Adoption Agreement document uploaded & linked successfully!", "success");
+        fetchAdoptions();
+      }
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to upload adoption agreement document.", "error");
+    } finally {
+      setUploadingAgreement(false);
+    }
+  };
+
+  const handleDogMatchChange = async (newDogId: string) => {
+    if (!selectedAdoption?.id || !newDogId) return;
+    try {
+      setIsSubmitting(true);
+      await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
+        dog_id: newDogId,
+      });
+      const matchedDog = dogs.find((d) => String(d.id) === newDogId);
+      setSelectedAdoption((prev) =>
+        prev
+          ? {
+              ...prev,
+              dog_id: newDogId,
+              petId: newDogId,
+              petName: matchedDog?.name || prev.petName,
+              petBreed: matchedDog?.breed || prev.petBreed,
+            }
+          : prev
+      );
+      addToast(`Adoption match updated: Application linked to dog ${matchedDog?.name || newDogId}.`, "success");
+      fetchAdoptions();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to re-match dog identity.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -848,19 +935,32 @@ const Adoptions = () => {
         </form>
       </Modal>
 
-      {/* Schedule Home Inspection Modal */}
-      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Verification Visit">
+      {/* Schedule Visit Modal */}
+      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Verification Visit / Meet & Greet">
         <form onSubmit={handleScheduleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
-            Schedule an upcoming home verification visit for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
+            Schedule an upcoming visit or interview for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
           </p>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Visit / Session Type *</label>
+            <select
+              value={scheduleForm.visitType}
+              onChange={(e) => setScheduleForm({ ...scheduleForm, visitType: e.target.value as "home_check" | "interview" })}
+              style={inputStyle}
+            >
+              <option value="home_check">🏠 Home Verification Visit (Home Inspection)</option>
+              <option value="interview">🐕 Meet &amp; Greet Session (Shelter Interview)</option>
+            </select>
+          </div>
+
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Scheduled Date &amp; Time *</label>
             <input type="datetime-local" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Inspector Notes (Optional)</label>
-            <textarea placeholder="e.g. Check secure fencing height and landlord permissions during visit." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Session Notes (Optional)</label>
+            <textarea placeholder="e.g. Verify yard fencing, family interaction, or landlord approval..." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
             <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
@@ -954,6 +1054,30 @@ const Adoptions = () => {
               <StatusBadge status={String(selectedAdoption.status || "")} />
             </div>
 
+            {/* Double-Approval Concurrency Safeguard Warning */}
+            {(() => {
+              const dogId = String(selectedAdoption.dog_id || selectedAdoption.petId || "");
+              const existingClaimed = dogId
+                ? adoptions.find(
+                    (a) =>
+                      String(a.dog_id || a.petId) === dogId &&
+                      String(a.id) !== String(selectedAdoption.id) &&
+                      ["approved", "completed"].includes(String(a.status).toLowerCase())
+                  )
+                : null;
+              if (existingClaimed) {
+                return (
+                  <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: "8px", padding: "12px", color: "#991B1B", fontSize: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <FaExclamationTriangle size={18} />
+                    <div>
+                      <strong>Concurrency Notice:</strong> This dog is already claimed by an approved/completed application (App ID: <code>{String(existingClaimed.id).slice(0, 8)}</code>, Adopter: {String(existingClaimed.applicantName)}). Double approval is restricted.
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Applicant Details</div>
@@ -966,12 +1090,22 @@ const Adoptions = () => {
               </div>
 
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase" }}>Rescue Dog Details</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", marginTop: "4px" }}>
-                  Name: {String(selectedAdoption.petName)} ({String(selectedAdoption.petBreed || "Canine")})
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Rescue Dog Identity &amp; Match</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
+                  {String(selectedAdoption.petName)} ({String(selectedAdoption.petBreed || "Canine")})
                 </div>
-                <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                  Dog ID: <code style={{ fontSize: "11px" }}>{String(selectedAdoption.petId || selectedAdoption.dog_id || "—")}</code>
+                <div style={{ marginTop: "6px" }}>
+                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, display: "block", marginBottom: "2px" }}>Re-match / Select Dog:</label>
+                  <select
+                    value={String(selectedAdoption.dog_id || selectedAdoption.petId || "")}
+                    onChange={(e) => void handleDogMatchChange(e.target.value)}
+                    style={{ ...inputStyle, padding: "4px 8px", fontSize: "12px" }}
+                  >
+                    <option value="">Select candidate dog...</option>
+                    {dogs.map((d) => (
+                      <option key={d.id} value={d.id}>{d.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
@@ -1001,6 +1135,34 @@ const Adoptions = () => {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Adoption Legal Agreement Document Section */}
+            <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "6px" }}>
+                📄 Adoption Legal Contract &amp; Agreement
+              </div>
+              {selectedAdoption.adoption_agreement_url ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <a
+                    href={String(selectedAdoption.adoption_agreement_url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#2563EB", fontWeight: 600, fontSize: "13px", textDecoration: "underline" }}
+                  >
+                    View Signed Adoption Contract (PDF / Doc)
+                  </a>
+                  <span style={{ fontSize: "11px", color: "#059669", fontWeight: 700 }}>✓ Document Attached</span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                  <span style={{ fontSize: "12px", color: "#64748B" }}>No legal agreement contract attached yet.</span>
+                  <label style={{ padding: "6px 12px", borderRadius: "6px", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+                    {uploadingAgreement ? "Uploading..." : "Upload Agreement PDF"}
+                    <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={handleUploadAgreement} disabled={uploadingAgreement} style={{ display: "none" }} />
+                  </label>
+                </div>
+              )}
             </div>
 
             {Boolean(selectedAdoption.home_inspection_scheduled_at) && String(selectedAdoption.status).toLowerCase() !== "submitted" && (

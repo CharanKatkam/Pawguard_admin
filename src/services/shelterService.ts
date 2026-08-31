@@ -39,7 +39,7 @@ export interface KennelPayload {
 }
 
 export interface CleaningLogPayload {
-  sanitation_state_after: KennelSanitationState;
+  sanitation_state_after?: KennelSanitationState;
   cleaning_method?: string;
   notes?: string;
 }
@@ -63,18 +63,10 @@ export const shelterService = {
     return response.data;
   },
 
-  // GET /shelter/facilities (paginated, with search & filters, fallback to /rescue-centres for rescue roles)
+  // GET /shelter/facilities (paginated, with search & filters)
   getShelters: async (params?: Record<string, unknown>) => {
-    try {
-      const response = await api.get("/shelter/facilities", { params });
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 403 || err?.response?.status === 404) {
-        const fallback = await api.get("/rescue-centres", { params }).catch(() => null);
-        if (fallback?.data) return fallback.data;
-      }
-      throw err;
-    }
+    const response = await api.get("/shelter/facilities", { params });
+    return response.data;
   },
 
   // POST /shelter/facilities - ShelterFacilityCreate { name, address, phone, ... }
@@ -90,18 +82,10 @@ export const shelterService = {
     return response.data;
   },
 
-  // GET /shelter/facilities/{facility_id} (fallback to /rescue-centres/{facility_id} for rescue roles)
+  // GET /shelter/facilities/{facility_id}
   getShelterById: async (facilityId: string) => {
-    try {
-      const response = await api.get(`/shelter/facilities/${facilityId}`);
-      return response.data;
-    } catch (err: any) {
-      if (err?.response?.status === 403) {
-        const fallback = await api.get(`/rescue-centres/${facilityId}`).catch(() => null);
-        if (fallback?.data) return fallback.data;
-      }
-      throw err;
-    }
+    const response = await api.get(`/shelter/facilities/${facilityId}`);
+    return response.data;
   },
 
   // PUT /shelter/facilities/{facility_id} - ShelterFacilityUpdate
@@ -163,12 +147,8 @@ export const shelterService = {
 
   // GET /shelter/facilities/{facility_id}/sections
   getFacilitySections: async (facilityId: string) => {
-    try {
-      const response = await api.get(`/shelter/facilities/${facilityId}/sections`);
-      return response.data;
-    } catch {
-      return { success: true, data: [] };
-    }
+    const response = await api.get(`/shelter/facilities/${facilityId}/sections`);
+    return response.data;
   },
 
   // POST /shelter/sections/{section_id}/kennels - KennelCreate
@@ -186,25 +166,26 @@ export const shelterService = {
 
   // GET /shelter/sections/{section_id}/kennels
   getSectionKennels: async (sectionId: string) => {
-    try {
-      const response = await api.get(`/shelter/sections/${sectionId}/kennels`);
-      return response.data;
-    } catch {
-      return { success: true, data: [] };
-    }
+    const response = await api.get(`/shelter/sections/${sectionId}/kennels`);
+    return response.data;
   },
 
-  // POST /shelter/kennels/{kennel_id}/assign/{dog_id}
+  // PATCH /shelter/kennels/{kennel_id}/assign/{dog_id} (primary) with POST fallback
   assignDogToKennel: async (kennelId: string, dogId: string) => {
-    const response = await api.post(`/shelter/kennels/${kennelId}/assign/${dogId}`);
-    await publishActionEvent({
-      module: "shelter",
-      action: "update",
-      title: "Animal Assigned to Kennel",
-      message: `Animal ${dogId} assigned to kennel ${kennelId}.`,
-      targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
-    });
-    return response.data;
+    try {
+      const response = await api.patch(`/shelter/kennels/${kennelId}/assign/${dogId}`);
+      await publishActionEvent({
+        module: "shelter",
+        action: "update",
+        title: "Animal Assigned to Kennel",
+        message: `Animal ${dogId} assigned to kennel ${kennelId}.`,
+        targetRoles: ["super_admin", "shelter_manager", "rescue_centre_admin"],
+      });
+      return response.data;
+    } catch {
+      const fallback = await api.post(`/shelter/kennels/${kennelId}/assign/${dogId}`);
+      return fallback.data;
+    }
   },
 
   // PUT /shelter/kennels/{kennel_id}/sanitation (marks sanitized/clean)
@@ -226,7 +207,7 @@ export const shelterService = {
       module: "shelter",
       action: "create",
       title: "Kennel Cleaning Logged",
-      message: `Kennel ${kennelId} status set to ${data.sanitation_state_after}.`,
+      message: `Kennel ${kennelId} status set to ${data.sanitation_state_after || "clean"}.`,
       targetRoles: ["super_admin", "shelter_manager"],
     });
     return response.data;

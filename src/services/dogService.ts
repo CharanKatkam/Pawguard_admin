@@ -6,6 +6,8 @@ export interface DogPayload {
   breed?: string;
   age?: number;
   gender?: string;
+  ear_shape?: string;
+  tail_type?: string;
   status?: string;
   description?: string;
   is_adoptable?: boolean;
@@ -85,4 +87,4 @@ export const dogService = {
   },
 };
 
-export default dogService;
+export default dogService;

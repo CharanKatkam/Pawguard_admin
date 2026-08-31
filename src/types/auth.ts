@@ -10,7 +10,10 @@ export type UserRole =
   | "volunteer_coordinator"
   | "inventory_manager"
   | "finance_user"
-  | "volunteer";
+  | "volunteer"
+  | "foster_family"
+  | "donor"
+  | "general_public_user";
 
 export interface User {
   id?: string | number;

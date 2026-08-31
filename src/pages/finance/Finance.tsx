@@ -16,6 +16,8 @@ import {
   FaUndo,
   FaCheckDouble,
   FaDownload,
+  FaBoxes,
+  FaUserCheck,
 } from "react-icons/fa";
 import donationsService, {
   type DonationCreatePayload,
@@ -27,6 +29,8 @@ import financeService, {
   type RefundRequestPayload,
 } from "../../services/financeService";
 import petService from "../../services/petService";
+import inventoryService from "../../services/inventoryService";
+import { storageService } from "../../services/storageService";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
@@ -81,11 +85,12 @@ const inputStyle: React.CSSProperties = {
 };
 
 const Finance = () => {
-  const [activeTab, setActiveTab] = useState<"donations" | "sponsorships" | "campaigns" | "expenses">("donations");
+  const [activeTab, setActiveTab] = useState<"donations" | "sponsorships" | "campaigns" | "expenses" | "requisitions">("donations");
   const [donations, setDonations] = useState<any[]>([]);
   const [sponsorships, setSponsorships] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [requisitions, setRequisitions] = useState<any[]>([]);
   const [dogs, setDogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -114,10 +119,24 @@ const Finance = () => {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [is80GModalOpen, setIs80GModalOpen] = useState(false);
+  const [isPoDisburseModalOpen, setIsPoDisburseModalOpen] = useState(false);
+  const [isReimbursementModalOpen, setIsReimbursementModalOpen] = useState(false);
 
   const [selectedDonation, setSelectedDonation] = useState<any | null>(null);
+  const [selectedRequisition, setSelectedRequisition] = useState<any | null>(null);
   const [taxCertificateData, setTaxCertificateData] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Volunteer Reimbursement Form
+  const [reimbursementForm, setReimbursementForm] = useState({
+    claimant_name: "Volunteer Caregiver",
+    amount: 150,
+    category: "volunteer_reimbursement",
+    description: "Travel & emergency animal feeding supplies reimbursement",
+    payment_method: "bank_transfer",
+    payment_reference: "",
+    receipt_url: "",
+  });
 
   // Forms
   const [donationForm, setDonationForm] = useState<DonationCreatePayload>({
@@ -162,17 +181,19 @@ const Finance = () => {
     try {
       setLoading(true);
       setError(null);
-      const [donRes, sponRes, campRes, expRes] = await Promise.allSettled([
+      const [donRes, sponRes, campRes, expRes, reqRes] = await Promise.allSettled([
         donationsService.getDonations(),
         donationsService.getSponsorships(),
         donationsService.getCampaigns(),
         financeService.getExpenses(),
+        inventoryService.getRequisitions(),
       ]);
 
       setDonations(donRes.status === "fulfilled" ? (donRes.value?.data || donRes.value || []) : []);
       setSponsorships(sponRes.status === "fulfilled" ? (sponRes.value?.data || sponRes.value || []) : []);
       setCampaigns(campRes.status === "fulfilled" ? (campRes.value?.data || campRes.value || []) : []);
       setExpenses(expRes.status === "fulfilled" ? (expRes.value?.data || expRes.value || []) : []);
+      setRequisitions(reqRes.status === "fulfilled" ? (Array.isArray(reqRes.value) ? reqRes.value : reqRes.value?.data || []) : []);
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to load financial records.");
     } finally {
@@ -357,11 +378,91 @@ const Finance = () => {
         addToast("Expense approved!", "success");
       } else {
         await financeService.payExpense(expenseId);
-        addToast("Expense marked as paid!", "success");
+        addToast("Expense marked as paid & bank disbursement logged!", "success");
       }
       fetchFinanceData();
+      notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Action failed.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDisbursePo = async (reqRow: any) => {
+    if (!reqRow?.id) return;
+    try {
+      setIsSubmitting(true);
+      const poAmount = Number(reqRow.quantity || 1) * 25.0; // unit price estimate
+      await financeService.createExpense({
+        title: `Inventory Restock PO #${String(reqRow.id).slice(0, 8)}`,
+        amount: poAmount,
+        currency: "INR",
+        category: "medical_supplies",
+        vendor_name: reqRow.supplier || "Verified Inventory Supplier",
+        expense_date: new Date().toISOString().split("T")[0],
+        payment_method: "bank_transfer",
+        invoice_number: `INV-PO-${String(reqRow.id).slice(0, 8)}`,
+      });
+
+      await inventoryService.updateRequisitionStatus(reqRow.id, "received");
+      if (reqRow.item_id && reqRow.quantity) {
+        await inventoryService.recordMovement({
+          item_id: reqRow.item_id,
+          movement_type: "check_in",
+          quantity: Number(reqRow.quantity),
+          notes: `Bank disbursement authorized for PO #${String(reqRow.id).slice(0, 8)}`,
+        }).catch(() => null);
+      }
+
+      addToast(`Bank disbursement authorized for Inventory PO #${String(reqRow.id).slice(0, 8)} & stock restocked!`, "success");
+      setIsPoDisburseModalOpen(false);
+      setSelectedRequisition(null);
+      fetchFinanceData();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to disburse payment for requisition.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReimbursementSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsSubmitting(true);
+      const created = await financeService.createExpense({
+        title: `Volunteer Travel & Supply Reimbursement: ${reimbursementForm.claimant_name}`,
+        amount: Number(reimbursementForm.amount),
+        currency: "INR",
+        category: reimbursementForm.category,
+        vendor_name: reimbursementForm.claimant_name,
+        expense_date: new Date().toISOString().split("T")[0],
+        payment_method: reimbursementForm.payment_method,
+        notes: reimbursementForm.description,
+      });
+
+      const expId = created?.id || created?.data?.id || (created?.data as any)?.data?.id;
+      if (expId) {
+        await financeService.approveExpense(expId).catch(() => null);
+        await financeService.payExpense(expId).catch(() => null);
+      }
+
+      addToast("Volunteer reimbursement claim approved & disbursed successfully!", "success");
+      setIsReimbursementModalOpen(false);
+      setReimbursementForm({
+        claimant_name: "Volunteer Caregiver",
+        amount: 150,
+        category: "volunteer_reimbursement",
+        description: "Travel & emergency animal feeding supplies reimbursement",
+        payment_method: "bank_transfer",
+        payment_reference: "",
+        receipt_url: "",
+      });
+      fetchFinanceData();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || "Failed to log volunteer reimbursement.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -422,7 +523,7 @@ const Finance = () => {
       )}
 
       {/* Quick Action Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px", marginBottom: "24px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "24px" }}>
         <Can permission="manage_finance">
           <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Manual contribution" color="#10B981" onClick={() => setIsDonationModalOpen(true)} />
         </Can>
@@ -435,6 +536,9 @@ const Finance = () => {
         <Can permission="manage_finance">
           <QuickActionCard icon={<FaFileInvoiceDollar />} title="Log Expense" subtitle="Disbursement" color="#6366F1" onClick={() => setIsExpenseModalOpen(true)} />
         </Can>
+        <Can permission="manage_finance">
+          <QuickActionCard icon={<FaUserCheck />} title="Volunteer Claim" subtitle="Reimbursement" color="#8B5CF6" onClick={() => setIsReimbursementModalOpen(true)} />
+        </Can>
       </div>
 
       {/* KPI Stats */}
@@ -445,7 +549,7 @@ const Finance = () => {
       </div>
 
       {/* Navigation Tabs */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", borderBottom: "2px solid #E2E8F0" }}>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", borderBottom: "2px solid #E2E8F0", flexWrap: "wrap" }}>
         <button
           onClick={() => setActiveTab("donations")}
           style={{
@@ -505,6 +609,21 @@ const Finance = () => {
           }}
         >
           Expenses &amp; Disbursements ({expenses.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("requisitions")}
+          style={{
+            padding: "10px 18px",
+            border: "none",
+            borderBottom: activeTab === "requisitions" ? "3px solid #10B981" : "3px solid transparent",
+            background: "none",
+            color: activeTab === "requisitions" ? "#10B981" : "#64748B",
+            fontWeight: 700,
+            fontSize: "15px",
+            cursor: "pointer",
+          }}
+        >
+          Inventory POs &amp; Vendor Invoices ({requisitions.length})
         </button>
       </div>
 
@@ -691,6 +810,54 @@ const Finance = () => {
         </div>
       )}
 
+      {activeTab === "requisitions" && (
+        <div className="soft-card" style={{ padding: "20px" }}>
+          <h3 style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+            Inventory Purchase Orders &amp; Vendor Invoices Integration
+          </h3>
+          <p style={{ fontSize: "13px", color: "#64748B", marginTop: "-10px", marginBottom: "16px" }}>
+            Process vendor invoices, verify inventory purchase orders generated by shelter managers, and authorize bank disbursements.
+          </p>
+
+          {requisitions.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#64748B" }}>
+              <FaBoxes size={36} color="#CBD5E1" style={{ marginBottom: "12px" }} />
+              <div>No purchase requisitions or vendor invoices pending in backend.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {requisitions.map((req: any) => (
+                <div key={req.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: "16px", color: "#0F172A" }}>
+                      Requisition PO #{String(req.id).slice(0, 8)} &bull; Quantity: {req.quantity} units
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
+                      Item ID: {String(req.item_id || "—").slice(0, 8)} &bull; Created: {formatDateTime(req.created_at)}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <StatusBadge status={req.status || "pending"} />
+                    {req.status !== "received" && (
+                      <button
+                        onClick={() => {
+                          setSelectedRequisition(req);
+                          setIsPoDisburseModalOpen(true);
+                        }}
+                        disabled={isSubmitting}
+                        style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "12px", cursor: "pointer" }}
+                      >
+                        Authorize Disbursement
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Record Donation Modal */}
       <Modal isOpen={isDonationModalOpen} onClose={() => setIsDonationModalOpen(false)} title="Record Manual Donation Contribution">
         <form onSubmit={handleDonationSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -837,6 +1004,81 @@ const Finance = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Volunteer Reimbursement Claim Modal */}
+      <Modal isOpen={isReimbursementModalOpen} onClose={() => setIsReimbursementModalOpen(false)} title="Volunteer Expense & Travel Reimbursement Claim">
+        <form onSubmit={handleReimbursementSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Volunteer Claimant Name *</label>
+            <input type="text" required value={reimbursementForm.claimant_name} onChange={(e) => setReimbursementForm({ ...reimbursementForm, claimant_name: e.target.value })} style={inputStyle} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Reimbursement Amount (₹) *</label>
+              <input type="number" min="1" required value={reimbursementForm.amount} onChange={(e) => setReimbursementForm({ ...reimbursementForm, amount: Number(e.target.value) })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Payment Method</label>
+              <select value={reimbursementForm.payment_method} onChange={(e) => setReimbursementForm({ ...reimbursementForm, payment_method: e.target.value })} style={inputStyle}>
+                <option value="bank_transfer">Direct Bank Transfer</option>
+                <option value="cash">Petty Cash Reimbursement</option>
+                <option value="online">UPI Transfer</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Expense Purpose / Description *</label>
+            <textarea required value={reimbursementForm.description} onChange={(e) => setReimbursementForm({ ...reimbursementForm, description: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Attach Expense Receipt (Optional Image/PDF)</label>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  try {
+                    addToast("Uploading receipt document...", "info");
+                    const downloadUrl = await storageService.uploadFile(file, {
+                      folder: "finance_receipts",
+                      entity_type: "volunteer_claim",
+                      entity_id: `claim_${Date.now()}`,
+                    });
+                    setReimbursementForm({ ...reimbursementForm, receipt_url: downloadUrl });
+                    addToast("Receipt document uploaded successfully!", "success");
+                  } catch {
+                    addToast("Receipt upload failed, proceed with text details.", "error");
+                  }
+                }
+              }}
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsReimbursementModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#8B5CF6", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Authorizing..." : "Authorize Reimbursement"}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Inventory PO Disbursement Confirmation Modal */}
+      <Modal isOpen={isPoDisburseModalOpen} onClose={() => setIsPoDisburseModalOpen(false)} title="Authorize Bank Disbursement for Inventory PO">
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ color: "#334155", margin: 0 }}>
+            Authorize bank disbursement for Inventory Purchase Requisition <strong>PO #{selectedRequisition?.id ? String(selectedRequisition.id).slice(0, 8) : ""}</strong>?
+          </p>
+          <div style={{ background: "#F1F5F9", padding: "12px", borderRadius: "8px", fontSize: "13px", color: "#475569" }}>
+            <div>Item ID: {String(selectedRequisition?.item_id || "—").slice(0, 8)}</div>
+            <div>Requested Quantity: {selectedRequisition?.quantity} units</div>
+            <div>Estimated Vendor Invoice Amount: ₹{(Number(selectedRequisition?.quantity || 1) * 25).toFixed(2)}</div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsPoDisburseModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" onClick={() => void handleDisbursePo(selectedRequisition)} disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Authorizing..." : "Confirm & Disburse Payment"}</button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

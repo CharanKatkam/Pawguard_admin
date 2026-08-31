@@ -20,11 +20,14 @@ import {
   FaEye,
   FaCheckCircle,
   FaHome,
+  FaPills,
+  FaClock,
 } from "react-icons/fa";
 import vetService from "../../../services/vetService";
 import medicalService from "../../../services/medicalService";
 import dogService from "../../../services/dogService";
 import petService from "../../../services/petService";
+import storageService from "../../../services/storageService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 
 type Row = Record<string, unknown>;
@@ -64,7 +67,14 @@ const emptyConsultationForm = {
   vaccineName: "",
   lotNumber: "",
   nextDueAt: "",
+  drugName: "",
+  dosage: "As directed",
+  route: "Oral",
+  drugDurationDays: 7,
+  followUpDate: "",
+  followUpReason: "",
   vetNotes: "",
+  attachmentUrl: "",
 };
 
 const VeterinarianDashboard = () => {
@@ -229,7 +239,7 @@ const VeterinarianDashboard = () => {
   // Consultation Modal State
   const [isConsultationOpen, setIsConsultationOpen] = useState(false);
   const [activeAppt, setActiveAppt] = useState<Row | null>(null);
-  const [consultationTab, setConsultationTab] = useState<"exam" | "history" | "treatment" | "vaccine">("exam");
+  const [consultationTab, setConsultationTab] = useState<"exam" | "history" | "treatment" | "vaccine" | "prescription" | "followup">("exam");
   const [petHistory, setPetHistory] = useState<Row[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
@@ -393,7 +403,34 @@ const VeterinarianDashboard = () => {
         }).catch(() => null);
       }
 
-      // 4. Update Appointment Status if valid appointment ID exists
+      // 4. Log Prescription if entered
+      if (consultationForm.drugName) {
+        const durationDays = Number(consultationForm.drugDurationDays) || 7;
+        const startAt = new Date().toISOString();
+        const endAt = new Date(Date.now() + durationDays * 86400000).toISOString();
+        await medicalService.createPrescription({
+          dog_id: petId,
+          drug_name: consultationForm.drugName,
+          dosage: consultationForm.dosage || "As directed",
+          route: consultationForm.route || "Oral",
+          start_at: startAt,
+          end_at: endAt,
+        }).catch(() => null);
+      }
+
+      // 5. Schedule Follow-up if entered
+      if (consultationForm.followUpDate) {
+        await vetService.bookAppointment({
+          pet_id: petId,
+          dog_id: petId,
+          reason: `Follow-up: ${consultationForm.followUpReason || consultationForm.diagnosis || "Post-consultation checkup"}`,
+          notes: consultationForm.vetNotes,
+          date: consultationForm.followUpDate,
+          status: "requested",
+        }).catch(() => null);
+      }
+
+      // 6. Update Appointment Status if valid appointment ID exists
       if (apptId) {
         await vetService.completeAppointment(apptId, consultationForm.vetNotes || undefined).catch(() => null);
       }
@@ -1042,6 +1079,22 @@ const VeterinarianDashboard = () => {
               >
                 <FaSyringe /> Vaccination
               </button>
+
+              <button
+                type="button"
+                onClick={() => setConsultationTab("prescription")}
+                style={{ padding: "8px 16px", border: "none", borderBottom: consultationTab === "prescription" ? "3px solid #2563EB" : "3px solid transparent", background: "none", fontWeight: 700, fontSize: "13px", color: consultationTab === "prescription" ? "#2563EB" : "#64748B", cursor: "pointer" }}
+              >
+                <FaPills /> Prescription
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setConsultationTab("followup")}
+                style={{ padding: "8px 16px", border: "none", borderBottom: consultationTab === "followup" ? "3px solid #2563EB" : "3px solid transparent", background: "none", fontWeight: 700, fontSize: "13px", color: consultationTab === "followup" ? "#2563EB" : "#64748B", cursor: "pointer" }}
+              >
+                <FaClock /> Follow-Up
+              </button>
             </div>
 
             {/* TAB CONTENTS */}
@@ -1187,6 +1240,112 @@ const VeterinarianDashboard = () => {
                   </div>
                 </div>
               )}
+              {consultationTab === "prescription" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Drug / Medication Name</label>
+                    <input
+                      type="text"
+                      value={consultationForm.drugName}
+                      onChange={(e) => setConsultationForm({ ...consultationForm, drugName: e.target.value })}
+                      placeholder="e.g. Amoxicillin, Meloxicam, Carprofen"
+                      style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                    />
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Dosage</label>
+                      <input
+                        type="text"
+                        value={consultationForm.dosage}
+                        onChange={(e) => setConsultationForm({ ...consultationForm, dosage: e.target.value })}
+                        placeholder="e.g. 250mg BID"
+                        style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Administration Route</label>
+                      <select
+                        value={consultationForm.route}
+                        onChange={(e) => setConsultationForm({ ...consultationForm, route: e.target.value })}
+                        style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                      >
+                        <option value="Oral">Oral (PO)</option>
+                        <option value="Subcutaneous">Subcutaneous (SQ)</option>
+                        <option value="Intramuscular">Intramuscular (IM)</option>
+                        <option value="Intravenous">Intravenous (IV)</option>
+                        <option value="Topical">Topical</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Duration (Days)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={consultationForm.drugDurationDays}
+                        onChange={(e) => setConsultationForm({ ...consultationForm, drugDurationDays: Number(e.target.value) })}
+                        style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {consultationTab === "followup" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Schedule Follow-up Date</label>
+                    <input
+                      type="date"
+                      value={consultationForm.followUpDate}
+                      onChange={(e) => setConsultationForm({ ...consultationForm, followUpDate: e.target.value })}
+                      style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Follow-up Clinical Reason &amp; Instructions</label>
+                    <input
+                      type="text"
+                      value={consultationForm.followUpReason}
+                      onChange={(e) => setConsultationForm({ ...consultationForm, followUpReason: e.target.value })}
+                      placeholder="e.g. Suture removal, post-op progress check, booster evaluation"
+                      style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "14px", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                  📎 Clinical Lab Report / Attachment (Optional)
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      try {
+                        addToast("Uploading clinical report to storage...", "info");
+                        const url = await storageService.uploadFile(file, { folder: "medical_records", entity_type: "clinical_exam" });
+                        setConsultationForm((prev) => ({ ...prev, attachmentUrl: url }));
+                        addToast("Clinical report uploaded & attached!", "success");
+                      } catch {
+                        addToast("Failed to upload file attachment.", "error");
+                      }
+                    }
+                  }}
+                  style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#F8FAFC" }}
+                />
+                {consultationForm.attachmentUrl && (
+                  <div style={{ fontSize: "12px", color: "#10B981", fontWeight: 700, marginTop: "4px" }}>
+                    ✓ Clinical document attached: {consultationForm.attachmentUrl.slice(0, 45)}...
+                  </div>
+                )}
+              </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>Attending Veterinarian Summary Notes</label>

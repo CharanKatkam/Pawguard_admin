@@ -290,6 +290,38 @@ export const rescueService = {
     return response.data;
   },
 
+  // GET /rescue/agents/location - Live Field Agent GPS Locations (PRR 3.2 & 3.4)
+  getAgentLocations: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/rescue/agents/location", { params });
+    return response.data;
+  },
+
+  // GET /rescue/{request_id}/location - Real-Time Case GPS Location
+  getCaseLocation: async (requestId: string) => {
+    const response = await api.get(`/rescue/${requestId}/location`);
+    return response.data;
+  },
+
+  // GET /rescue/{request_id}/suggest-agents - Nearest Agent GPS Suggestions (PRR 3.2)
+  suggestNearestAgents: async (requestId: string, radiusKm: number = 50) => {
+    const response = await api.get(`/rescue/${requestId}/suggest-agents`, {
+      params: { radius: radiusKm },
+    });
+    return response.data;
+  },
+
+  // GET /rescue/agents/availability - Available Rescue Agents
+  getAgentAvailability: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/rescue/agents/availability", { params });
+    return response.data;
+  },
+
+  // GET /rescue/vehicles/availability - Available Fleet Vehicles
+  getVehicleAvailability: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/rescue/vehicles/availability", { params });
+    return response.data;
+  },
+
 
   // POST /rescue/{request_id}/escalate - RescueEscalateCreate (PRR 3.3)
   escalateRescue: async (requestId: string, escalationType: string, notes?: string) => {

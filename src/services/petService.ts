@@ -12,6 +12,8 @@ export interface PetPayload {
   weight?: number;
   color?: string;
   temperament?: string;
+  ear_shape?: string;
+  tail_type?: string;
   is_spayed_neutered?: boolean;
   is_adoptable?: boolean;
   is_public_visible?: boolean;

@@ -105,20 +105,13 @@ export const KennelAssignmentModal: React.FC<KennelAssignmentModalProps> = ({
 
   const selectedDog = dogs.find((d) => (d.id || d.dog_id) === selectedDogId);
   const selectedKennel = kennels.find((k) => k.id === selectedKennelId);
-  const selectedSection = sections.find((s) => s.id === selectedSectionId);
 
-  // Quarantine & Eligibility Warnings
+  // Quarantine & Eligibility Info
   const isDogInQuarantine = selectedDog && selectedDog.is_quarantine_passed === false;
-  const isQuarantineSection =
-    selectedSection?.section_type === "quarantine" ||
-    selectedSection?.section_type === "isolation";
   const isKennelFull = selectedKennel?.is_occupied;
 
-  const isFormValid =
-    selectedKennelId &&
-    selectedDogId &&
-    !isKennelFull &&
-    (!isDogInQuarantine || isQuarantineSection);
+  // Conditional validation: require animal and kennel selection, ensuring kennel is available
+  const isFormValid = Boolean(selectedKennelId && selectedDogId && !isKennelFull);
 
   const handleSubmitAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,10 +121,6 @@ export const KennelAssignmentModal: React.FC<KennelAssignmentModalProps> = ({
     }
     if (isKennelFull) {
       addToast("Selected kennel is currently occupied. Please choose an available unit.", "error");
-      return;
-    }
-    if (isDogInQuarantine && !isQuarantineSection) {
-      addToast("Quarantine animals must be assigned to Quarantine or Isolation sections.", "error");
       return;
     }
 
@@ -185,12 +174,12 @@ export const KennelAssignmentModal: React.FC<KennelAssignmentModalProps> = ({
             </select>
           </div>
 
-          {/* Quarantine Warning */}
+          {/* Quarantine Advisory */}
           {selectedDog && isDogInQuarantine && (
-            <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", padding: "12px", borderRadius: "6px", fontSize: "12px", color: "#991B1B", display: "flex", alignItems: "center", gap: "8px" }}>
-              <FaShieldAlt style={{ fontSize: "16px", color: "#DC2626" }} />
+            <div style={{ background: "#FEF3C7", border: "1px solid #FDE68A", padding: "10px 12px", borderRadius: "6px", fontSize: "12px", color: "#92400E", display: "flex", alignItems: "center", gap: "8px" }}>
+              <FaShieldAlt style={{ fontSize: "15px", color: "#D97706" }} />
               <div>
-                <strong>Quarantine Protocol Active:</strong> This animal has not cleared quarantine. It must be assigned to a <strong>Quarantine</strong> or <strong>Isolation</strong> section.
+                <strong>Quarantine Advisory:</strong> This animal has not completed medical quarantine. Placement in a <strong>Quarantine</strong> or <strong>Isolation</strong> section is recommended.
               </div>
             </div>
           )}

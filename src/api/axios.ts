@@ -2,9 +2,9 @@ import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
 import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser, getAccessToken } from "../utils/authStorage";
 
-// Base API configuration: use relative /api/v1 (Vite dev proxy in local dev, Vercel rewrite proxy in production)
-const rawApiUrl = (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
-const API_BASE_URL = rawApiUrl.startsWith("http") ? "/api/v1" : rawApiUrl;
+// Base API configuration: use relative /api/v1 in Vite dev mode (proxied to backend), or configured env URL
+const envApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+const API_BASE_URL = import.meta.env.DEV ? "/api/v1" : (envApiUrl || "/api/v1");
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -20,10 +20,10 @@ api.interceptors.request.use(
   (config) => {
     const token = getAccessToken();
     if (token) {
-      config.headers = config.headers || {};
-      if (typeof config.headers.set === "function") {
+      if (config.headers && typeof config.headers.set === "function") {
         config.headers.set("Authorization", `Bearer ${token}`);
       } else {
+        config.headers = config.headers || {};
         (config.headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
       }
     }

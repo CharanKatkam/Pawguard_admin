@@ -100,6 +100,21 @@ const RescueCoordinatorDashboard = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
 
+  // GPS Tracking & Agent Suggestion State
+  const [agentGpsLocations, setAgentGpsLocations] = useState<any[]>([]);
+  const [isSuggestingAgents, setIsSuggestingAgents] = useState(false);
+  const [suggestedAgents, setSuggestedAgents] = useState<any[]>([]);
+  const [isSuggestModalOpen, setIsSuggestModalOpen] = useState(false);
+
+  // Rejection & Rationale State
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [rejectionRationale, setRejectionRationale] = useState("");
+
+  // Severity & Priority Edit State
+  const [editSeverity, setEditSeverity] = useState("medium");
+  const [editIsUrgent, setEditIsUrgent] = useState(false);
+  const [isUpdatingPriority, setIsUpdatingPriority] = useState(false);
+
   const [dashboardData, setDashboardData] = useState<RescueDashboardData>({
     total_calls: 0,
     pending: 0,
@@ -125,11 +140,16 @@ const RescueCoordinatorDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [dashRes, allRes, assignedRes] = await Promise.allSettled([
+      const [dashRes, allRes, assignedRes, gpsRes] = await Promise.allSettled([
         dashboardService.getRescueDashboard(),
         rescueService.getRescueCases(),
         rescueService.getRescueCases({ assigned_to_me: true }),
+        rescueService.getAgentLocations(),
       ]);
+
+      if (gpsRes.status === "fulfilled") {
+        setAgentGpsLocations(unwrapList(gpsRes.value));
+      }
 
       if (dashRes.status === "fulfilled") {
         const data = (dashRes.value as { data?: Record<string, unknown> })?.data || (dashRes.value as Record<string, unknown>) || {};
@@ -370,6 +390,60 @@ const RescueCoordinatorDashboard = () => {
     }
   };
 
+  const handleRejectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRequest?.id) return;
+    if (!rejectionRationale.trim()) {
+      addToast("Please provide a rejection rationale.", "error");
+      return;
+    }
+    try {
+      setIsActionLoading(true);
+      await rescueService.rejectRescueRequest(String(selectedRequest.id), rejectionRationale.trim());
+      addToast("Rescue report rejected and closed.", "info");
+      setIsRejectModalOpen(false);
+      setIsViewModalOpen(false);
+      setRejectionRationale("");
+      fetchCasesData();
+    } catch {
+      addToast("Failed to reject rescue report.", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleUpdatePrioritySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRequest?.id) return;
+    try {
+      setIsUpdatingPriority(true);
+      await rescueService.updateRescueCase(String(selectedRequest.id), {
+        severity: editSeverity,
+        is_urgent: editIsUrgent,
+      });
+      addToast(`Rescue case priority updated to ${editSeverity.toUpperCase()}${editIsUrgent ? " (URGENT)" : ""}.`, "success");
+      fetchCasesData();
+    } catch {
+      addToast("Failed to update case priority.", "error");
+    } finally {
+      setIsUpdatingPriority(false);
+    }
+  };
+
+  const handleSuggestNearestAgents = async (requestId: string) => {
+    try {
+      setIsSuggestingAgents(true);
+      const res = await rescueService.suggestNearestAgents(requestId);
+      const agentsList = unwrapList(res);
+      setSuggestedAgents(agentsList);
+      setIsSuggestModalOpen(true);
+    } catch {
+      addToast("Could not fetch GPS agent suggestions.", "error");
+    } finally {
+      setIsSuggestingAgents(false);
+    }
+  };
+
   const approvedTransportVols = transportVols.filter((v) => isVolApproved(v.status));
   const pendingTransportVols = transportVols.filter((v) => isVolPending(v.status));
 
@@ -583,6 +657,51 @@ const RescueCoordinatorDashboard = () => {
         ))}
       </div>
 
+      {/* Live Field Agent GPS Locations & Roster */}
+      <div className="soft-card" style={{ padding: "20px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#0F172A", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+              <FaMapMarkerAlt style={{ color: "#10B981" }} /> Live Field Agent GPS Locations &amp; Dispatch Radar
+            </h3>
+            <p style={{ margin: "2px 0 0", color: "#64748B", fontSize: "12.5px" }}>
+              Real-time telemetry and coordinates fetched directly from backend OpenAPI location stream.
+            </p>
+          </div>
+          <span style={{ fontSize: "12px", background: "#ECFDF5", color: "#047857", padding: "4px 10px", borderRadius: "999px", fontWeight: 700 }}>
+            {agentGpsLocations.length} Active GPS Transmitters Connected
+          </span>
+        </div>
+
+        {agentGpsLocations.length === 0 ? (
+          <div style={{ padding: "16px", background: "#F8FAFC", borderRadius: "10px", border: "1px solid #E2E8F0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
+            No active agent GPS signals broadcasted in the last reporting window. Active agents automatically broadcast location during dispatches.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+            {agentGpsLocations.map((agent: any, idx: number) => {
+              const statusLower = String(agent.status || agent.dispatch_status || "available").toLowerCase();
+              const isBusy = statusLower.includes("dispatch") || statusLower.includes("busy") || statusLower.includes("active");
+              return (
+                <div key={agent.agent_id || agent.id || idx} style={{ padding: "12px 14px", borderRadius: "10px", background: "#FFFFFF", border: "1px solid #E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                    <strong style={{ fontSize: "13.5px", color: "#0F172A" }}>{agent.agent_name || agent.full_name || agent.name || `Agent #${idx + 1}`}</strong>
+                    <span style={{ fontSize: "10px", fontWeight: 800, padding: "2px 6px", borderRadius: "4px", background: isBusy ? "#FEF3C7" : "#ECFDF5", color: isBusy ? "#D97706" : "#047857", textTransform: "uppercase" }}>
+                      {isBusy ? "ON DISPATCH" : "AVAILABLE"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "2px" }}>
+                    <div>📍 <strong>GPS:</strong> {agent.latitude ? `${Number(agent.latitude).toFixed(4)}, ${Number(agent.longitude).toFixed(4)}` : agent.location || "Sector Radar"}</div>
+                    {agent.battery_level !== undefined && <div>🔋 <strong>Battery:</strong> {agent.battery_level}%</div>}
+                    {agent.last_ping && <div>⏱️ <strong>Last Ping:</strong> {formatDateTime(agent.last_ping)}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Dynamic Rescue Operations Table */}
       <div id="rescue-table-section" className="soft-card" style={{ padding: "20px" }}>
         <div
@@ -661,6 +780,20 @@ const RescueCoordinatorDashboard = () => {
                     style={{ padding: "8px 16px", background: "#10B981", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
                   >
                     Verify Incident
+                  </button>
+                  <button
+                    disabled={isActionLoading}
+                    onClick={() => setIsRejectModalOpen(true)}
+                    style={{ padding: "8px 16px", background: "#DC2626", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    Reject Report
+                  </button>
+                  <button
+                    disabled={isActionLoading || isSuggestingAgents}
+                    onClick={() => handleSuggestNearestAgents(String(selectedRequest.id || ""))}
+                    style={{ padding: "8px 16px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
+                  >
+                    {isSuggestingAgents ? "Finding Agents..." : "📍 Suggest Nearest Agents (GPS)"}
                   </button>
                   <button
                     disabled={isActionLoading}
@@ -785,6 +918,34 @@ const RescueCoordinatorDashboard = () => {
                 </span>
               )}
             </div>
+            <form onSubmit={handleUpdatePrioritySubmit} style={{ background: "#F8FAFC", padding: "12px 14px", borderRadius: "8px", border: "1px solid #E2E8F0", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <strong style={{ color: "#475569", fontSize: "13px" }}>Update Priority:</strong>
+              <select
+                value={editSeverity}
+                onChange={(e) => setEditSeverity(e.target.value)}
+                style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "12.5px" }}
+              >
+                <option value="low">LOW</option>
+                <option value="medium">MEDIUM</option>
+                <option value="high">HIGH</option>
+                <option value="critical">CRITICAL</option>
+              </select>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12.5px", color: "#DC2626", fontWeight: 700, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={editIsUrgent}
+                  onChange={(e) => setEditIsUrgent(e.target.checked)}
+                />
+                Is Urgent Emergency
+              </label>
+              <button
+                type="submit"
+                disabled={isUpdatingPriority}
+                style={{ padding: "4px 10px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+              >
+                {isUpdatingPriority ? "Saving..." : "Save Priority"}
+              </button>
+            </form>
             <div>
               <strong style={{ color: "#475569" }}>Current Status:</strong> {rescueStatusBadge(String(selectedRequest.status || ""))}
             </div>
@@ -905,6 +1066,91 @@ const RescueCoordinatorDashboard = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Rejection Rationale Modal */}
+      <Modal
+        isOpen={isRejectModalOpen}
+        onClose={() => setIsRejectModalOpen(false)}
+        title={`Reject Rescue Report${selectedRequest?.ticket ? ` — ${selectedRequest.ticket}` : ""}`}
+      >
+        <form onSubmit={handleRejectSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>
+            Rejecting this rescue report will close the case and notify the reporting party. Please provide an explicit operational rationale.
+          </p>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#991B1B", marginBottom: "4px" }}>
+              Rejection Rationale / Explanation *
+            </label>
+            <textarea
+              rows={3}
+              required
+              placeholder="e.g. Duplicate report, invalid location, animal not found, handled by public owner..."
+              value={rejectionRationale}
+              onChange={(e) => setRejectionRationale(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #FCA5A5", fontSize: "13px" }}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+            <button
+              type="button"
+              onClick={() => setIsRejectModalOpen(false)}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "13px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isActionLoading}
+              style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: "#DC2626", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+            >
+              {isActionLoading ? "Rejecting..." : "Confirm Rejection"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Nearest Agent GPS Suggestions Modal */}
+      <Modal
+        isOpen={isSuggestModalOpen}
+        onClose={() => setIsSuggestModalOpen(false)}
+        title="📍 Nearest Available Field Agents (GPS Radar)"
+        size="lg"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#64748B" }}>
+            Calculated nearest active agents based on live GPS coordinates and proximity to incident location.
+          </p>
+          {suggestedAgents.length === 0 ? (
+            <div style={{ padding: "16px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #E2E8F0", textAlign: "center", color: "#64748B", fontSize: "13px" }}>
+              No nearby agents found within 50km radius.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {suggestedAgents.map((ag: any, i: number) => (
+                <div key={ag.agent_id || ag.id || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
+                  <div>
+                    <strong style={{ fontSize: "14px", color: "#0F172A" }}>{ag.agent_name || ag.full_name || ag.name || `Agent #${i + 1}`}</strong>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                      📍 Proximity: <strong>{ag.distance_km != null ? `${Number(ag.distance_km).toFixed(1)} km` : "Nearby"}</strong> | Status: <span style={{ textTransform: "uppercase", fontWeight: 700, color: "#16A34A" }}>{ag.status || "Active"}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSuggestModalOpen(false);
+                      setIsViewModalOpen(false);
+                      navigate(`/rescue-dispatch?case_id=${encodeURIComponent(String(selectedRequest?.id || ""))}&agent_id=${encodeURIComponent(String(ag.agent_id || ag.id || ""))}`);
+                    }}
+                    style={{ padding: "6px 14px", background: "#2563EB", color: "#FFF", borderRadius: "6px", border: "none", fontWeight: 700, fontSize: "12px", cursor: "pointer" }}
+                  >
+                    Select &amp; Dispatch
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

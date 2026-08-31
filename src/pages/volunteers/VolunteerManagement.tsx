@@ -400,15 +400,38 @@ const VolunteerManagement = () => {
   // Join or Assign Active Volunteer to Shift
   const handleJoinShift = async (shiftId: string, volunteerId?: string) => {
     try {
+      const targetShift = shifts.find((s) => String(s.id) === String(shiftId));
+      if (targetShift) {
+        const enrolled = Number(targetShift.enrolled_count ?? targetShift.attendance_count ?? 0);
+        const cap = Number(targetShift.capacity ?? 5);
+        if (enrolled >= cap) {
+          addToast(`Cannot assign volunteer: Shift capacity is full (${enrolled}/${cap} enrolled).`, "error");
+          return;
+        }
+      }
+
       const activeVols = applications.filter((v) =>
         ["active", "approved", "onboarded"].includes(String(v.status || "").toLowerCase())
       );
+      const targetVol = applications.find(
+        (v) => String(v.id || v.application_id || v.profile_id) === String(volunteerId)
+      );
+
+      if (volunteerId && targetVol) {
+        const st = String(targetVol.status || "").toLowerCase();
+        if (!["active", "approved", "onboarded"].includes(st)) {
+          addToast(`Cannot assign volunteer: Status is '${st}'. Only approved/active volunteers may be assigned.`, "error");
+          return;
+        }
+      }
+
       const targetVolId = volunteerId || activeVols[0]?.id || activeVols[0]?.profile_id;
 
       if (!targetVolId) {
         addToast("No active or approved volunteers available to assign to shift.", "error");
         return;
       }
+
       await volunteerService.joinShift(shiftId, targetVolId);
       addToast("Volunteer assigned to shift successfully!", "success");
       fetchShifts();
