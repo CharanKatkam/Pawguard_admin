@@ -2,9 +2,23 @@ import axios from "axios";
 import { notifyAuthChanged } from "../utils/dataSync";
 import { clearAuthData, isSessionExpired, updateLastActivity, getStoredUser, getAccessToken } from "../utils/authStorage";
 
-// Base API configuration: use relative /api/v1 in Vite dev mode (proxied to backend), or configured env URL
-const envApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = import.meta.env.DEV ? "/api/v1" : (envApiUrl || "/api/v1");
+// Base API configuration: use relative /api/v1 in Vite dev mode (proxied to backend), or environment-configured URL
+const getBaseUrl = (): string => {
+  const envApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (import.meta.env.DEV) {
+    return "/api/v1";
+  }
+  if (envApiUrl && envApiUrl.trim() !== "") {
+    const trimmed = envApiUrl.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return trimmed.endsWith("/api/v1") ? trimmed : `${trimmed.replace(/\/+$/, "")}/api/v1`;
+    }
+    return trimmed;
+  }
+  return "/api/v1";
+};
+
+const API_BASE_URL = getBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,

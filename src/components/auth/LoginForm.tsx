@@ -132,8 +132,9 @@ const LoginForm = () => {
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         if (!error.response) {
+          const origin = typeof window !== "undefined" ? window.location.origin : "this origin";
           setErrorMsg(
-            "CORS / Origin Error: Please access the app via http://localhost:5173 to match backend CORS policy, or update backend CORSMiddleware origins."
+            `Unable to connect to PawGuard backend. Please verify your connection, or ensure backend CORS policy allows requests from '${origin}'.`
           );
         } else {
           const backendErr = error.response.data?.error;
