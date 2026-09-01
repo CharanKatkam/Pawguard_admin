@@ -29,7 +29,7 @@ const ProtectedRoute = ({ allowedRoles, permission }: ProtectedRouteProps) => {
             const userRole = normalizeRole(fetchedUser) || getCurrentUserRole();
             if (userRole) {
               fetchedUser.role = userRole;
-              setAuthData({ user: fetchedUser }, getRememberMe());
+              setAuthData({ user: fetchedUser }, getRememberMe(), false);
             }
           }
         })

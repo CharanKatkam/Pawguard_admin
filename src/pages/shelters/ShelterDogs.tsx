@@ -577,8 +577,27 @@ const ShelterDogs = () => {
   const unwrapList = (v: any) =>
     Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-  const dogId = (dog: any) =>
-    dog?.dog_id || dog?.id || dog?.original_dog_id || dog?.companion_pet?.original_dog_id || dog?.companion_pet_id || dog?.companion_pet?.id || "";
+  const isUuid = (val: unknown): boolean =>
+    typeof val === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val.trim());
+
+  const dogId = (dog: any): string => {
+    if (!dog) return "";
+    const candidates = [
+      dog.id,
+      dog.dog_id,
+      dog.original_dog_id,
+      dog.companion_pet?.original_dog_id,
+      dog.companion_pet_id,
+      dog.companion_pet?.id,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && isUuid(c)) return c.trim();
+    }
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+    return "";
+  };
 
   const formatDog = (dog: any) => {
     const hasActiveTag = !!(dog.safety_tag_status === "ACTIVE" || dog.is_safety_tag_active === true || dog.safety_tag_active === true || dog.safety_tag?.is_active === true);
@@ -722,8 +741,27 @@ const ShelterDogs = () => {
             savedToken = metaData.raw_token;
           }
         }
-      } catch {
-        /* handled */
+      } catch (metaErr: unknown) {
+        const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
+        const status = e?.response?.status;
+        const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
+
+        if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
+          setTagStatus("INACTIVE");
+          setTagMetadata(null);
+          setRawToken(null);
+          setQrImageUrl(null);
+          setQrBlob(null);
+          return;
+        } else if (status === 401) {
+          setQrError("Authentication Failure (401): No valid authentication credentials provided or session expired. Please sign in again.");
+          return;
+        } else if (status === 403) {
+          setQrError("Unauthorized (403): Your account role does not have permission to access Safety Tags for shelter animals.");
+          return;
+        } else if (apiMsg) {
+          setQrError(String(apiMsg));
+        }
       }
 
       if (savedToken) {
@@ -732,18 +770,6 @@ const ShelterDogs = () => {
         const blob = await generateQrBlob(savedToken);
         setQrImageUrl(qrUrl);
         setQrBlob(blob);
-      } else {
-        // Staff QR Image Fallback using backend GET /api/v1/dogs/{dog_id}/qr-image
-        try {
-          const qrImageBlob = await petService.getDogQrImage(id);
-          if (qrImageBlob) {
-            const url = URL.createObjectURL(qrImageBlob);
-            setQrImageUrl(url);
-            setQrBlob(qrImageBlob);
-          }
-        } catch {
-          /* unprovisioned state handled */
-        }
       }
     } catch (err: any) {
       setQrError("Failed to load Safety Tag metadata.");

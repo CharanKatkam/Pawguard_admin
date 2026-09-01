@@ -17,16 +17,16 @@ export const useInactivityTimeout = () => {
     const user = getStoredUser();
     if (!user) return;
 
-    // Refresh lastActivity timestamp on user interaction (throttled to max 1 update per 1000ms)
+    // Refresh lastActivity timestamp on actual user interaction (throttled to max 1 update per 30000ms)
     const handleUserActivity = () => {
       const now = Date.now();
-      if (now - lastThrottleRef.current > 1000) {
+      if (now - lastThrottleRef.current > 30000) {
         lastThrottleRef.current = now;
         updateLastActivity();
       }
     };
 
-    const events = ["mousemove", "keydown", "click", "scroll", "touchstart", "pointerdown"];
+    const events = ["click", "keydown", "pointerdown", "touchstart"];
     events.forEach((ev) => window.addEventListener(ev, handleUserActivity, { passive: true }));
 
     // Check for 15-minute inactivity timeout every 1000ms

@@ -1,5 +1,6 @@
 import api from "../api/axios";
 import { publishActionEvent } from "../utils/eventSystem";
+import { getAccessToken } from "../utils/authStorage";
 
 export interface PetPayload {
   id?: string;
@@ -26,13 +27,89 @@ export interface PetPayload {
 }
 
 export const petService = {
-  // GET /dogs (Exact OpenAPI endpoint)
-  getPets: async (params?: Record<string, unknown>) => {
+  // GET /dogs (Dog Master / Shelter Intake Records)
+  getDogs: async (params?: Record<string, unknown>) => {
     const response = await api.get("/dogs", { params });
     return response.data;
   },
 
-  // GET /dogs — fetch complete dataset across all pages for global KPI calculations
+  // GET /companion-pets (Companion Pets across all users when called by Admin)
+  getCompanionPets: async (params?: Record<string, unknown>) => {
+    const response = await api.get("/companion-pets", { params });
+    const data = response.data;
+    const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    const normalized = list.map((cp: any) => ({
+      ...cp,
+      is_companion_pet: true,
+      is_adoptable: cp.is_adoptable === true,
+      status: cp.status || "companion",
+    }));
+    return {
+      ...data,
+      data: normalized,
+    };
+  },
+
+  // GET /dogs & /companion-pets — unified or filtered Pet Management query in Admin context
+  getPets: async (params?: Record<string, unknown>) => {
+    const recordType = (params?.record_type || params?.type || params?.category) as string | undefined;
+
+    // 1. Direct query for Companion Pets Registry screen (GET /api/v1/companion-pets)
+    if (recordType === "companion" || recordType === "companion_pets") {
+      const cleanParams = { ...params };
+      delete cleanParams.record_type;
+      delete cleanParams.type;
+      delete cleanParams.category;
+      return petService.getCompanionPets(cleanParams);
+    }
+
+    // 2. Direct query for Dog Master Registry screen (GET /api/v1/dogs)
+    if (recordType === "master" || recordType === "dog_master") {
+      const cleanParams = { ...params };
+      delete cleanParams.record_type;
+      delete cleanParams.type;
+      delete cleanParams.category;
+      return petService.getDogs(cleanParams);
+    }
+
+    // 3. Default: Unified query combining Dog Master & Companion Pets datasets
+    const dogRes = await api.get("/dogs", { params });
+    const dogData = dogRes.data;
+    const dogList = Array.isArray(dogData?.data) ? dogData.data : Array.isArray(dogData) ? dogData : [];
+
+    try {
+      const compRes = await api.get("/companion-pets", { params });
+      const compData = compRes.data;
+      const compList = Array.isArray(compData?.data) ? compData.data : Array.isArray(compData) ? compData : [];
+
+      if (compList.length > 0) {
+        const existingDogIds = new Set(dogList.map((d: any) => d.id || d.dog_id));
+        const normalizedCompPets = compList
+          .filter((cp: any) => !existingDogIds.has(cp.id) && !existingDogIds.has(cp.original_dog_id))
+          .map((cp: any) => ({
+            ...cp,
+            is_companion_pet: true,
+            is_adoptable: cp.is_adoptable === true,
+            status: cp.status || "companion",
+          }));
+
+        const combined = [...dogList, ...normalizedCompPets];
+        const total = (dogData?.meta?.total || dogList.length) + normalizedCompPets.length;
+
+        return {
+          ...dogData,
+          data: combined,
+          meta: { ...(dogData?.meta || {}), total },
+        };
+      }
+    } catch {
+      /* fallback to dogList */
+    }
+
+    return dogData;
+  },
+
+  // GET /dogs & /companion-pets — fetch complete dataset across all pages for Admin KPI/table view
   getAllDogs: async (params?: Record<string, unknown>) => {
     const pageSize = 50;
     const collected: any[] = [];
@@ -57,10 +134,31 @@ export const petService = {
         }
       }
 
+      // Merge CompanionPets dataset into global dogs list if accessible
+      try {
+        const compRes = await api.get("/companion-pets", { params: { page: 1, page_size: pageSize } });
+        const compBody = compRes.data;
+        const compList = Array.isArray(compBody?.data) ? compBody.data : Array.isArray(compBody) ? compBody : [];
+        if (compList.length > 0) {
+          const existingIds = new Set(collected.map((d: any) => d.id || d.dog_id));
+          const normalizedCompanions = compList
+            .filter((cp: any) => !existingIds.has(cp.id) && !existingIds.has(cp.original_dog_id))
+            .map((cp: any) => ({
+              ...cp,
+              is_companion_pet: true,
+              is_adoptable: cp.is_adoptable === true,
+              status: cp.status || "companion",
+            }));
+          collected.push(...normalizedCompanions);
+        }
+      } catch {
+        /* ignore companion pets fetch failure */
+      }
+
       return {
         success: true,
         data: collected,
-        meta: { total: Math.max(totalRecords, collected.length) },
+        meta: { total: collected.length },
       };
     } catch (err) {
       console.warn("Failed to fetch all dogs in getAllDogs:", err);
@@ -74,8 +172,17 @@ export const petService = {
   },
 
   getPetById: async (dogId: string) => {
-    const response = await api.get(`/dogs/${dogId}`);
-    return response.data;
+    const cleanId = String(dogId || "").trim();
+    try {
+      const response = await api.get(`/dogs/${cleanId}`);
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        const compRes = await api.get(`/companion-pets/${cleanId}`);
+        return compRes.data;
+      }
+      throw err;
+    }
   },
 
   createPet: async (data: Record<string, unknown>) => {
@@ -172,19 +279,27 @@ export const petService = {
    * encoding the authoritative raw_token returned from POST /dogs/{dog_id}/safety-tag.
    */
   getDogQrImage: async (dogId: string): Promise<Blob> => {
+    const cleanId = String(dogId || "").trim();
+    if (!cleanId) throw new Error("Dog ID is required.");
     const frontendBaseUrl =
       (import.meta.env.VITE_FRONTEND_BASE_URL as string) ||
       (typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://pawguard-admin.vercel.app");
 
-    const response = await api.get(`/dogs/${dogId}/qr-image`, {
+    const token = getAccessToken();
+    const reqHeaders: Record<string, string> = {
+      "X-Frontend-Base-Url": frontendBaseUrl,
+      "X-Frontend-Url": frontendBaseUrl,
+    };
+    if (token) {
+      reqHeaders["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await api.get(`/dogs/${cleanId}/qr-image`, {
       params: {
         frontend_url: frontendBaseUrl,
         frontend_base_url: frontendBaseUrl,
       },
-      headers: {
-        "X-Frontend-Base-Url": frontendBaseUrl,
-        "X-Frontend-Url": frontendBaseUrl,
-      },
+      headers: reqHeaders,
       responseType: "blob",
     });
     if (!(response.data instanceof Blob)) {
@@ -195,7 +310,14 @@ export const petService = {
 
   // GET /dogs/{dog_id}/safety-tag - authenticated Safety Tag metadata for Dog Master record
   getSafetyTagMetadata: async (dogId: string) => {
-    const response = await api.get(`/dogs/${dogId}/safety-tag`);
+    const cleanId = String(dogId || "").trim();
+    if (!cleanId) throw new Error("Dog ID is required.");
+    const token = getAccessToken();
+    const reqHeaders: Record<string, string> = {};
+    if (token) {
+      reqHeaders["Authorization"] = `Bearer ${token}`;
+    }
+    const response = await api.get(`/dogs/${cleanId}/safety-tag`, { headers: reqHeaders });
     return response.data;
   },
 
@@ -229,11 +351,26 @@ export const petService = {
     return response.data;
   },
 
-  // GET /dogs/{dog_id}/public-scan or POST /dogs/safety-tag/resolve - authoritative token & dog public scan
   getPublicDogScan: async (identifier: string) => {
-    const clean = String(identifier || "").trim();
+    let clean = String(identifier || "").trim();
     if (!clean) {
       throw new Error("Safety Tag token or Dog identifier is required.");
+    }
+
+    // Extract raw token if identifier is a full scan URL (e.g., https://.../scan?token=CMP-12345)
+    if (clean.includes("token=")) {
+      try {
+        const parsedUrl = new URL(clean.startsWith("http") ? clean : `https://pawguard-public-web.vercel.app/${clean.replace(/^\/+/, "")}`);
+        const tokenParam = parsedUrl.searchParams.get("token");
+        if (tokenParam && tokenParam.trim()) {
+          clean = tokenParam.trim();
+        }
+      } catch {
+        const match = clean.match(/token=([^&]+)/);
+        if (match && match[1]) {
+          clean = match[1].trim();
+        }
+      }
     }
 
     const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;

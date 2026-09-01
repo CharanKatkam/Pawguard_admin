@@ -206,6 +206,7 @@ const Pets = () => {
 
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [adoptableOnly, setAdoptableOnly] = useState<boolean>(false);
+  const [registryTab, setRegistryTab] = useState<"all" | "master" | "companion">("all");
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(() => searchParams.get("action") === "register");
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isAdoptableModalOpen, setIsAdoptableModalOpen] = useState(false);
@@ -259,7 +260,27 @@ const Pets = () => {
   const unwrapList = (v: any) =>
     Array.isArray(v) ? v : Array.isArray(v?.data) ? v.data : [];
 
-  const dogId = (dog: any) => dog?.dog_id || dog?.id || dog?.original_dog_id || dog?.companion_pet?.original_dog_id || dog?.companion_pet_id || dog?.companion_pet?.id || "";
+  const isUuid = (val: unknown): boolean =>
+    typeof val === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val.trim());
+
+  const dogId = (dog: any): string => {
+    if (!dog) return "";
+    const candidates = [
+      dog.id,
+      dog.dog_id,
+      dog.original_dog_id,
+      dog.companion_pet?.original_dog_id,
+      dog.companion_pet_id,
+      dog.companion_pet?.id,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && isUuid(c)) return c.trim();
+    }
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+    return "";
+  };
 
   const formatDog = (dog: any) => {
     const rawStatus = String(dog.status || "").toLowerCase();
@@ -410,11 +431,12 @@ const Pets = () => {
       setError(null);
 
       const response = await petService.getPets({
+        record_type: registryTab,
         search: search.trim() || undefined,
         status: statusFilter || undefined,
         is_adoptable: adoptableOnly ? true : undefined,
         page,
-        page_size: 5,
+        page_size: 10,
       });
       let dogList = unwrapList(response).map(formatDog);
       if (statusFilter) {
@@ -508,7 +530,7 @@ const Pets = () => {
 
   useEffect(() => {
     fetchDogs();
-  }, [search, page, statusFilter, adoptableOnly]);
+  }, [search, page, statusFilter, adoptableOnly, registryTab]);
 
   useEffect(() => {
     fetchAllDogs();
@@ -626,12 +648,33 @@ const Pets = () => {
 
     if (dId) {
       try {
-        const res = await petService.getPetById(dId);
-        const fresh = res?.data || res;
-        if (fresh && (fresh.id || fresh.registration_number || fresh.name)) {
-          const formatted = formatDog(fresh);
-          setSelectedViewDog((prev: any) => (prev && dogId(prev) === dId ? { ...prev, ...formatted } : prev));
+        const [res, tagRes] = await Promise.allSettled([
+          petService.getPetById(dId),
+          petService.getSafetyTagMetadata(dId),
+        ]);
+
+        let freshFormatted: any = {};
+        if (res.status === "fulfilled") {
+          const fresh = res.value?.data || res.value;
+          if (fresh && (fresh.id || fresh.registration_number || fresh.name)) {
+            freshFormatted = formatDog(fresh);
+          }
         }
+
+        let tagInfo: any = { safety_tag_status: "INACTIVE", safety_tag_active: false };
+        if (tagRes.status === "fulfilled") {
+          const tagMeta = tagRes.value?.data || tagRes.value;
+          if (tagMeta) {
+            const isTagActive = tagMeta.is_active === true || String(tagMeta.status || "").toUpperCase() === "ACTIVE";
+            tagInfo = {
+              safety_tag_active: isTagActive,
+              safety_tag_status: isTagActive ? "ACTIVE" : "INACTIVE",
+              safety_tag_metadata: tagMeta,
+            };
+          }
+        }
+
+        setSelectedViewDog((prev: any) => (prev && dogId(prev) === dId ? { ...prev, ...freshFormatted, ...tagInfo } : prev));
       } catch {
         /* keep initialDog */
       }
@@ -669,9 +712,24 @@ const Pets = () => {
 
       let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
 
-      // Fetch authoritative metadata from GET /api/v1/dogs/{dog_id}/safety-tag FIRST
+      // Fetch authoritative metadata from GET /api/v1/dogs/{dog_id}/safety-tag or GET /api/v1/companion-pets/{pet_id}/safety-tag
       try {
-        const metaRes = await petService.getSafetyTagMetadata(id);
+        let metaRes: any = null;
+        const isCompanion = Boolean((dog as any)?.is_companion_pet || (dog as any)?.companion_pet_id || (dog as any)?.owner_id);
+        if (isCompanion) {
+          try {
+            metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
+          } catch {
+            metaRes = await petService.getSafetyTagMetadata(id);
+          }
+        } else {
+          try {
+            metaRes = await petService.getSafetyTagMetadata(id);
+          } catch {
+            metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
+          }
+        }
+
         const metaData = metaRes?.data || metaRes;
         if (metaData) {
           setTagMetadata(metaData);
@@ -684,8 +742,8 @@ const Pets = () => {
             return;
           }
           setTagStatus("ACTIVE");
-          if (metaData.raw_token) {
-            savedToken = metaData.raw_token;
+          if (metaData.raw_token || metaData.token) {
+            savedToken = metaData.raw_token || metaData.token;
           }
         }
       } catch (metaErr: unknown) {
@@ -700,8 +758,11 @@ const Pets = () => {
           setQrImageUrl(null);
           setQrBlob(null);
           return;
+        } else if (status === 401) {
+          setQrError("Authentication Failure (401): No valid authentication credentials provided or session expired. Please sign in again.");
+          return;
         } else if (status === 403) {
-          setQrError("Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.");
+          setQrError("Unauthorized (403): Your account role does not have permission to access Safety Tags.");
           return;
         } else if (apiMsg) {
           setQrError(String(apiMsg));
@@ -714,18 +775,6 @@ const Pets = () => {
         const blob = await generateQrBlob(savedToken);
         setQrImageUrl(qrUrl);
         setQrBlob(blob);
-      } else {
-        // Staff QR Image Fallback using backend GET /api/v1/dogs/{dog_id}/qr-image
-        try {
-          const qrImageBlob = await petService.getDogQrImage(id);
-          if (qrImageBlob) {
-            const url = URL.createObjectURL(qrImageBlob);
-            setQrImageUrl(url);
-            setQrBlob(qrImageBlob);
-          }
-        } catch {
-          /* unprovisioned state handled */
-        }
       }
     } catch (err: unknown) {
       let msg = "Failed to load Safety Tag metadata from backend service.";
@@ -734,8 +783,10 @@ const Pets = () => {
       if (apiMsg) msg = String(apiMsg);
       if (e?.response?.status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
         msg = "Dog Master record not found. A valid Dog Master record must exist on the backend before a Safety Tag can be provisioned.";
+      } else if (e?.response?.status === 401) {
+        msg = "Authentication Failure (401): No valid authentication credentials provided or session expired. Please sign in again.";
       } else if (e?.response?.status === 403) {
-        msg = "Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.";
+        msg = "Unauthorized (403): Your account role does not have permission to access Safety Tags for shelter animals.";
       }
       setQrError(msg);
     } finally {
@@ -1089,10 +1140,10 @@ const Pets = () => {
   ];
 
   const columns = [
-    { key: "registration_number", title: "Dog ID" },
+    { key: "registration_number", title: "Pet ID" },
     {
       key: "name",
-      title: "Dog Name",
+      title: "Pet Name",
       render: (v: string) => (
         <span style={{ fontWeight: 600, color: "#0F172A", wordBreak: "break-word", maxWidth: "240px", display: "inline-block" }}>
           {v || "-"}
@@ -1107,6 +1158,25 @@ const Pets = () => {
         v ? v.charAt(0).toUpperCase() + v.slice(1) : "-",
     },
     { key: "estimated_age", title: "Age" },
+    {
+      key: "is_companion_pet",
+      title: "Registry Category",
+      render: (_: any, row: any) => (
+        <span
+          style={{
+            padding: "3px 8px",
+            borderRadius: "999px",
+            fontSize: "11px",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            background: row.is_companion_pet ? "#EDE9FE" : "#DBEAFE",
+            color: row.is_companion_pet ? "#6D28D9" : "#1D4ED8",
+          }}
+        >
+          {row.is_companion_pet ? "Companion Pet" : "Dog Master"}
+        </span>
+      ),
+    },
     { key: "status", title: "Status" },
   ];
 
@@ -1246,10 +1316,77 @@ const Pets = () => {
       </div>
 
       <div id="dogs-table-card" className="soft-card" style={{ padding: "20px" }}>
-        <div style={{ marginBottom: "16px" }}>
-          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
-            Registered Dogs
-          </h3>
+        <div style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#0F172A" }}>
+              {registryTab === "companion"
+                ? "Companion Pets Registry (GET /api/v1/companion-pets)"
+                : registryTab === "master"
+                ? "Dog Master Registry (GET /api/v1/dogs)"
+                : "All Registered Animals"}
+            </h3>
+            <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#64748B" }}>
+              {registryTab === "companion"
+                ? "Viewing all citizen-registered & adopted companion pets across users."
+                : registryTab === "master"
+                ? "Viewing shelter intake & rescue centre Dog Master profiles."
+                : "Combined registry showing Dog Master profiles and Companion Pets."}
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: "6px", background: "#F1F5F9", padding: "4px", borderRadius: "8px" }}>
+            <button
+              type="button"
+              onClick={() => { setRegistryTab("all"); setPage(1); }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "6px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: registryTab === "all" ? "#FFFFFF" : "transparent",
+                color: registryTab === "all" ? "#2563EB" : "#64748B",
+                boxShadow: registryTab === "all" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              All Pets
+            </button>
+            <button
+              type="button"
+              onClick={() => { setRegistryTab("master"); setPage(1); }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "6px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: registryTab === "master" ? "#FFFFFF" : "transparent",
+                color: registryTab === "master" ? "#2563EB" : "#64748B",
+                boxShadow: registryTab === "master" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              Dog Master Registry
+            </button>
+            <button
+              type="button"
+              onClick={() => { setRegistryTab("companion"); setPage(1); }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "6px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: registryTab === "companion" ? "#FFFFFF" : "transparent",
+                color: registryTab === "companion" ? "#2563EB" : "#64748B",
+                boxShadow: registryTab === "companion" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              Companion Pets Registry
+            </button>
+          </div>
         </div>
 
         <DataTable
@@ -2767,6 +2904,22 @@ const Pets = () => {
                   }}
                 >
                   {selectedViewDog.is_adoptable ? "Ready for Adoption" : String(selectedViewDog.status || "Admitted").toUpperCase()}
+                </span>
+
+                <span
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "999px",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    background: selectedViewDog.safety_tag_status === "ACTIVE" || selectedViewDog.safety_tag_active ? "#059669" : "#DC2626",
+                    color: "#FFFFFF",
+                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  Safety Tag: {selectedViewDog.safety_tag_status === "ACTIVE" || selectedViewDog.safety_tag_active ? "ACTIVE" : "INACTIVE"}
                 </span>
               </div>
             </div>

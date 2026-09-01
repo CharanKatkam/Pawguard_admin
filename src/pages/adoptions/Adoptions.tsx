@@ -22,7 +22,6 @@ import adoptionService, {
   type AdoptionScoreCreatePayload,
 } from "../../services/adoptionService";
 import petService from "../../services/petService";
-import storageService from "../../services/storageService";
 import { generateQrDataUrl } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
@@ -41,34 +40,74 @@ const menuItemStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
+const extractErrorMessage = (err: any, fallback: string): string => {
+  const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message;
+  if (!detail) return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => (typeof item === "string" ? item : item?.msg || JSON.stringify(item))).join("; ");
+  }
+  if (typeof detail === "object") {
+    return (detail as any).msg || (detail as any).message || JSON.stringify(detail);
+  }
+  return String(detail);
+};
+
 const StatusBadge = ({ status }: { status: string }) => {
   const s = String(status || "").toLowerCase();
   let label = s.toUpperCase();
+  let bg = "#F1F5F9";
+  let color = "#334155";
+  let border = "#CBD5E1";
 
   if (s === "submitted") {
     label = "Submitted";
+    bg = "#F8FAFC";
+    color = "#475569";
+    border = "#CBD5E1";
   } else if (s === "screening") {
     label = "Screening";
+    bg = "#EFF6FF";
+    color = "#1D4ED8";
+    border = "#93C5FD";
   } else if (s === "interview") {
     label = "Interview";
+    bg = "#F3E8FF";
+    color = "#7E22CE";
+    border = "#D8B4FE";
   } else if (s === "home_check") {
     label = "Home Visit";
+    bg = "#FEF3C7";
+    color = "#B45309";
+    border = "#FDE68A";
   } else if (s === "approved") {
     label = "Approved";
+    bg = "#D1FAE5";
+    color = "#047857";
+    border = "#6EE7B7";
   } else if (s === "completed") {
     label = "Completed";
+    bg = "#EEF2FF";
+    color = "#4338CA";
+    border = "#A5B4FC";
   } else if (s === "rejected") {
     label = "Rejected";
+    bg = "#FEE2E2";
+    color = "#B91C1C";
+    border = "#FCA5A5";
   } else if (s === "vetting") {
     label = "Vetting";
+    bg = "#F1F5F9";
+    color = "#475569";
+    border = "#CBD5E1";
   }
 
   return (
     <span
       style={{
-        backgroundColor: "#F1F5F9",
-        color: "#334155",
-        border: "1px solid #CBD5E1",
+        backgroundColor: bg,
+        color: color,
+        border: `1px solid ${border}`,
         padding: "4px 10px",
         borderRadius: "999px",
         fontSize: "12px",
@@ -157,7 +196,6 @@ const Adoptions = () => {
   const [selectedAdoption, setSelectedAdoption] = useState<Record<string, unknown> | null>(null);
   const [candidateScores, setCandidateScores] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadingAgreement, setUploadingAgreement] = useState(false);
 
   // Forms
   const [newAppForm, setNewAppForm] = useState({
@@ -172,8 +210,8 @@ const Adoptions = () => {
 
   const [scheduleForm, setScheduleForm] = useState({
     date: "",
+    time: "10:00",
     notes: "",
-    visitType: "home_check" as "home_check" | "interview",
   });
 
   const [scoreForm, setScoreForm] = useState<AdoptionScoreCreatePayload>({
@@ -281,20 +319,82 @@ const Adoptions = () => {
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAdoption?.id) return;
+    const appId = String(selectedAdoption.id);
+
     try {
       setIsSubmitting(true);
-      const targetStatus = scheduleForm.visitType || "home_check";
-      await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
-        status: targetStatus,
-        home_inspection_scheduled_at: scheduleForm.date ? new Date(scheduleForm.date).toISOString() : null,
-        home_inspection_notes: `${targetStatus === "interview" ? "Meet & Greet Visit: " : "Home Inspection: "}${scheduleForm.notes || ""}`,
+      const d = scheduleForm.date;
+      const t = scheduleForm.time || "10:00";
+      let combinedDateTime: string | null = null;
+      if (d) {
+        const timeStr = t.length === 5 ? `${t}:00` : t;
+        const parsed = new Date(`${d}T${timeStr}`);
+        if (!isNaN(parsed.getTime())) {
+          combinedDateTime = parsed.toISOString();
+        }
+      }
+
+      if (!combinedDateTime) {
+        addToast("Please select a valid date and time for the home visit.", "error");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const notes = scheduleForm.notes?.trim()
+        ? `Home Inspection: ${scheduleForm.notes.trim()}`
+        : "Home Inspection Scheduled";
+
+      // 1. Transition application status from interview -> home_check via backend status API
+      await adoptionService.updateAdoptionStatus(
+        appId,
+        "home_check",
+        selectedAdoption.adopter_id as string | undefined,
+        selectedAdoption.petName as string | undefined
+      );
+
+      // 2. Update scheduled date/time and inspection notes on backend record
+      await adoptionService.updateAdoptionDetails(appId, {
+        status: "home_check",
+        home_inspection_scheduled_at: combinedDateTime,
+        home_inspection_notes: notes,
       });
-      addToast(`${targetStatus === "interview" ? "Meet-and-Greet" : "Home verification"} visit scheduled successfully!`, "success");
+
+      addToast("Home verification visit scheduled successfully!", "success");
       setIsScheduleModalOpen(false);
-      fetchAdoptions();
+      await fetchAdoptions();
+
+      // Refresh currently selected adoption in review modal so UI immediately displays Home Check stage
+      const updatedRow = await adoptionService.getAdoptionById(appId);
+      if (updatedRow) {
+        setSelectedAdoption(updatedRow);
+      }
+
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to schedule visit.", "error");
+      const errorMsg = extractErrorMessage(err, "Failed to schedule visit.");
+      addToast(errorMsg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCompleteInterview = async (appId: string) => {
+    try {
+      setIsSubmitting(true);
+      await adoptionService.updateAdoptionDetails(appId, {
+        interview_completed_at: new Date().toISOString(),
+        interview_notes: "Applicant interview call completed.",
+      });
+      addToast("Interview completed successfully!", "success");
+      await fetchAdoptions();
+      const updatedRow = await adoptionService.getAdoptionById(appId);
+      if (updatedRow) {
+        setSelectedAdoption(updatedRow);
+      }
+      notifyDataChanged();
+    } catch (err: any) {
+      const errorMsg = extractErrorMessage(err, "Failed to complete interview.");
+      addToast(errorMsg, "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -334,8 +434,29 @@ const Adoptions = () => {
   };
 
   const handleStatusChange = async (appId: string, newStatus: string) => {
+    const targetApp = adoptions.find((a) => String(a.id) === appId);
+    const currentStatus = String(targetApp?.status || selectedAdoption?.status || "").toLowerCase();
+
+    // Valid OpenAPI transition pipeline sequence
+    const validTransitions: Record<string, string[]> = {
+      submitted: ["screening", "rejected"],
+      screening: ["interview", "rejected"],
+      interview: ["home_check", "rejected"],
+      home_check: ["approved", "rejected"],
+      approved: ["completed", "rejected"],
+      vetting: ["screening", "interview", "rejected"],
+    };
+
+    const allowed = validTransitions[currentStatus];
+    if (allowed && !allowed.includes(newStatus)) {
+      addToast(
+        `Cannot transition application from '${currentStatus || "unknown"}' to '${newStatus}'. Please follow the backend adoption pipeline sequence.`,
+        "error"
+      );
+      return;
+    }
+
     if (newStatus === "approved") {
-      const targetApp = adoptions.find((a) => String(a.id) === appId);
       const targetDogId = String(targetApp?.dog_id || targetApp?.petId || "");
       if (targetDogId) {
         const existingClaimed = adoptions.find(
@@ -357,7 +478,7 @@ const Adoptions = () => {
     try {
       setIsSubmitting(true);
       await adoptionService.updateAdoptionStatus(appId, newStatus);
-      addToast(`Adoption application successfully transitioned to ${newStatus.toUpperCase()}!`, "success");
+      addToast(`Adoption application successfully transitioned to ${newStatus.toUpperCase().replace("_", " ")}!`, "success");
       await fetchAdoptions();
       notifyDataChanged();
       setSelectedAdoption((prev) => {
@@ -372,6 +493,7 @@ const Adoptions = () => {
     } catch (err: any) {
       const msg = err?.response?.data?.error?.message || err?.response?.data?.detail || err?.message || "Failed to update application status.";
       addToast(`⚠️ ${msg}`, "error");
+      await fetchAdoptions();
     } finally {
       setIsSubmitting(false);
     }
@@ -439,31 +561,6 @@ const Adoptions = () => {
       addToast(err?.response?.data?.detail || "Failed to delete record.", "error");
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleUploadAgreement = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedAdoption?.id) return;
-    try {
-      setUploadingAgreement(true);
-      const agreementUrl = await storageService.uploadFile(file, {
-        folder: "agreements",
-        entity_type: "adoption_agreement",
-        entity_id: String(selectedAdoption.id),
-      });
-      if (agreementUrl) {
-        await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
-          adoption_agreement_url: agreementUrl,
-        });
-        setSelectedAdoption((prev) => (prev ? { ...prev, adoption_agreement_url: agreementUrl } : prev));
-        addToast("Legal Adoption Agreement document uploaded & linked successfully!", "success");
-        fetchAdoptions();
-      }
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || err?.message || "Failed to upload adoption agreement document.", "error");
-    } finally {
-      setUploadingAgreement(false);
     }
   };
 
@@ -757,31 +854,92 @@ const Adoptions = () => {
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveMenuId(null);
-                            setSelectedAdoption(row);
-                            setIsScheduleModalOpen(true);
-                          }}
-                          style={menuItemStyle}
-                        >
-                          <FaHome style={{ marginRight: "8px", color: "#64748B" }} /> Visit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveMenuId(null);
-                            setSelectedAdoption(row);
-                            setIsScoreModalOpen(true);
-                          }}
-                          style={menuItemStyle}
-                        >
-                          <FaStar style={{ marginRight: "8px", color: "#64748B" }} /> Score
-                        </button>
-                        {statusStr !== "approved" && statusStr !== "completed" && statusStr !== "rejected" && (
+                        {statusStr === "submitted" && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                              void handleStatusChange(rowId, "screening");
+                            }}
+                            style={menuItemStyle}
+                          >
+                            <FaUserCheck style={{ marginRight: "8px", color: "#2563EB" }} /> Start Screening
+                          </button>
+                        )}
+
+                        {statusStr === "screening" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(null);
+                                void handleStatusChange(rowId, "interview");
+                              }}
+                              style={menuItemStyle}
+                            >
+                              <FaUserCheck style={{ marginRight: "8px", color: "#2563EB" }} /> Start Interview
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(null);
+                                setSelectedAdoption(row);
+                                setIsScoreModalOpen(true);
+                              }}
+                              style={menuItemStyle}
+                            >
+                              <FaStar style={{ marginRight: "8px", color: "#64748B" }} /> Score
+                            </button>
+                          </>
+                        )}
+
+                        {statusStr === "interview" && (
+                          <>
+                            {!row.interview_completed_at ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveMenuId(null);
+                                  void handleCompleteInterview(rowId);
+                                }}
+                                style={menuItemStyle}
+                              >
+                                <FaUserCheck style={{ marginRight: "8px", color: "#2563EB" }} /> Complete Interview
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveMenuId(null);
+                                  setSelectedAdoption(row);
+                                  setIsScheduleModalOpen(true);
+                                }}
+                                style={menuItemStyle}
+                              >
+                                <FaHome style={{ marginRight: "8px", color: "#10B981" }} /> Schedule Home Visit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(null);
+                                setSelectedAdoption(row);
+                                setIsScoreModalOpen(true);
+                              }}
+                              style={menuItemStyle}
+                            >
+                              <FaStar style={{ marginRight: "8px", color: "#64748B" }} /> Score
+                            </button>
+                          </>
+                        )}
+
+                        {statusStr === "home_check" && (
                           <>
                             <button
                               type="button"
@@ -792,21 +950,23 @@ const Adoptions = () => {
                               }}
                               style={{ ...menuItemStyle, color: "#059669" }}
                             >
-                              Approve
+                              <FaCheckDouble style={{ marginRight: "8px", color: "#059669" }} /> Approve
                             </button>
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setActiveMenuId(null);
-                                void handleStatusChange(rowId, "rejected");
+                                setSelectedAdoption(row);
+                                setIsScoreModalOpen(true);
                               }}
-                              style={{ ...menuItemStyle, color: "#DC2626" }}
+                              style={menuItemStyle}
                             >
-                              Reject
+                              <FaStar style={{ marginRight: "8px", color: "#64748B" }} /> Score
                             </button>
                           </>
                         )}
+
                         {statusStr === "approved" && (
                           <button
                             type="button"
@@ -818,7 +978,21 @@ const Adoptions = () => {
                             }}
                             style={menuItemStyle}
                           >
-                            Finalize
+                            <FaCheckDouble style={{ marginRight: "8px", color: "#6366F1" }} /> Finalize
+                          </button>
+                        )}
+
+                        {statusStr !== "approved" && statusStr !== "completed" && statusStr !== "rejected" && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                              void handleStatusChange(rowId, "rejected");
+                            }}
+                            style={{ ...menuItemStyle, color: "#DC2626" }}
+                          >
+                            Reject
                           </button>
                         )}
                       </div>
@@ -956,28 +1130,22 @@ const Adoptions = () => {
         </form>
       </Modal>
 
-      {/* Schedule Visit Modal */}
-      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Verification Visit / Meet & Greet">
+      {/* Schedule Home Visit Modal */}
+      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Visit (Home Verification)">
         <form onSubmit={handleScheduleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
-            Schedule an upcoming visit or interview for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
+            Schedule a home visit (home verification / inspection) for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
           </p>
 
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Visit / Session Type *</label>
-            <select
-              value={scheduleForm.visitType}
-              onChange={(e) => setScheduleForm({ ...scheduleForm, visitType: e.target.value as "home_check" | "interview" })}
-              style={inputStyle}
-            >
-              <option value="home_check">🏠 Home Verification Visit (Home Inspection)</option>
-              <option value="interview">🐕 Meet &amp; Greet Session (Shelter Interview)</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Scheduled Date &amp; Time *</label>
-            <input type="datetime-local" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Date *</label>
+              <input type="date" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Time *</label>
+              <input type="time" required value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} style={inputStyle} />
+            </div>
           </div>
           <div>
             <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Session Notes (Optional)</label>
@@ -1111,23 +1279,37 @@ const Adoptions = () => {
               </div>
 
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Rescue Dog Identity &amp; Match</div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
-                  {String(selectedAdoption.petName)} ({String(selectedAdoption.petBreed || "Canine")})
-                </div>
-                <div style={{ marginTop: "6px" }}>
-                  <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, display: "block", marginBottom: "2px" }}>Re-match / Select Dog:</label>
-                  <select
-                    value={String(selectedAdoption.dog_id || selectedAdoption.petId || "")}
-                    onChange={(e) => void handleDogMatchChange(e.target.value)}
-                    style={{ ...inputStyle, padding: "4px 8px", fontSize: "12px" }}
-                  >
-                    <option value="">Select candidate dog...</option>
-                    {dogs.map((d) => (
-                      <option key={d.id} value={d.id}>{d.label}</option>
-                    ))}
-                  </select>
-                </div>
+                {["submitted", "screening", "vetting"].includes(String(selectedAdoption.status || "").toLowerCase()) ? (
+                  <>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Rescue Dog Identity &amp; Match</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
+                      {String(selectedAdoption.petName)} ({String(selectedAdoption.petBreed || "Canine")})
+                    </div>
+                    <div style={{ marginTop: "6px" }}>
+                      <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, display: "block", marginBottom: "2px" }}>Re-match / Select Dog:</label>
+                      <select
+                        value={String(selectedAdoption.dog_id || selectedAdoption.petId || "")}
+                        onChange={(e) => void handleDogMatchChange(e.target.value)}
+                        style={{ ...inputStyle, padding: "4px 8px", fontSize: "12px" }}
+                      >
+                        <option value="">Select candidate dog...</option>
+                        {dogs.map((d) => (
+                          <option key={d.id} value={d.id}>{d.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Selected Dog</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
+                      {String(selectedAdoption.petName)} &bull; {String(selectedAdoption.petBreed || "Canine")}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                      Dog ID: <span style={{ fontFamily: "monospace" }}>{String(selectedAdoption.dog_id || selectedAdoption.petId || "—").slice(0, 8).toUpperCase()}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1158,33 +1340,19 @@ const Adoptions = () => {
               </div>
             </div>
 
-            {/* Adoption Legal Agreement Document Section */}
-            <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "6px" }}>
-                📄 Adoption Legal Contract &amp; Agreement
+            {Boolean(selectedAdoption.interview_completed_at) && (
+              <div style={{ background: "#F0FDF4", padding: "12px", borderRadius: "8px", border: "1px solid #BBF7D0" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#166534", textTransform: "uppercase" }}>Applicant Interview Record</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#14532D", marginTop: "4px" }}>
+                  ✓ Interview Completed: {formatDateTime(String(selectedAdoption.interview_completed_at))}
+                </div>
+                {Boolean(selectedAdoption.interview_notes) && String(selectedAdoption.interview_notes) !== "—" && (
+                  <div style={{ fontSize: "12px", color: "#15803D", marginTop: "4px" }}>
+                    Notes: {String(selectedAdoption.interview_notes)}
+                  </div>
+                )}
               </div>
-              {selectedAdoption.adoption_agreement_url ? (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <a
-                    href={String(selectedAdoption.adoption_agreement_url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: "#2563EB", fontWeight: 600, fontSize: "13px", textDecoration: "underline" }}
-                  >
-                    View Signed Adoption Contract (PDF / Doc)
-                  </a>
-                  <span style={{ fontSize: "11px", color: "#059669", fontWeight: 700 }}>✓ Document Attached</span>
-                </div>
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-                  <span style={{ fontSize: "12px", color: "#64748B" }}>No legal agreement contract attached yet.</span>
-                  <label style={{ padding: "6px 12px", borderRadius: "6px", background: "#2563EB", color: "#FFF", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
-                    {uploadingAgreement ? "Uploading..." : "Upload Agreement PDF"}
-                    <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={handleUploadAgreement} disabled={uploadingAgreement} style={{ display: "none" }} />
-                  </label>
-                </div>
-              )}
-            </div>
+            )}
 
             {Boolean(selectedAdoption.home_inspection_scheduled_at) && String(selectedAdoption.status).toLowerCase() !== "submitted" && (
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
@@ -1213,26 +1381,105 @@ const Adoptions = () => {
               </div>
             )}
 
-            {String(selectedAdoption.status).toLowerCase() !== "approved" && String(selectedAdoption.status).toLowerCase() !== "completed" && String(selectedAdoption.status).toLowerCase() !== "rejected" && (
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => void handleStatusChange(String(selectedAdoption.id), "approved")}
-                  style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
-                >
-                  {isSubmitting ? "Approving..." : "Approve"}
-                </button>
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => void handleStatusChange(String(selectedAdoption.id), "rejected")}
-                  style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
-                >
-                  {isSubmitting ? "Rejecting..." : "Reject"}
-                </button>
-              </div>
-            )}
+            {(() => {
+              const currentStatus = String(selectedAdoption.status || "").toLowerCase();
+              if (currentStatus === "completed" || currentStatus === "rejected") {
+                return null;
+              }
+
+              return (
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap" }}>
+                  {currentStatus === "submitted" && (
+                    <Can permission={["edit_adoptions", "create_adoptions", "manage_adoptions", "approve_adoptions"]}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => void handleStatusChange(String(selectedAdoption.id), "screening")}
+                        style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                      >
+                        {isSubmitting ? "Processing..." : "Start Screening"}
+                      </button>
+                    </Can>
+                  )}
+                  {currentStatus === "screening" && (
+                    <Can permission={["edit_adoptions", "manage_adoptions", "approve_adoptions"]}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => void handleStatusChange(String(selectedAdoption.id), "interview")}
+                        style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                      >
+                        {isSubmitting ? "Processing..." : "Start Interview"}
+                      </button>
+                    </Can>
+                  )}
+                  {currentStatus === "interview" && (
+                    <Can permission={["edit_adoptions", "manage_adoptions", "approve_adoptions"]}>
+                      {!selectedAdoption.interview_completed_at ? (
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => void handleCompleteInterview(String(selectedAdoption.id))}
+                          style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                        >
+                          {isSubmitting ? "Completing..." : "Complete Interview"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => {
+                            setIsScheduleModalOpen(true);
+                          }}
+                          style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                        >
+                          Schedule Home Visit
+                        </button>
+                      )}
+                    </Can>
+                  )}
+                  {currentStatus === "home_check" && (
+                    <Can permission={["approve_adoptions", "manage_adoptions"]}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => void handleStatusChange(String(selectedAdoption.id), "approved")}
+                        style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                      >
+                        {isSubmitting ? "Approving..." : "Approve Application"}
+                      </button>
+                    </Can>
+                  )}
+                  {currentStatus === "approved" && (
+                    <Can permission={["approve_adoptions", "manage_adoptions"]}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          setIsDetailsModalOpen(false);
+                          setIsCompleteModalOpen(true);
+                        }}
+                        style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                      >
+                        Finalize Adoption &amp; Create Companion Pet
+                      </button>
+                    </Can>
+                  )}
+                  {currentStatus !== "approved" && (
+                    <Can permission={["edit_adoptions", "manage_adoptions", "approve_adoptions"]}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => void handleStatusChange(String(selectedAdoption.id), "rejected")}
+                        style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
+                      >
+                        {isSubmitting ? "Rejecting..." : "Reject"}
+                      </button>
+                    </Can>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </Modal>

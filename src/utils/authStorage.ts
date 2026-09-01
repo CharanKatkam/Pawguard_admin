@@ -183,7 +183,7 @@ export interface AuthData {
 /**
  * Persist user session metadata required for UI role context.
  */
-export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
+export const setAuthData = (data: AuthData, rememberMe: boolean, isInitialLogin = true): void => {
   setRememberMe(rememberMe);
 
   if (data.user) {
@@ -195,7 +195,9 @@ export const setAuthData = (data: AuthData, rememberMe: boolean): void => {
   if (data.refresh_token) {
     write(AUTH_STORAGE_KEYS.refreshToken, data.refresh_token);
   }
-  updateLastActivity();
+  if (isInitialLogin || !getLastActivity()) {
+    updateLastActivity();
+  }
 };
 
 /** Remove session user metadata from BOTH storages (leaves remember-email preference). */
