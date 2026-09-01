@@ -667,22 +667,44 @@ const Pets = () => {
     try {
       setQrLoading(true);
 
-      // Check session or local storage for raw_token / QR image generated during provisioning
-      const possibleKeys = [
-        `pawguard_safety_tag_token_${id}`,
-        `pawguard_safety_tag_token_${dog?.id}`,
-        `pawguard_safety_tag_token_${(dog as any)?.dog_id}`,
-        `pawguard_safety_tag_token_${dog?.registration_number}`,
-      ].filter(Boolean);
-
       let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
-      if (!savedToken) {
-        for (const k of possibleKeys) {
-          const t = localStorage.getItem(k) || sessionStorage.getItem(k);
-          if (t) {
-            savedToken = t;
-            break;
+
+      // Fetch authoritative metadata from GET /api/v1/dogs/{dog_id}/safety-tag FIRST
+      try {
+        const metaRes = await petService.getSafetyTagMetadata(id);
+        const metaData = metaRes?.data || metaRes;
+        if (metaData) {
+          setTagMetadata(metaData);
+          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
+          if (!isActive) {
+            setTagStatus("INACTIVE");
+            setRawToken(null);
+            setQrImageUrl(null);
+            setQrBlob(null);
+            return;
           }
+          setTagStatus("ACTIVE");
+          if (metaData.raw_token) {
+            savedToken = metaData.raw_token;
+          }
+        }
+      } catch (metaErr: unknown) {
+        const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
+        const status = e?.response?.status;
+        const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
+
+        if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
+          setTagStatus("INACTIVE");
+          setQrError(null);
+          setRawToken(null);
+          setQrImageUrl(null);
+          setQrBlob(null);
+          return;
+        } else if (status === 403) {
+          setQrError("Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.");
+          return;
+        } else if (apiMsg) {
+          setQrError(String(apiMsg));
         }
       }
 
@@ -692,8 +714,6 @@ const Pets = () => {
         const blob = await generateQrBlob(savedToken);
         setQrImageUrl(qrUrl);
         setQrBlob(blob);
-        localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
-        setTagStatus("ACTIVE");
       } else {
         // Staff QR Image Fallback using backend GET /api/v1/dogs/{dog_id}/qr-image
         try {
@@ -705,34 +725,6 @@ const Pets = () => {
           }
         } catch {
           /* unprovisioned state handled */
-        }
-      }
-
-      // Fetch metadata from GET /api/v1/dogs/{dog_id}/safety-tag
-      try {
-        const metaRes = await petService.getSafetyTagMetadata(id);
-        const metaData = metaRes?.data || metaRes;
-        if (metaData) {
-          setTagMetadata(metaData);
-          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
-          if (isActive) {
-            setTagStatus("ACTIVE");
-          } else if (metaData.is_active === false || String(metaData.status || "").toUpperCase() === "INACTIVE") {
-            setTagStatus("INACTIVE");
-          }
-        }
-      } catch (metaErr: unknown) {
-        const e = metaErr as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } } };
-        const status = e?.response?.status;
-        const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
-
-        if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-          setTagStatus("INACTIVE");
-          setQrError(null);
-        } else if (status === 403) {
-          setQrError("Unauthorized: Your role does not have permission to access Safety Tags for shelter animals.");
-        } else if (apiMsg) {
-          setQrError(String(apiMsg));
         }
       }
     } catch (err: unknown) {
@@ -803,9 +795,20 @@ const Pets = () => {
     setIsProvisioning(true);
     setQrError(null);
 
+    const isCompanion = Boolean((qrDog as any)?.is_companion || (qrDog as any)?.companion_pet_id || (qrDog as any)?.type === "companion");
+
     try {
-      // POST /api/v1/dogs/{dog_id}/safety-tag (or ?force_reissue=true)
-      const res = await petService.provisionSafetyTag(id, forceReissue);
+      // Provision via POST /dogs/{id}/safety-tag or POST /companion-pets/{id}/safety-tag
+      let res: any = null;
+      if (isCompanion) {
+        res = await petService.provisionCompanionPetSafetyTag(id, forceReissue);
+      } else {
+        try {
+          res = await petService.provisionSafetyTag(id, forceReissue);
+        } catch {
+          res = await petService.provisionCompanionPetSafetyTag(id, forceReissue);
+        }
+      }
       const data = res?.data || res || {};
       const token = data.raw_token || data.token || data.rawToken;
 
@@ -814,23 +817,9 @@ const Pets = () => {
       }
 
       setRawToken(token);
-      const keysToStore = [
-        id,
-        qrDog?.id,
-        (qrDog as any)?.dog_id,
-        (qrDog as any)?.original_dog_id,
-        qrDog?.registration_number,
-      ].filter(Boolean);
-
-      for (const k of keysToStore) {
-        sessionStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
-        localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
-      }
-
       const qrDataUrl = await generateQrDataUrl(token);
       const blob = await generateQrBlob(token);
 
-      localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrDataUrl);
       setQrImageUrl(qrDataUrl);
       setQrBlob(blob);
       setTagStatus("ACTIVE");
@@ -859,16 +848,23 @@ const Pets = () => {
     const id = dogId(qrDog);
     if (!id) return;
     setIsDeactivating(true);
+    const isCompanion = Boolean((qrDog as any)?.is_companion || (qrDog as any)?.companion_pet_id || (qrDog as any)?.type === "companion");
     try {
-      const res = await petService.revokeSafetyTag(id);
+      let res: any = null;
+      if (isCompanion) {
+        res = await petService.revokeCompanionPetSafetyTag(id);
+      } else {
+        try {
+          res = await petService.revokeSafetyTag(id);
+        } catch {
+          res = await petService.revokeCompanionPetSafetyTag(id);
+        }
+      }
       addToast(res?.message || `Safety Tag deactivated for pet ${qrDog.name || id}.`, "success");
       setTagStatus("INACTIVE");
       setRawToken(null);
       setQrImageUrl(null);
       setQrBlob(null);
-      sessionStorage.removeItem(`pawguard_safety_tag_token_${id}`);
-      localStorage.removeItem(`pawguard_safety_tag_token_${id}`);
-      localStorage.removeItem(`pawguard_safety_tag_qr_${id}`);
       setIsDeactivateConfirmOpen(false);
       notifyDataChanged();
     } catch (err: unknown) {
@@ -2165,16 +2161,11 @@ const Pets = () => {
                         return;
                       }
                       try {
-                        const id = dogId(qrDog);
                         const qrUrl = await generateQrDataUrl(clean);
                         const blob = await generateQrBlob(clean);
                         setRawToken(clean);
                         setQrImageUrl(qrUrl);
                         setQrBlob(blob);
-                        if (id) {
-                          localStorage.setItem(`pawguard_safety_tag_token_${id}`, clean);
-                          localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
-                        }
                         addToast("Active Safety Tag QR loaded successfully!", "success");
                       } catch {
                         addToast("Failed to render QR for entered token.", "error");

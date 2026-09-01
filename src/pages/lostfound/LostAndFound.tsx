@@ -30,6 +30,7 @@ import lostFoundService, {
 import dogService from "../../services/dogService";
 import petService from "../../services/petService";
 import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
+import QrScannerModal from "../../components/dashboard/QrScannerModal";
 
 const PAGE_SIZE = 8;
 
@@ -433,6 +434,9 @@ const LostAndFound = () => {
   const [actionBusy, setActionBusy] = useState(false);
   const [claimNotes, setClaimNotes] = useState("");
   const [reviewNotes, setReviewNotes] = useState("");
+
+  const [isVerifyScannerOpen, setIsVerifyScannerOpen] = useState(false);
+  const [verifyExpectedAnimalId, setVerifyExpectedAnimalId] = useState<string | undefined>(undefined);
 
   const [formData, setFormData] = useState({
     report_type: "lost" as ReportKind,
@@ -1217,14 +1221,15 @@ const LostAndFound = () => {
           </p>
         </div>
 
-        <Can permission="create_lost_found">
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button
+            type="button"
             onClick={() => {
-              resetForm();
-              setIsAddModalOpen(true);
+              setVerifyExpectedAnimalId(undefined);
+              setIsVerifyScannerOpen(true);
             }}
             style={{
-              background: "#2563EB",
+              background: "#0F172A",
               color: "#FFFFFF",
               border: "none",
               borderRadius: "10px",
@@ -1237,10 +1242,34 @@ const LostAndFound = () => {
               cursor: "pointer",
             }}
           >
-            <FaPlus size={14} />
-            <span>New Report</span>
+            <FaQrcode size={14} />
+            <span>Verify Safety Tag</span>
           </button>
-        </Can>
+          <Can permission="create_lost_found">
+            <button
+              onClick={() => {
+                resetForm();
+                setIsAddModalOpen(true);
+              }}
+              style={{
+                background: "#2563EB",
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: "10px",
+                padding: "10px 18px",
+                fontSize: "14px",
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                cursor: "pointer",
+              }}
+            >
+              <FaPlus size={14} />
+              <span>New Report</span>
+            </button>
+          </Can>
+        </div>
       </div>
 
       <div
@@ -1633,6 +1662,29 @@ const LostAndFound = () => {
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    const animalId = row.companion_pet_id || (row as any).pet_id || (row as any).dog_id;
+                    setVerifyExpectedAnimalId(animalId ? String(animalId) : undefined);
+                    setIsVerifyScannerOpen(true);
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "5px 9px",
+                    borderRadius: "6px",
+                    border: "1px solid #38BDF8",
+                    background: "#F0F9FF",
+                    color: "#0369A1",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  <FaQrcode size={12} /> Verify Tag
+                </button>
+                <button
+                  type="button"
                   onClick={() => openMatches(row)}
                   style={{
                     display: "inline-flex",
@@ -1886,20 +1938,45 @@ const LostAndFound = () => {
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
                   <FaQrcode color="#6366F1" size={16} /> Dog Safety Tag &amp; QR Identifier
                 </span>
-                {tagData && (
-                  <span
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const animalId = selectedReport.companion_pet_id || (selectedReport as any).pet_id || (selectedReport as any).dog_id;
+                      setVerifyExpectedAnimalId(animalId ? String(animalId) : undefined);
+                      setIsVerifyScannerOpen(true);
+                    }}
                     style={{
-                      padding: "2px 8px",
-                      borderRadius: "12px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                      border: "none",
+                      background: "#2563EB",
+                      color: "#FFFFFF",
                       fontSize: "11px",
-                      fontWeight: 700,
-                      background: tagData.is_active ? "#ECFDF5" : "#FEF2F2",
-                      color: tagData.is_active ? "#059669" : "#DC2626",
+                      fontWeight: 600,
+                      cursor: "pointer",
                     }}
                   >
-                    {tagData.is_active ? "● ACTIVE SAFETY TAG" : "○ INACTIVE / REVOKED"}
-                  </span>
-                )}
+                    <FaQrcode size={11} /> Verify via Scanner
+                  </button>
+                  {tagData && (
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: "12px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        background: tagData.is_active ? "#ECFDF5" : "#FEF2F2",
+                        color: tagData.is_active ? "#059669" : "#DC2626",
+                      }}
+                    >
+                      {tagData.is_active ? "● ACTIVE SAFETY TAG" : "○ INACTIVE / REVOKED"}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {tagLoading ? (
@@ -2895,6 +2972,12 @@ const LostAndFound = () => {
           </div>
         </div>
       </Modal>
+
+      <QrScannerModal
+        isOpen={isVerifyScannerOpen}
+        onClose={() => setIsVerifyScannerOpen(false)}
+        expectedAnimalId={verifyExpectedAnimalId}
+      />
     </div>
   );
 };

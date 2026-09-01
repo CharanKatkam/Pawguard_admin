@@ -353,16 +353,24 @@ const RescueAgentDashboard = () => {
 
       const newDogId = (petRes as any)?.id || (petRes as any)?.dog_id || (petRes as any)?.data?.id;
 
-      // 2. Reusing EXISTING Safety Tag / QR provisioning API
+      // 2. Provision Safety Tag using canonical dog_id
+      let tagProvisioned = false;
       if (newDogId) {
         try {
           await petService.provisionSafetyTag(String(newDogId));
+          tagProvisioned = true;
         } catch {
-          // Safety tag best effort if auto-provisioned
+          tagProvisioned = false;
         }
       }
 
-      addToast(`Rescued Dog Registered! Backend Dog UUID: ${newDogId || "Generated"}. Safety Tag & QR linked.`, "success");
+      if (tagProvisioned) {
+        addToast(`Rescued Dog Registered & Safety Tag Provisioned! Backend Dog UUID: ${newDogId}`, "success");
+      } else if (newDogId) {
+        addToast(`⚠️ Rescued Dog Registered (Backend Dog UUID: ${newDogId}), but Safety Tag provisioning failed. Please provision tag manually from Pets module.`, "info");
+      } else {
+        addToast("Rescued Dog Registered successfully!", "success");
+      }
       setIsDogModalOpen(false);
       setRegisterDogForm({ case_id: "", name: "", breed: "Stray Dog", gender: "male", estimated_age: "2 years", notes: "" });
       fetchAssignedCases();

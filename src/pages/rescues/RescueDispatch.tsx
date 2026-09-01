@@ -17,6 +17,7 @@ import {
 import rescueService from "../../services/rescueService";
 import userService from "../../services/userService";
 import vehicleService from "../../services/vehicleService";
+import petService from "../../services/petService";
 import { rescueStatusBadge, dispatchStage } from "../../utils/rescueStatus.tsx";
 import { notifyDataChanged, useDataSync } from "../../utils/dataSync";
 import { normalizeRole, getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
@@ -317,8 +318,21 @@ const RescueDispatch = () => {
   // Status Change Action (Start, En Route, Arrived, Complete)
   const handleStatusChange = async (dispatchId: string, nextStatus: string, successMessage: string) => {
     try {
-      await rescueService.updateDispatchStatus(dispatchId, nextStatus);
-      addToast(successMessage, "success");
+      const res = await rescueService.updateDispatchStatus(dispatchId, nextStatus);
+      const resObj = res?.data || res || {};
+      const dogId = resObj.dog_id || resObj.id || resObj.pet_id;
+
+      if (dogId && (nextStatus === "completed" || nextStatus === "admitted" || nextStatus === "rescued")) {
+        try {
+          await petService.provisionSafetyTag(String(dogId));
+          addToast(`${successMessage} Safety Tag provisioned for Dog UUID: ${dogId}.`, "success");
+        } catch {
+          addToast(`⚠️ ${successMessage} (Safety Tag provisioning pending for Dog UUID: ${dogId}).`, "info");
+        }
+      } else {
+        addToast(successMessage, "success");
+      }
+
       fetchAll();
       notifyDataChanged();
     } catch (err: unknown) {

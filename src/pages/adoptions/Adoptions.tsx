@@ -385,8 +385,22 @@ const Adoptions = () => {
       // 1. Update status to completed
       await adoptionService.updateAdoptionStatus(String(selectedAdoption.id), "completed");
       // 2. Create Companion Pet
-      await adoptionService.createCompanionPetFromAdoption(String(selectedAdoption.id));
-      // 3. Update Dog Master Profile status to adopted
+      const compRes = await adoptionService.createCompanionPetFromAdoption(String(selectedAdoption.id));
+      const compData = compRes?.data || compRes || {};
+      const compPetId = compData.id || compData.pet_id || compData.companion_pet_id;
+
+      // 3. Provision Companion Pet Safety Tag if companion pet ID returned
+      let tagProvisioned = false;
+      if (compPetId) {
+        try {
+          await petService.provisionCompanionPetSafetyTag(String(compPetId));
+          tagProvisioned = true;
+        } catch {
+          tagProvisioned = false;
+        }
+      }
+
+      // 4. Update Dog Master Profile status to adopted
       if (petId) {
         await petService.updatePet(petId, {
           status: "adopted",
@@ -394,7 +408,14 @@ const Adoptions = () => {
           adoption_status: "Adopted",
         }).catch(() => null);
       }
-      addToast("Adoption completed! Dog Master Profile updated & registered as Companion Pet.", "success");
+
+      if (tagProvisioned) {
+        addToast("Adoption completed! Registered as Companion Pet with Safety Tag provisioned.", "success");
+      } else if (compPetId) {
+        addToast("⚠️ Adoption completed & Companion Pet registered, but Safety Tag auto-provisioning is pending.", "info");
+      } else {
+        addToast("Adoption completed successfully!", "success");
+      }
       setIsCompleteModalOpen(false);
       fetchAdoptions();
       notifyDataChanged();

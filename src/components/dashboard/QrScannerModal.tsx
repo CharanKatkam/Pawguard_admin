@@ -22,6 +22,7 @@ import { useToast } from "../../context/ToastContext";
 interface QrScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
+  expectedAnimalId?: string;
 }
 
 const extractTokenFromInput = (input: string): string => {
@@ -39,7 +40,7 @@ const extractTokenFromInput = (input: string): string => {
   return trimmed;
 };
 
-const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose }) => {
+const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose, expectedAnimalId }) => {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const currentRole = getCurrentUserRole();
@@ -87,57 +88,107 @@ const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose }) => {
       try {
         let petData: Record<string, unknown> | null = null;
         let tagMeta: Record<string, unknown> | null = null;
+        let isTagRevoked = false;
 
-        // 1. Try scanSafetyTag (POST /companion-pets/safety-tag/scan)
-        try {
-          const scanRes = await petService.scanSafetyTag(token);
-          const resObj = scanRes?.data || scanRes;
-          if (resObj && (resObj.id || resObj.name || resObj.registration_number || resObj.pet_id)) {
-            petData = resObj;
-            tagMeta = {
-              is_active: resObj.is_active !== false,
-              token_prefix: resObj.token_prefix || token.slice(0, 8),
-              scan_count: resObj.scan_count || resObj.scans_count || 1,
-              last_scanned_at: resObj.last_scanned_at || new Date().toISOString(),
-            };
-          }
-        } catch {
-          // Ignore and proceed to fallback
-        }
+        const upperToken = token.toUpperCase();
+        const isDogToken = upperToken.startsWith("DGD");
+        const isCompanionToken = upperToken.startsWith("CMP") || upperToken.startsWith("PET");
 
-        // 2. Try public dog scan (GET /dogs/{identifier}/public-scan) if not resolved
-        if (!petData) {
+        // 1. Primary Dog Safety Tag Resolver (for DGD or generic tokens)
+        if (isDogToken || (!isCompanionToken && !petData)) {
           try {
-            const pubRes = await petService.getPublicDogScan(token);
-            const pubData = pubRes?.data || pubRes;
-            if (pubData && (pubData.id || pubData.name || pubData.registration_number)) {
-              petData = pubData;
-              tagMeta = {
-                is_active: pubData.is_active !== false,
-                token_prefix: pubData.token_prefix || token.slice(0, 8),
-                scan_count: pubData.scan_count || pubData.scans_count || 1,
-                last_scanned_at: pubData.last_scanned_at || new Date().toISOString(),
-              };
+            const resolveRes = await petService.resolveDogSafetyTag(token);
+            const resObj = resolveRes?.data || resolveRes;
+            const dogObj = resObj?.dog || resObj;
+            if (resObj && (resObj.id || resObj.dog_id || resObj.tag_id || dogObj.id || dogObj.name || dogObj.registration_number)) {
+              const isActive = resObj.is_active !== false && String(resObj.status || "").toUpperCase() !== "INACTIVE";
+              if (!isActive) {
+                isTagRevoked = true;
+              } else {
+                petData = {
+                  ...dogObj,
+                  id: resObj.dog_id || dogObj.id || resObj.tag_id,
+                  dog_id: resObj.dog_id || dogObj.id || resObj.tag_id,
+                  token_prefix: resObj.token_prefix || dogObj.token_prefix,
+                  scan_count: resObj.scan_count ?? dogObj.scan_count,
+                  last_scanned_at: resObj.last_scanned_at || dogObj.last_scanned_at,
+                };
+                tagMeta = {
+                  is_active: true,
+                  token_prefix: resObj.token_prefix || token.slice(0, 8),
+                  scan_count: resObj.scan_count ?? resObj.scans_count ?? 1,
+                  last_scanned_at: resObj.last_scanned_at || new Date().toISOString(),
+                };
+              }
             }
-          } catch {
-            // Ignore
+          } catch (dogErr: any) {
+            const status = dogErr?.response?.status;
+            if (status !== 404 || isDogToken) {
+              const apiMsg =
+                dogErr?.response?.data?.error?.message ||
+                dogErr?.response?.data?.detail ||
+                dogErr?.response?.data?.message ||
+                dogErr?.message;
+              if (status === 404) {
+                setError(`Dog Safety Tag token "${token}" was not found in the PawGuard database.`);
+              } else {
+                setError(apiMsg || `Backend error: Failed to resolve Dog Safety Tag token "${token}".`);
+              }
+              return;
+            }
           }
         }
 
-        // 3. Try direct pet lookup by ID/Token if not resolved
-        if (!petData) {
+        // 2. Companion Pet Safety Tag Resolver (for CMP/PET or fallback on non-DGD tokens)
+        if (!petData && !isTagRevoked && (isCompanionToken || !isDogToken)) {
           try {
-            const getRes = await petService.getPetById(token);
-            const getData = getRes?.data || getRes;
-            if (getData && (getData.id || getData.name || getData.registration_number)) {
-              petData = getData;
+            const scanRes = await petService.scanCompanionPetSafetyTag(token);
+            const resObj = scanRes?.data || scanRes;
+            if (resObj && (resObj.id || resObj.name || resObj.registration_number || resObj.pet_id)) {
+              const isActive = resObj.is_active !== false && String(resObj.status || "").toUpperCase() !== "INACTIVE";
+              if (!isActive) {
+                isTagRevoked = true;
+              } else {
+                petData = resObj;
+                tagMeta = {
+                  is_active: true,
+                  token_prefix: resObj.token_prefix || token.slice(0, 8),
+                  scan_count: resObj.scan_count || resObj.scans_count || 1,
+                  last_scanned_at: resObj.last_scanned_at || new Date().toISOString(),
+                };
+              }
             }
-          } catch {
-            // Ignore
+          } catch (compErr: any) {
+            const status = compErr?.response?.status;
+            const apiMsg =
+              compErr?.response?.data?.error?.message ||
+              compErr?.response?.data?.detail ||
+              compErr?.response?.data?.message ||
+              compErr?.message;
+            if (status === 404) {
+              setError(`Safety Tag token "${token}" was not found in the PawGuard database.`);
+            } else {
+              setError(apiMsg || `Backend error: Failed to scan Safety Tag token "${token}".`);
+            }
+            return;
           }
         }
 
-        if (petData) {
+        if (isTagRevoked) {
+          setError(`Safety Tag "${token.slice(0, 12)}..." has been REVOKED/DEACTIVATED on the backend. Public scans no longer resolve for this tag.`);
+        } else if (petData) {
+          const resolvedId = String(petData.dog_id || petData.id || petData.pet_id || "").toLowerCase();
+          const expectedId = String(expectedAnimalId || "").toLowerCase();
+
+          if (expectedId && resolvedId && resolvedId !== expectedId) {
+            setError(
+              `⚠️ CANONICAL IDENTITY MISMATCH: The scanned Safety Tag belongs to animal "${petData.name || petData.registration_number}" (${resolvedId}), which does not match the expected animal ID "${expectedId}".`
+            );
+            setScannedPet(null);
+            setScannedTagMeta(null);
+            return;
+          }
+
           setScannedPet(petData);
           setScannedTagMeta(tagMeta);
           addToast("Safety Tag scanned and verified successfully!", "success");

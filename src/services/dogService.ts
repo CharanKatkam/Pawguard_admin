@@ -85,6 +85,13 @@ export const dogService = {
     const response = await api.delete(`/dogs/${dogId}/safety-tag`);
     return response.data;
   },
+
+  // POST /dogs/safety-tag/resolve - resolve Safety Tag token to canonical dog record
+  resolveSafetyTag: async (token: string) => {
+    const clean = String(token || "").trim();
+    const response = await api.post(`/dogs/safety-tag/resolve`, { raw_token: clean, token: clean });
+    return response.data;
+  },
 };
 
 export default dogService;

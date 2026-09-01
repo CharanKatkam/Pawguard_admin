@@ -581,12 +581,7 @@ const ShelterDogs = () => {
     dog?.dog_id || dog?.id || dog?.original_dog_id || dog?.companion_pet?.original_dog_id || dog?.companion_pet_id || dog?.companion_pet?.id || "";
 
   const formatDog = (dog: any) => {
-    const id = dogId(dog);
-    const savedToken =
-      localStorage.getItem(`pawguard_safety_tag_token_${id}`) ||
-      sessionStorage.getItem(`pawguard_safety_tag_token_${id}`);
-    const savedQrUrl = localStorage.getItem(`pawguard_safety_tag_qr_${id}`);
-    const hasActiveTag = !!(savedToken || savedQrUrl || dog.safety_tag_status === "ACTIVE" || dog.safety_tag_active);
+    const hasActiveTag = !!(dog.safety_tag_status === "ACTIVE" || dog.is_safety_tag_active === true || dog.safety_tag_active === true || dog.safety_tag?.is_active === true);
 
     return {
       ...dog,
@@ -706,22 +701,29 @@ const ShelterDogs = () => {
 
     try {
       setQrLoading(true);
-      const possibleKeys = [
-        `pawguard_safety_tag_token_${id}`,
-        `pawguard_safety_tag_token_${dog?.id}`,
-        `pawguard_safety_tag_token_${(dog as any)?.dog_id}`,
-        `pawguard_safety_tag_token_${dog?.registration_number}`,
-      ].filter(Boolean);
-
       let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
-      if (!savedToken) {
-        for (const k of possibleKeys) {
-          const t = localStorage.getItem(k) || sessionStorage.getItem(k);
-          if (t) {
-            savedToken = t;
-            break;
+
+      // Fetch metadata from GET /api/v1/dogs/{dog_id}/safety-tag FIRST
+      try {
+        const metaRes = await petService.getSafetyTagMetadata(id);
+        const metaData = metaRes?.data || metaRes;
+        if (metaData) {
+          setTagMetadata(metaData);
+          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
+          if (!isActive) {
+            setTagStatus("INACTIVE");
+            setRawToken(null);
+            setQrImageUrl(null);
+            setQrBlob(null);
+            return;
+          }
+          setTagStatus("ACTIVE");
+          if (metaData.raw_token) {
+            savedToken = metaData.raw_token;
           }
         }
+      } catch {
+        /* handled */
       }
 
       if (savedToken) {
@@ -730,8 +732,6 @@ const ShelterDogs = () => {
         const blob = await generateQrBlob(savedToken);
         setQrImageUrl(qrUrl);
         setQrBlob(blob);
-        localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
-        setTagStatus("ACTIVE");
       } else {
         // Staff QR Image Fallback using backend GET /api/v1/dogs/{dog_id}/qr-image
         try {
@@ -744,22 +744,6 @@ const ShelterDogs = () => {
         } catch {
           /* unprovisioned state handled */
         }
-      }
-
-      try {
-        const metaRes = await petService.getSafetyTagMetadata(id);
-        const metaData = metaRes?.data || metaRes;
-        if (metaData) {
-          setTagMetadata(metaData);
-          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
-          if (isActive) {
-            setTagStatus("ACTIVE");
-          } else if (metaData.is_active === false || String(metaData.status || "").toUpperCase() === "INACTIVE") {
-            setTagStatus("INACTIVE");
-          }
-        }
-      } catch {
-        /* handled */
       }
     } catch (err: any) {
       setQrError("Failed to load Safety Tag metadata.");
@@ -789,23 +773,9 @@ const ShelterDogs = () => {
       if (!token) throw new Error("Backend did not return raw_token.");
 
       setRawToken(token);
-      const keysToStore = [
-        id,
-        qrDog?.id,
-        (qrDog as any)?.dog_id,
-        (qrDog as any)?.original_dog_id,
-        qrDog?.registration_number,
-      ].filter(Boolean);
-
-      for (const k of keysToStore) {
-        sessionStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
-        localStorage.setItem(`pawguard_safety_tag_token_${k}`, token);
-      }
-
       const qrDataUrl = await generateQrDataUrl(token);
       const blob = await generateQrBlob(token);
 
-      localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrDataUrl);
       setQrImageUrl(qrDataUrl);
       setQrBlob(blob);
       setTagStatus("ACTIVE");
@@ -859,8 +829,6 @@ const ShelterDogs = () => {
       setRawToken(null);
       setQrImageUrl(null);
       setQrBlob(null);
-      localStorage.removeItem(`pawguard_safety_tag_token_${id}`);
-      localStorage.removeItem(`pawguard_safety_tag_qr_${id}`);
       setIsDeactivateConfirmOpen(false);
       fetchShelterDogsData();
       notifyDataChanged();
@@ -2171,16 +2139,11 @@ const ShelterDogs = () => {
                         return;
                       }
                       try {
-                        const id = dogId(qrDog);
                         const qrUrl = await generateQrDataUrl(clean);
                         const blob = await generateQrBlob(clean);
                         setRawToken(clean);
                         setQrImageUrl(qrUrl);
                         setQrBlob(blob);
-                        if (id) {
-                          localStorage.setItem(`pawguard_safety_tag_token_${id}`, clean);
-                          localStorage.setItem(`pawguard_safety_tag_qr_${id}`, qrUrl);
-                        }
                         addToast("Active Safety Tag QR loaded successfully!", "success");
                       } catch {
                         addToast("Failed to render QR for entered token.", "error");

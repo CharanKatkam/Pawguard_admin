@@ -219,7 +219,17 @@ export const petService = {
     return response.data;
   },
 
-  // GET /dogs/{dog_id}/public-scan or POST /companion-pets/safety-tag/scan - authoritative token & dog public scan
+  // POST /dogs/safety-tag/resolve - resolve a Dog Master Safety Tag token to canonical dog record
+  resolveDogSafetyTag: async (token: string) => {
+    const clean = String(token || "").trim();
+    if (!clean) {
+      throw new Error("Safety Tag token is required.");
+    }
+    const response = await api.post(`/dogs/safety-tag/resolve`, { raw_token: clean });
+    return response.data;
+  },
+
+  // GET /dogs/{dog_id}/public-scan or POST /dogs/safety-tag/resolve - authoritative token & dog public scan
   getPublicDogScan: async (identifier: string) => {
     const clean = String(identifier || "").trim();
     if (!clean) {
@@ -228,24 +238,112 @@ export const petService = {
 
     const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-    // 1. If identifier is a valid Dog Master UUID, query direct /dogs/{dog_id}/public-scan
+    // 1. If identifier is a valid UUID, query direct public-scan
     if (uuidRegex.test(clean)) {
-      const response = await api.get(`/dogs/${clean}/public-scan`);
-      return response.data;
+      try {
+        const response = await api.get(`/dogs/${clean}/public-scan`);
+        return response.data;
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          const compRes = await api.get(`/companion-pets/${clean}/public-scan`);
+          return compRes.data;
+        }
+        throw err;
+      }
     }
 
-    // 2. Query authoritative public token scan endpoint /companion-pets/safety-tag/scan
+    const upperToken = clean.toUpperCase();
+    const isDogToken = upperToken.startsWith("DGD");
+    const isCompanionToken = upperToken.startsWith("CMP") || upperToken.startsWith("PET");
+
+    // 2. If token is explicitly a Dog Safety Tag token ("DGD...")
+    if (isDogToken) {
+      try {
+        const resolveRes = await api.post(`/dogs/safety-tag/resolve`, { raw_token: clean });
+        const resObj = resolveRes?.data || resolveRes;
+        const dogObj = resObj?.dog || resObj;
+        return {
+          ...dogObj,
+          id: resObj?.dog_id || dogObj?.id || resObj?.tag_id,
+          dog_id: resObj?.dog_id || dogObj?.id || resObj?.tag_id,
+          is_active: resObj?.is_active,
+          token_prefix: resObj?.token_prefix,
+          scan_count: resObj?.scan_count,
+          last_scanned_at: resObj?.last_scanned_at,
+        };
+      } catch (err: any) {
+        const status = err?.response?.status;
+        const apiMsg =
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.detail ||
+          err?.response?.data?.message ||
+          err?.message;
+        if (status === 404) {
+          throw new Error(`Dog Safety Tag token "${clean}" was not found in the PawGuard database.`);
+        }
+        throw new Error(apiMsg || `Failed to resolve Dog Safety Tag token "${clean}".`);
+      }
+    }
+
+    // 3. If token is explicitly a Companion Pet Safety Tag token ("CMP..." / "PET...")
+    if (isCompanionToken) {
+      try {
+        const scanRes = await api.post(`/companion-pets/safety-tag/scan`, { token: clean });
+        return scanRes.data;
+      } catch (err: any) {
+        const status = err?.response?.status;
+        const apiMsg =
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.detail ||
+          err?.response?.data?.message ||
+          err?.message;
+        if (status === 404) {
+          throw new Error(`Companion Pet Safety Tag token "${clean}" was not found in the PawGuard database.`);
+        }
+        throw new Error(apiMsg || `Failed to scan Companion Pet Safety Tag token "${clean}".`);
+      }
+    }
+
+    // 4. For generic/unprefixed tokens: try Dog resolver first, fall through to Companion scanner ONLY on 404
+    try {
+      const resolveRes = await api.post(`/dogs/safety-tag/resolve`, { raw_token: clean });
+      const resObj = resolveRes?.data || resolveRes;
+      const dogObj = resObj?.dog || resObj;
+      if (resObj && (resObj.dog_id || dogObj.id || dogObj.name)) {
+        return {
+          ...dogObj,
+          id: resObj?.dog_id || dogObj?.id || resObj?.tag_id,
+          dog_id: resObj?.dog_id || dogObj?.id || resObj?.tag_id,
+          is_active: resObj?.is_active,
+          token_prefix: resObj?.token_prefix,
+          scan_count: resObj?.scan_count,
+          last_scanned_at: resObj?.last_scanned_at,
+        };
+      }
+    } catch (dogErr: any) {
+      const status = dogErr?.response?.status;
+      if (status !== 404) {
+        const apiMsg =
+          dogErr?.response?.data?.error?.message ||
+          dogErr?.response?.data?.detail ||
+          dogErr?.response?.data?.message ||
+          dogErr?.message;
+        throw new Error(apiMsg || `Failed to resolve Safety Tag token "${clean}".`);
+      }
+    }
+
+    // Attempt Companion Pet scan on 404 fallback for generic token
     try {
       const scanRes = await api.post(`/companion-pets/safety-tag/scan`, { token: clean });
       if (scanRes.data) {
         return scanRes.data;
       }
-    } catch (err: any) {
+    } catch (compErr: any) {
       const apiMsg =
-        err?.response?.data?.error?.message ||
-        err?.response?.data?.detail ||
-        err?.response?.data?.message ||
-        err?.message;
+        compErr?.response?.data?.error?.message ||
+        compErr?.response?.data?.detail ||
+        compErr?.response?.data?.message ||
+        compErr?.message;
       throw new Error(apiMsg || `Safety Tag token "${clean}" could not be verified or is invalid.`);
     }
 
@@ -262,6 +360,53 @@ export const petService = {
       return dog.raw_token.trim().toUpperCase();
     }
     return "-";
+  },
+
+  // =========================================================================
+  // COMPANION PET SAFETY TAG ENDPOINTS
+  // =========================================================================
+
+  // POST /companion-pets/{pet_id}/safety-tag - provision/generate Safety Tag for a Companion Pet
+  provisionCompanionPetSafetyTag: async (petId: string, forceReissue = false) => {
+    const cleanId = String(petId || "").trim();
+    if (!cleanId) throw new Error("Companion Pet ID is required for Safety Tag provisioning.");
+    const url = forceReissue
+      ? `/companion-pets/${cleanId}/safety-tag?force_reissue=true`
+      : `/companion-pets/${cleanId}/safety-tag`;
+    const response = await api.post(url);
+    return response.data;
+  },
+
+  // GET /companion-pets/{pet_id}/safety-tag - get Safety Tag metadata for a Companion Pet
+  getCompanionPetSafetyTagMetadata: async (petId: string) => {
+    const cleanId = String(petId || "").trim();
+    if (!cleanId) throw new Error("Companion Pet ID is required.");
+    const response = await api.get(`/companion-pets/${cleanId}/safety-tag`);
+    return response.data;
+  },
+
+  // DELETE /companion-pets/{pet_id}/safety-tag - revoke Safety Tag for a Companion Pet
+  revokeCompanionPetSafetyTag: async (petId: string) => {
+    const cleanId = String(petId || "").trim();
+    if (!cleanId) throw new Error("Companion Pet ID is required.");
+    const response = await api.delete(`/companion-pets/${cleanId}/safety-tag`);
+    return response.data;
+  },
+
+  // GET /companion-pets/{pet_id}/public-scan - public scan by Companion Pet ID
+  getCompanionPetPublicScan: async (petId: string) => {
+    const cleanId = String(petId || "").trim();
+    if (!cleanId) throw new Error("Companion Pet ID is required.");
+    const response = await api.get(`/companion-pets/${cleanId}/public-scan`);
+    return response.data;
+  },
+
+  // POST /companion-pets/safety-tag/scan - public scan by Companion Pet Safety Tag Token
+  scanCompanionPetSafetyTag: async (token: string) => {
+    const clean = String(token || "").trim();
+    if (!clean) throw new Error("Safety Tag token is required.");
+    const response = await api.post(`/companion-pets/safety-tag/scan`, { token: clean });
+    return response.data;
   },
 };
 

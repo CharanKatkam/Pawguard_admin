@@ -77,28 +77,27 @@ const PublicDogProfile = () => {
 
       try {
         let data: PublicDogData | null = null;
+        let isRevokedTag = false;
 
-        // Try direct safety tag token scan first (via searchParams token or scanned raw_token query)
         const tokenToScan = searchParams.get("token") || query;
         if (tokenToScan) {
-          try {
-            const tokenRes = await petService.scanSafetyTag(tokenToScan);
-            const raw = tokenRes?.data || tokenRes;
-            if (raw && (raw.name || raw.registration_number || raw.pet || raw.id)) {
+          const res = await petService.getPublicDogScan(tokenToScan);
+          const raw = res?.data || res;
+          if (raw && (raw.name || raw.registration_number || raw.pet || raw.id || raw.dog_id || raw.pet_id)) {
+            const isActive = raw.is_active !== false && String(raw.status || "").toUpperCase() !== "INACTIVE";
+            if (!isActive) {
+              isRevokedTag = true;
+            } else {
               data = raw.pet || raw;
             }
-          } catch {
-            /* Fall back to public dog scan */
           }
         }
 
-        if (!data) {
-          const res = await petService.getPublicDogScan(query);
-          data = res?.data || res;
-        }
-
         if (isSubscribed) {
-          if (data && (data.name || data.registration_number)) {
+          if (isRevokedTag || (data && (data.is_tag_active === false || data.safety_tag_status === "INACTIVE"))) {
+            setError("This Safety Tag has been REVOKED/DEACTIVATED. Scans will no longer resolve for this pet.");
+            setDog(null);
+          } else if (data && (data.name || data.registration_number)) {
             setDog(data);
           } else {
             setError("Pet profile not found. The scanned QR code does not match an active pet record.");
