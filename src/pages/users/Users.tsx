@@ -1370,6 +1370,19 @@ const Users = () => {
     },
   ];
 
+  if (isRescueCentreAdmin) {
+    return (
+      <div style={{ padding: "40px 20px", textAlign: "center" }}>
+        <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#991B1B", padding: "24px", borderRadius: "12px", maxWidth: "600px", margin: "0 auto" }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 700 }}>Access Restricted</h3>
+          <p style={{ margin: 0, fontSize: "14px", color: "#7F1D1D" }}>
+            Rescue Centre Admin users are not authorized to access Staff & Users management. Contact a Super Administrator to manage user accounts.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Header Banner */}

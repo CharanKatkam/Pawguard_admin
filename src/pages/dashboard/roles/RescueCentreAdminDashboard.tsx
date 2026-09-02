@@ -9,7 +9,6 @@ import {
   FaPaw,
   FaStethoscope,
   FaHome,
-  FaHeart,
   FaChartBar,
   FaUsers,
   FaSync,
@@ -26,8 +25,6 @@ import dashboardService from "../../../services/dashboardService";
 import rescueService from "../../../services/rescueService";
 import dogService from "../../../services/dogService";
 import shelterService from "../../../services/shelterService";
-import adoptionService from "../../../services/adoptionService";
-import fosterService from "../../../services/fosterService";
 import inventoryService from "../../../services/inventoryService";
 import userService from "../../../services/userService";
 import vehicleService from "../../../services/vehicleService";
@@ -35,7 +32,7 @@ import grievanceService from "../../../services/grievanceService";
 import { useToast } from "../../../context/ToastContext";
 import { rescueStatusBadge, dispatchStage, dispatchAgentNames } from "../../../utils/rescueStatus";
 import { useDataSync } from "../../../utils/dataSync";
-import { normalizeRole, getCurrentUser } from "../../../utils/roleUtils";
+import { normalizeRole, getCurrentUser, getRescueCentreId } from "../../../utils/roleUtils";
 import { formatDateTime } from "../../../utils/dateUtils";
 import type { RescueRequestTableRow } from "../../rescues/RescueRequests";
 
@@ -60,16 +57,6 @@ interface DogIntakeRow {
   shelter_name: string;
   intake_status: string;
   care_status: string;
-  rawItem: Record<string, unknown>;
-}
-
-interface ApplicationPipelineRow {
-  id: string;
-  applicant_name: string;
-  dog_name: string;
-  type: string;
-  status: string;
-  created_at: string;
   rawItem: Record<string, unknown>;
 }
 
@@ -128,24 +115,11 @@ const mapRescueCallRowToDetail = (row: RescueCallRow): RescueRequestTableRow => 
 const RescueCentreAdminDashboard = () => {
   const navigate = useNavigate();
   const { addToast } = useToast();
-
-  const currentUser = getCurrentUser();
-  const currentRescueCentreId = String(
-    (currentUser as any)?.rescue_centre_id ||
-    (currentUser as any)?.rescue_center_id ||
-    (currentUser as any)?.organization_id ||
-    (currentUser as any)?.facility_id ||
-    (currentUser as any)?.shelter_id ||
-    ""
-  );
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"rescues" | "intake" | "pipeline" | "agents" | "vehicles" | "complaints">("rescues");
+  const [activeTab, setActiveTab] = useState<"rescues" | "intake" | "agents" | "vehicles" | "complaints">("rescues");
   const [selectedCase, setSelectedCase] = useState<RescueRequestTableRow | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [selectedPipelineRow, setSelectedPipelineRow] = useState<ApplicationPipelineRow | null>(null);
-  const [isPipelineModalOpen, setIsPipelineModalOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<any | null>(null);
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<any | null>(null);
@@ -276,7 +250,6 @@ const RescueCentreAdminDashboard = () => {
   // Lifecycle Data States
   const [rescueCalls, setRescueCalls] = useState<RescueCallRow[]>([]);
   const [dogIntakes, setDogIntakes] = useState<DogIntakeRow[]>([]);
-  const [applications, setApplications] = useState<ApplicationPipelineRow[]>([]);
   const [rescueAgents, setRescueAgents] = useState<any[]>([]);
   const [fleetVehicles, setFleetVehicles] = useState<any[]>([]);
 
@@ -287,7 +260,6 @@ const RescueCentreAdminDashboard = () => {
     activeDispatches: 0,
     shelterDogsCount: 0,
     medicallyClearedCount: 0,
-    activeAdoptionsCount: 0,
     lowStockAlertsCount: 0,
   });
 
@@ -296,26 +268,46 @@ const RescueCentreAdminDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const scopeParams = currentRescueCentreId ? { rescue_centre_id: currentRescueCentreId } : {};
+      const currentUserObj = getCurrentUser();
+      const currentRole = normalizeRole(currentUserObj);
+      const isRescueAdmin = currentRole === "rescue_centre_admin";
+      const currentCentreId = getRescueCentreId(currentUserObj);
+
+      if (isRescueAdmin && !currentCentreId) {
+        setError("No Rescue Centre Assigned: Your account does not have an assigned Rescue Centre. Contact a Super Administrator to assign your Rescue Centre.");
+        setLoading(false);
+        setRescueCalls([]);
+        setDogIntakes([]);
+        setRescueAgents([]);
+        setFleetVehicles([]);
+        setGrievanceTickets([]);
+        setStatsData({
+          totalCalls: 0,
+          pendingCalls: 0,
+          activeDispatches: 0,
+          shelterDogsCount: 0,
+          medicallyClearedCount: 0,
+          lowStockAlertsCount: 0,
+        });
+        return;
+      }
+
+      const scopeParams = currentCentreId ? { rescue_centre_id: currentCentreId } : {};
 
       const [
         dashRes,
         casesRes,
         dogsRes,
         _sheltersRes,
-        adoptionsRes,
-        fostersRes,
         inventoryRes,
         usersRes,
         vehiclesRes,
         grievanceRes,
       ] = await Promise.allSettled([
-        dashboardService.getRescueCentreDashboard(),
+        dashboardService.getRescueCentreDashboard(scopeParams),
         rescueService.getRescueCases({ page: 1, page_size: 50, ...scopeParams }),
         dogService.getAllDogs(scopeParams),
         shelterService.getShelters(scopeParams),
-        adoptionService.getAdoptions(),
-        fosterService.getFosterProfiles(),
         inventoryService.getInventory(),
         userService.getUsers(scopeParams),
         vehicleService.getVehicles(scopeParams),
@@ -325,8 +317,6 @@ const RescueCentreAdminDashboard = () => {
       const dashData = dashRes.status === "fulfilled" ? dashRes.value?.data || dashRes.value || {} : {};
       const casesList = casesRes.status === "fulfilled" ? unwrapList(casesRes.value) : [];
       const dogsList = dogsRes.status === "fulfilled" ? unwrapList(dogsRes.value) : [];
-      const adoptionsList = adoptionsRes.status === "fulfilled" ? unwrapList(adoptionsRes.value) : [];
-      const fostersList = fostersRes.status === "fulfilled" ? unwrapList(fostersRes.value) : [];
       const inventoryList = inventoryRes.status === "fulfilled" ? unwrapList(inventoryRes.value) : [];
       const usersList = usersRes.status === "fulfilled" ? unwrapList(usersRes.value) : [];
       const vehiclesList = vehiclesRes.status === "fulfilled" ? unwrapList(vehiclesRes.value) : [];
@@ -379,29 +369,7 @@ const RescueCentreAdminDashboard = () => {
           rawItem: d,
         }));
 
-      // 3. Process Adoption & Foster Pipeline
-      const pipeline: ApplicationPipelineRow[] = [
-        ...adoptionsList.map((a: any) => ({
-          id: String(a.id || a.application_id || "-"),
-          applicant_name: String(a.applicant_name || a.adopter_name || a.user_name || "Applicant"),
-          dog_name: String(a.dog_name || a.dog?.name || "Dog"),
-          type: "Adoption",
-          status: String(a.status || "Submitted"),
-          created_at: String(a.created_at || a.applied_at || ""),
-          rawItem: a,
-        })),
-        ...fostersList.map((f: any) => ({
-          id: String(f.id || f.placement_id || "-"),
-          applicant_name: String(f.foster_family || f.user?.full_name || f.user?.email || "Foster Host"),
-          dog_name: String(f.dog_name || "Dog"),
-          type: "Foster Placement",
-          status: String(f.status || "Active"),
-          created_at: String(f.created_at || f.started_at || ""),
-          rawItem: f,
-        })),
-      ].sort((a, b) => b.created_at.localeCompare(a.created_at));
-
-      // 4. Calculate Aggregate Metrics
+      // 3. Calculate Aggregate Metrics
       const pendingCases = casesList.filter((c: any) => {
         const s = String(c.status || "").toLowerCase();
         return s === "pending" || s === "reported" || s === "requested";
@@ -425,7 +393,6 @@ const RescueCentreAdminDashboard = () => {
 
       setRescueCalls(recentCalls);
       setDogIntakes(intakes);
-      setApplications(pipeline);
 
       setStatsData({
         totalCalls: dashData.total_calls ?? dashData.totalCalls ?? casesList.length,
@@ -433,7 +400,6 @@ const RescueCentreAdminDashboard = () => {
         activeDispatches: dashData.dispatched ?? dashData.dispatchedCases ?? dispatchedCases,
         shelterDogsCount: dogsList.length,
         medicallyClearedCount: clearedDogs,
-        activeAdoptionsCount: adoptionsList.length + fostersList.length,
         lowStockAlertsCount: lowStockItems,
       });
     } catch (err: any) {
@@ -478,14 +444,6 @@ const RescueCentreAdminDashboard = () => {
       color: "#6366F1",
       icon: <FaPaw />,
       onClick: () => setActiveTab("intake"),
-    },
-    {
-      title: "Adoptions & Fosters",
-      value: loading ? "..." : String(statsData.activeAdoptionsCount),
-      trend: "Active Placement Pipeline",
-      color: "#EC4899",
-      icon: <FaHeart />,
-      onClick: () => navigate("/adoptions"),
     },
   ];
 
@@ -545,35 +503,6 @@ const RescueCentreAdminDashboard = () => {
     },
   ];
 
-  const pipelineColumns = [
-    { key: "id", header: "Application ID" },
-    { key: "applicant_name", header: "Applicant / Host" },
-    { key: "dog_name", header: "Dog Target" },
-    {
-      key: "type",
-      header: "Pipeline Category",
-      render: (v: string) => (
-        <span style={badgeStyle(v === "Adoption" ? "#FCE7F3" : "#E0E7FF", v === "Adoption" ? "#BE185D" : "#4338CA")}>
-          {v}
-        </span>
-      ),
-    },
-    {
-      key: "status",
-      header: "Stage Status",
-      render: (v: string) => (
-        <span style={badgeStyle("#F1F5F9", "#334155")}>
-          {v.toUpperCase()}
-        </span>
-      ),
-    },
-    {
-      key: "created_at",
-      header: "Date Logged",
-      render: (v: string) => (v ? formatDateTime(v) : "-"),
-    },
-  ];
-
   return (
     <div>
       {/* Hero Header */}
@@ -592,7 +521,7 @@ const RescueCentreAdminDashboard = () => {
               Rescue Centre Operations & Lifecycle Management Portal
             </h1>
             <p style={{ margin: "6px 0 0", color: "#94A3B8", fontSize: "13px" }}>
-              Complete operational monitoring: rescue cases, agent dispatch, medical intake, shelter capacity, adoption/foster workflow & inventory alerts.
+              Complete operational monitoring: rescue cases, agent dispatch, medical intake, shelter capacity & inventory alerts.
             </p>
           </div>
           <button
@@ -630,7 +559,6 @@ const RescueCentreAdminDashboard = () => {
         <QuickActionCard icon={<FaPaw />} title="Dog Management" subtitle="Dog Master Profiles" color="#6366F1" onClick={() => navigate("/pets")} />
         <QuickActionCard icon={<FaHome />} title="Shelter Facilities" subtitle="Kennel Capacity" color="#8B5CF6" onClick={() => navigate("/shelters")} />
         <QuickActionCard icon={<FaPaw />} title="Shelter Dogs" subtitle="Post-Rescue Handover" color="#059669" onClick={() => navigate("/shelter-dogs")} />
-        <QuickActionCard icon={<FaUsers />} title="Staff & Users" subtitle="User Directory" color="#D97706" onClick={() => navigate("/users")} />
         <QuickActionCard icon={<FaStethoscope />} title="Medical Suite" subtitle="Medical Records" color="#EC4899" onClick={() => navigate("/medical-records")} />
         <QuickActionCard icon={<FaChartBar />} title="Reports & Analytics" subtitle="Operational Insights" color="#3B82F6" onClick={() => navigate("/reports")} />
       </div>
@@ -685,26 +613,6 @@ const RescueCentreAdminDashboard = () => {
               }}
             >
               <FaPaw /> Shelter Dog Master Intakes ({dogIntakes.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("pipeline")}
-              style={{
-                padding: "9px 16px",
-                borderRadius: "10px",
-                border: activeTab === "pipeline" ? "2px solid #2563EB" : "1px solid #CBD5E1",
-                background: activeTab === "pipeline" ? "#EFF6FF" : "#FFFFFF",
-                color: activeTab === "pipeline" ? "#1D4ED8" : "#475569",
-                fontWeight: 700,
-                fontSize: "13px",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <FaHeart /> Adoption & Foster Pipeline ({applications.length})
             </button>
 
             <button
@@ -842,44 +750,6 @@ const RescueCentreAdminDashboard = () => {
                 }}
               >
                 <FaEye /> View Details
-              </button>
-            )}
-          />
-        )}
-
-        {/* TAB 3: ADOPTION & FOSTER PIPELINE */}
-        {activeTab === "pipeline" && (
-          <DataTable
-            columns={pipelineColumns}
-            data={applications}
-            loading={loading}
-            emptyMessage="No active adoption or foster applications."
-            onRowClick={(row: ApplicationPipelineRow) => {
-              setSelectedPipelineRow(row);
-              setIsPipelineModalOpen(true);
-            }}
-            renderRowActions={(row: ApplicationPipelineRow) => (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPipelineRow(row);
-                  setIsPipelineModalOpen(true);
-                }}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #6366F1",
-                  background: "#EEF2FF",
-                  color: "#4338CA",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                <FaEye /> View Pipeline
               </button>
             )}
           />
@@ -1231,131 +1101,7 @@ const RescueCentreAdminDashboard = () => {
         )}
       </Modal>
 
-      {/* Adoption & Foster Pipeline Detail Modal */}
-      <Modal
-        isOpen={isPipelineModalOpen}
-        onClose={() => setIsPipelineModalOpen(false)}
-        title={`${selectedPipelineRow?.type || "Pipeline"} Details — ${selectedPipelineRow?.applicant_name || "Applicant"}`}
-        size="lg"
-        footer={
-          <button
-            onClick={() => setIsPipelineModalOpen(false)}
-            style={{ padding: "8px 16px", background: "#64748B", color: "#FFF", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 700, fontSize: "13px" }}
-          >
-            Close
-          </button>
-        }
-      >
-        {selectedPipelineRow && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {/* Header info */}
-            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#0F172A" }}>
-                  {selectedPipelineRow.applicant_name} &bull; {selectedPipelineRow.dog_name}
-                </h2>
-                <div style={{ fontSize: "13px", color: "#64748B", marginTop: "4px" }}>
-                  Pipeline Type: <strong>{selectedPipelineRow.type}</strong>
-                </div>
-              </div>
-              <span
-                style={{
-                  backgroundColor: "#EFF6FF",
-                  color: "#2563EB",
-                  padding: "4px 10px",
-                  borderRadius: "999px",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  display: "inline-block",
-                  textTransform: "uppercase"
-                }}
-              >
-                {selectedPipelineRow.status}
-              </span>
-            </div>
 
-            {selectedPipelineRow.type === "Adoption" ? (
-              // Adoption application fields
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", background: "#FFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Residential Status</span>
-                    <strong style={{ textTransform: "capitalize" }}>{String(selectedPipelineRow.rawItem?.residential_status || "-")}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Secure Fenced Yard</span>
-                    <strong>{selectedPipelineRow.rawItem?.has_yard_fence ? "Yes (Fenced)" : "No Fence"}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Landlord Approval</span>
-                    <strong>{selectedPipelineRow.rawItem?.has_landlord_approval ? "Yes (Approved)" : "No / N/A"}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Household Members</span>
-                    <strong>{String(selectedPipelineRow.rawItem?.household_members_count || "-")}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaClock size={10} style={{ marginRight: "4px" }} /> Home Visit Scheduled</span>
-                    <strong>{selectedPipelineRow.rawItem?.home_inspection_scheduled_at ? formatDateTime(String(selectedPipelineRow.rawItem.home_inspection_scheduled_at)) : "Not scheduled"}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaClock size={10} style={{ marginRight: "4px" }} /> Applied At</span>
-                    <strong>{selectedPipelineRow.created_at ? formatDateTime(selectedPipelineRow.created_at) : "-"}</strong>
-                  </div>
-                </div>
-
-                {Boolean(selectedPipelineRow.rawItem?.pet_care_experience) && (
-                  <div style={{ background: "#F1F5F9", padding: "12px 14px", borderRadius: "10px", border: "1px solid #CBD5E1" }}>
-                    <strong style={{ color: "#334155", display: "block", marginBottom: "4px", fontSize: "13px" }}>
-                      <FaInfoCircle size={12} style={{ marginRight: "6px" }} /> Pet Care Experience:
-                    </strong>
-                    <span style={{ fontSize: "13px", color: "#475569" }}>{String(selectedPipelineRow.rawItem?.pet_care_experience)}</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              // Foster placement fields
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", background: "#FFF", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Background Check</span>
-                    <strong style={{ color: selectedPipelineRow.rawItem?.background_check_passed ? "#059669" : "#D97706" }}>
-                      {selectedPipelineRow.rawItem?.background_check_passed ? "✓ Passed" : "Pending Verification"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Home Inspection</span>
-                    <strong style={{ color: selectedPipelineRow.rawItem?.home_inspection_passed ? "#059669" : "#D97706" }}>
-                      {selectedPipelineRow.rawItem?.home_inspection_passed ? "✓ Passed / Verified" : "Pending Inspection"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Max Capacity</span>
-                    <strong>{String(selectedPipelineRow.rawItem?.max_capacity || "2")} slots</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Availability Status</span>
-                    <strong>{selectedPipelineRow.rawItem?.is_available ? "Available" : "At Capacity / Busy"}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}><FaClock size={10} style={{ marginRight: "4px" }} /> Started / Created At</span>
-                    <strong>{selectedPipelineRow.created_at ? formatDateTime(selectedPipelineRow.created_at) : "-"}</strong>
-                  </div>
-                </div>
-
-                {Boolean(selectedPipelineRow.rawItem?.notes) && (
-                  <div style={{ background: "#F1F5F9", padding: "12px 14px", borderRadius: "10px", border: "1px solid #CBD5E1" }}>
-                    <strong style={{ color: "#334155", display: "block", marginBottom: "4px", fontSize: "13px" }}>
-                      <FaInfoCircle size={12} style={{ marginRight: "6px" }} /> Notes / Vetting Summary:
-                    </strong>
-                    <span style={{ fontSize: "13px", color: "#475569" }}>{String(selectedPipelineRow.rawItem?.notes)}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
 
       {/* Rescue Agent Detail Modal */}
       <Modal

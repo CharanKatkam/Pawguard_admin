@@ -8,6 +8,7 @@ import { useToast } from "../../context/ToastContext";
 import Can from "../../components/rbac/Can";
 import {
   FaPaw,
+  FaDog,
   FaAmbulance,
   FaHeart,
   FaPlus,
@@ -28,7 +29,7 @@ import petService from "../../services/petService";
 import rescueService from "../../services/rescueService";
 import medicalService from "../../services/medicalService";
 import storageService from "../../services/storageService";
-import { getCurrentUserRole } from "../../utils/roleUtils";
+import { getCurrentUser, getCurrentUserRole, normalizeRole, getRescueCentreId } from "../../utils/roleUtils";
 import { hasPermission } from "../../utils/rbac";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { publishActionEvent } from "../../utils/eventSystem";
@@ -240,7 +241,6 @@ const Pets = () => {
   const [isDeactivateConfirmOpen, setIsDeactivateConfirmOpen] = useState(false);
   const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
   const [isRefreshingScanData, setIsRefreshingScanData] = useState(false);
-  const [manualTokenInput, setManualTokenInput] = useState("");
 
   // Manual Token Lookup modal state
   const [isTokenLookupModalOpen, setIsTokenLookupModalOpen] = useState(false);
@@ -430,30 +430,114 @@ const Pets = () => {
       setLoading(true);
       setError(null);
 
-      const response = await petService.getPets({
-        record_type: registryTab,
+      const currentUser = getCurrentUser();
+      const currentRole = normalizeRole(currentUser);
+      const isRescueAdmin = currentRole === "rescue_centre_admin" || currentRole === "rescue_coordinator" || currentRole === "rescue_agent" || String(currentRole || "").includes("rescue");
+      const userShelterId = (currentUser as any)?.shelter_id || (currentUser as any)?.shelter?.id || (currentUser as any)?.assigned_shelter_id;
+      const userRescueCentreId = getRescueCentreId(currentUser);
+
+      if (currentRole === "rescue_centre_admin" && !userRescueCentreId) {
+        setError("No Rescue Centre Assigned: Your account does not have an assigned Rescue Centre. Contact a Super Administrator.");
+        setDogs([]);
+        setLoading(false);
+        return;
+      }
+
+      const effectiveTab = (isRescueAdmin && registryTab === "companion") ? "master" : registryTab;
+
+      const queryParams: Record<string, any> = {
+        record_type: effectiveTab,
         search: search.trim() || undefined,
         status: statusFilter || undefined,
         is_adoptable: adoptableOnly ? true : undefined,
         page,
         page_size: 10,
-      });
+      };
+
+      if (currentRole === "shelter_manager" && userShelterId) {
+        queryParams.shelter_id = userShelterId;
+      }
+
+      if (currentRole === "rescue_centre_admin" && userRescueCentreId) {
+        queryParams.rescue_centre_id = userRescueCentreId;
+      }
+
+      const response = await petService.getPets(queryParams);
+
       let dogList = unwrapList(response).map(formatDog);
+
+      if (currentRole === "shelter_manager" && userShelterId) {
+        dogList = dogList.filter((d: any) => {
+          const dShelterId = d.shelter_id || d.shelter?.id || d.shelter_location_id;
+          return !dShelterId || String(dShelterId).toLowerCase() === String(userShelterId).toLowerCase();
+        });
+      }
+
+      if (currentRole === "rescue_centre_admin" && userRescueCentreId) {
+        dogList = dogList.filter((d: any) => {
+          const dCentreId = d.rescue_centre_id || d.rescue_center_id || d.facility_id || d.organization_id || d.rescue_centre?.id;
+          return !dCentreId || String(dCentreId) === String(userRescueCentreId);
+        });
+      }
+
+      if (isRescueAdmin) {
+        dogList = dogList.filter((d: any) => !d.is_companion_pet && d.status !== "companion");
+      }
+
+      // Registry tab filter refinement:
+      if (effectiveTab === "master") {
+        dogList = dogList.filter((d: any) => !d.is_companion_pet);
+      } else if (effectiveTab === "companion" && !isRescueAdmin) {
+        dogList = dogList.filter((d: any) => Boolean(d.is_companion_pet) || d.status === "companion");
+      }
+
+      // Status filter refinement:
       if (statusFilter) {
-        dogList = dogList.filter((d: any) => String(d.status).toLowerCase() === statusFilter.toLowerCase());
+        dogList = dogList.filter((d: any) => String(d.status || "").toLowerCase() === statusFilter.toLowerCase());
       }
+
+      // Adoptable filter refinement:
       if (adoptableOnly) {
-        dogList = dogList.filter((d: any) => d.is_adoptable);
+        dogList = dogList.filter((d: any) => Boolean(d.is_adoptable));
       }
+
+      // Search filter refinement:
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        dogList = dogList.filter((d: any) =>
+          String(d.name || "").toLowerCase().includes(q) ||
+          String(d.breed || "").toLowerCase().includes(q) ||
+          String(d.registration_number || "").toLowerCase().includes(q) ||
+          String(d.chip_number || "").toLowerCase().includes(q) ||
+          String(d.status || "").toLowerCase().includes(q) ||
+          String(d.owner_name || d.owner_email || "").toLowerCase().includes(q)
+        );
+      }
+
       const total = response?.meta?.total ?? response?.data?.meta?.total ?? dogList.length;
       setTotalCount(total);
       setDogs(dogList);
     } catch (err: any) {
-      setError(
-        err?.response?.data?.detail ||
-        err?.response?.data?.message ||
-        "Failed to load dogs list. Access may be restricted."
-      );
+      const status = err?.response?.status;
+      const apiMsg = err?.response?.data?.error?.message || err?.response?.data?.detail || err?.response?.data?.message;
+
+      if (status === 403) {
+        if (registryTab === "companion") {
+          setError("Access Denied (403): You don't have permission to view Companion Pets.");
+        } else if (registryTab === "master") {
+          setError("Access Denied (403): You don't have permission to view Dog Master records.");
+        } else {
+          setError("Access Denied (403): Your account role is not authorized to view pet records.");
+        }
+      } else if (apiMsg) {
+        setError(String(apiMsg));
+      } else {
+        if (registryTab === "companion") {
+          setError("Unable to load Companion Pets. Please check backend service connectivity.");
+        } else {
+          setError("Unable to load dogs list. Access may be restricted.");
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -462,9 +546,48 @@ const Pets = () => {
   const fetchAllDogs = async () => {
     try {
       setLoadingAll(true);
-      const response = await petService.getAllDogs();
+      const currentUser = getCurrentUser();
+      const currentRole = normalizeRole(currentUser);
+      const userShelterId = (currentUser as any)?.shelter_id || (currentUser as any)?.shelter?.id || (currentUser as any)?.assigned_shelter_id;
+      const userRescueCentreId = getRescueCentreId(currentUser);
+
+      if (currentRole === "rescue_centre_admin" && !userRescueCentreId) {
+        setAllDogs([]);
+        setLoadingAll(false);
+        return;
+      }
+
+      const params: Record<string, any> = {};
+      if (currentRole === "shelter_manager" && userShelterId) {
+        params.shelter_id = userShelterId;
+      }
+
+      if (currentRole === "rescue_centre_admin" && userRescueCentreId) {
+        params.rescue_centre_id = userRescueCentreId;
+      }
+
+      const response = await petService.getAllDogs(params);
       const rawList = unwrapList(response);
-      const formatted = rawList.map(formatDog);
+      let formatted = rawList.map(formatDog);
+
+      if (currentRole === "shelter_manager" && userShelterId) {
+        formatted = formatted.filter((d: any) => {
+          const dShelterId = d.shelter_id || d.shelter?.id || d.shelter_location_id;
+          return !dShelterId || String(dShelterId).toLowerCase() === String(userShelterId).toLowerCase();
+        });
+      }
+
+      if (currentRole === "rescue_centre_admin" && userRescueCentreId) {
+        formatted = formatted.filter((d: any) => {
+          const dCentreId = d.rescue_centre_id || d.rescue_center_id || d.facility_id || d.organization_id;
+          return String(dCentreId) === String(userRescueCentreId);
+        });
+      }
+
+      if (currentRole === "rescue_centre_admin" || currentRole === "rescue_coordinator" || currentRole === "rescue_agent" || String(currentRole || "").includes("rescue")) {
+        formatted = formatted.filter((d: any) => !d.is_companion_pet && d.status !== "companion");
+      }
+
       setAllDogs(formatted);
       const totalMeta = response?.meta?.total ?? response?.data?.meta?.total ?? formatted.length;
       if (typeof totalMeta === "number" && totalMeta >= 0) {
@@ -697,20 +820,27 @@ const Pets = () => {
       addToast("Could not determine the dog record to generate a QR for.", "error");
       return;
     }
+    const knownActiveOnDog = Boolean(
+      (dog as any)?.raw_token ||
+      (dog as any)?.token ||
+      (dog as any)?.safety_token ||
+      (dog as any)?.safety_tag_active === true ||
+      String((dog as any)?.safety_tag_status || "").toUpperCase() === "ACTIVE"
+    );
+
     setQrDog(dog);
     setQrBlob(null);
     setQrImageUrl(null);
     setQrError(null);
     setTagMetadata(null);
     setRawToken(null);
-    setManualTokenInput("");
-    setTagStatus("INACTIVE");
+    setTagStatus(knownActiveOnDog ? "ACTIVE" : "INACTIVE");
     setIsQrModalOpen(true);
 
     try {
       setQrLoading(true);
 
-      let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
+      let savedToken: string | null = null;
 
       // Fetch authoritative metadata from GET /api/v1/dogs/{dog_id}/safety-tag or GET /api/v1/companion-pets/{pet_id}/safety-tag
       try {
@@ -730,10 +860,21 @@ const Pets = () => {
           }
         }
 
-        const metaData = metaRes?.data || metaRes;
+        const metaData = metaRes?.data?.data || metaRes?.data || metaRes;
         if (metaData) {
           setTagMetadata(metaData);
-          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
+          const isExplicitlyInactive =
+            metaData.is_active === false ||
+            String(metaData.status || "").toUpperCase() === "INACTIVE" ||
+            String(metaData.status || "").toUpperCase() === "REVOKED";
+
+          const hasActiveIndicator =
+            metaData.is_active === true ||
+            String(metaData.status || "").toUpperCase() === "ACTIVE" ||
+            Boolean(metaData.raw_token || metaData.token || metaData.rawToken || metaData.token_prefix || metaData.public_scan_url) ||
+            knownActiveOnDog;
+
+          const isActive = !isExplicitlyInactive && hasActiveIndicator;
           if (!isActive) {
             setTagStatus("INACTIVE");
             setRawToken(null);
@@ -742,8 +883,15 @@ const Pets = () => {
             return;
           }
           setTagStatus("ACTIVE");
-          if (metaData.raw_token || metaData.token) {
-            savedToken = metaData.raw_token || metaData.token;
+          // Backend Security Contract: raw_token is ONLY returned once during POST provisioning.
+          // GET metadata returns token_prefix only. Do NOT mislabel token_prefix as raw_token.
+          const realRawToken =
+            metaData.raw_token ||
+            metaData.rawToken ||
+            null;
+
+          if (realRawToken) {
+            savedToken = String(realRawToken).trim();
           }
         }
       } catch (metaErr: unknown) {
@@ -752,20 +900,21 @@ const Pets = () => {
         const apiMsg = e?.response?.data?.error?.message || e?.response?.data?.message;
 
         if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
-          setTagStatus("INACTIVE");
+          if (!knownActiveOnDog) {
+            setTagStatus("INACTIVE");
+            setRawToken(null);
+            setQrImageUrl(null);
+            setQrBlob(null);
+          }
           setQrError(null);
-          setRawToken(null);
-          setQrImageUrl(null);
-          setQrBlob(null);
-          return;
         } else if (status === 401) {
           setQrError("Authentication Failure (401): No valid authentication credentials provided or session expired. Please sign in again.");
-          return;
         } else if (status === 403) {
-          setQrError("Unauthorized (403): Your account role does not have permission to access Safety Tags.");
-          return;
+          setQrError("Access Denied (403): Your account role does not have authorization to view protected Safety Tag tokens or QR codes.");
         } else if (apiMsg) {
           setQrError(String(apiMsg));
+        } else {
+          setQrError("Service Temporarily Unavailable: Failed to connect to Safety Tag backend service.");
         }
       }
 
@@ -814,15 +963,33 @@ const Pets = () => {
     if (!id) return;
     setIsRefreshingScanData(true);
     try {
-      const metaRes = await petService.getSafetyTagMetadata(id);
-      const metaData = metaRes?.data || metaRes;
+      let metaRes: any = null;
+      const isCompanion = Boolean((qrDog as any)?.is_companion_pet || (qrDog as any)?.companion_pet_id || (qrDog as any)?.owner_id);
+      if (isCompanion) {
+        try {
+          metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
+        } catch {
+          metaRes = await petService.getSafetyTagMetadata(id);
+        }
+      } else {
+        try {
+          metaRes = await petService.getSafetyTagMetadata(id);
+        } catch {
+          metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
+        }
+      }
+      const metaData = metaRes?.data?.data || metaRes?.data || metaRes;
       if (metaData) {
         setTagMetadata(metaData);
-        const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
-        if (isActive) {
-          setTagStatus("ACTIVE");
-        } else if (metaData.is_active === false || String(metaData.status || "").toUpperCase() === "INACTIVE") {
+        const isExplicitlyInactive =
+          metaData.is_active === false ||
+          String(metaData.status || "").toUpperCase() === "INACTIVE" ||
+          String(metaData.status || "").toUpperCase() === "REVOKED";
+
+        if (isExplicitlyInactive) {
           setTagStatus("INACTIVE");
+        } else {
+          setTagStatus("ACTIVE");
         }
       }
       addToast("Scan activity data refreshed from backend.", "success");
@@ -966,13 +1133,19 @@ const Pets = () => {
       );
 
       if (matched) {
-        setVerifiedDog(matched);
+        setVerifiedDog({
+          ...matched,
+          raw_token: scanData.raw_token || matched.raw_token,
+          tag_status: "ACTIVE",
+        });
       } else {
         setVerifiedDog(
           formatDog({
             ...scanData,
             id: dogIdVal || query,
             status: scanData.current_status || scanData.status || "shelter",
+            raw_token: scanData.raw_token || query,
+            tag_status: "ACTIVE",
           })
         );
       }
@@ -1103,7 +1276,12 @@ const Pets = () => {
     }
   };
 
+  const currentUser = getCurrentUser();
+  const currentRole = normalizeRole(currentUser);
+  const isRescueAdmin = currentRole === "rescue_centre_admin" || currentRole === "rescue_coordinator" || currentRole === "rescue_agent" || String(currentRole || "").includes("rescue");
+
   const totalRegisteredCount = (globalTotalCount && globalTotalCount > allDogs.length) ? globalTotalCount : allDogs.length;
+  const companionCount = allDogs.filter((dog) => Boolean(dog.is_companion_pet) || dog.status === "companion").length;
   const adoptableCount = allDogs.filter((dog) => Boolean(dog.is_adoptable)).length;
 
   const isCardsLoading = loadingAll && allDogs.length === 0 && (globalTotalCount === null || globalTotalCount === 0);
@@ -1115,14 +1293,30 @@ const Pets = () => {
       trend: "Registered Dogs",
       color: "#2563EB",
       icon: <FaPaw />,
-      selected: !statusFilter && !adoptableOnly,
+      selected: registryTab === "all" && !statusFilter && !adoptableOnly,
       onClick: () => {
+        setRegistryTab("all");
         setStatusFilter("");
         setAdoptableOnly(false);
         setPage(1);
         document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
       },
     },
+    ...(!isRescueAdmin ? [{
+      title: "Companion Dogs",
+      value: isCardsLoading ? "..." : companionCount,
+      trend: "Citizen & Owner Registered",
+      color: "#6D28D9",
+      icon: <FaDog />,
+      selected: registryTab === "companion" && !statusFilter && !adoptableOnly,
+      onClick: () => {
+        setRegistryTab("companion");
+        setStatusFilter("");
+        setAdoptableOnly(false);
+        setPage(1);
+        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    }] : []),
     {
       title: "Adoptable Dogs",
       value: isCardsLoading ? "..." : adoptableCount,
@@ -1369,23 +1563,25 @@ const Pets = () => {
             >
               Dog Master Registry
             </button>
-            <button
-              type="button"
-              onClick={() => { setRegistryTab("companion"); setPage(1); }}
-              style={{
-                padding: "6px 14px",
-                borderRadius: "6px",
-                border: "none",
-                fontSize: "12px",
-                fontWeight: 700,
-                cursor: "pointer",
-                background: registryTab === "companion" ? "#FFFFFF" : "transparent",
-                color: registryTab === "companion" ? "#2563EB" : "#64748B",
-                boxShadow: registryTab === "companion" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-              }}
-            >
-              Companion Pets Registry
-            </button>
+            {!isRescueAdmin && (
+              <button
+                type="button"
+                onClick={() => { setRegistryTab("companion"); setPage(1); }}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  background: registryTab === "companion" ? "#FFFFFF" : "transparent",
+                  color: registryTab === "companion" ? "#2563EB" : "#64748B",
+                  boxShadow: registryTab === "companion" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                }}
+              >
+                Companion Pets Registry
+              </button>
+            )}
           </div>
         </div>
 
@@ -1396,7 +1592,13 @@ const Pets = () => {
           loading={loading}
           error={error}
           onRetry={fetchDogs}
-          emptyMessage="No dogs registered yet. Register a rescued dog to get started."
+          emptyMessage={
+            registryTab === "companion"
+              ? "No companion pets found."
+              : registryTab === "master"
+              ? "No Dog Master profiles found."
+              : "No pets registered yet. Register a rescued dog to get started."
+          }
           onRowClick={openViewMasterFile}
           renderRowActions={rowActions}
           serverMode
@@ -1414,17 +1616,29 @@ const Pets = () => {
                 value={statusFilter}
                 onChange={(e) => {
                   setStatusFilter(e.target.value);
-                  setAdoptableOnly(false);
                   setPage(1);
                 }}
                 style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #CBD5E1", fontSize: "13px", background: "#FFF", outline: "none" }}
               >
                 <option value="">All Statuses</option>
-                <option value="shelter">In Shelter</option>
-                <option value="clinic">In Clinic</option>
-                <option value="rescued">Rescued</option>
-                <option value="fostered">Fostered</option>
-                <option value="adopted">Adopted</option>
+                {registryTab !== "companion" && (
+                  <>
+                    <option value="shelter">In Shelter</option>
+                    <option value="clinic">In Clinic</option>
+                    <option value="rescued">Rescued</option>
+                    <option value="fostered">Fostered</option>
+                    <option value="adopted">Adopted</option>
+                  </>
+                )}
+                {registryTab !== "master" && (
+                  <>
+                    <option value="active">Active</option>
+                    <option value="owned">Owned</option>
+                    <option value="registered">Registered</option>
+                    <option value="lost">Lost</option>
+                    <option value="found">Found</option>
+                  </>
+                )}
               </select>
 
               <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "#334155", cursor: "pointer", fontWeight: 600 }}>
@@ -1433,7 +1647,6 @@ const Pets = () => {
                   checked={adoptableOnly}
                   onChange={(e) => {
                     setAdoptableOnly(e.target.checked);
-                    if (e.target.checked) setStatusFilter("");
                     setPage(1);
                   }}
                 />
@@ -2128,7 +2341,7 @@ const Pets = () => {
                 </div>
               )}
 
-              {rawToken && (
+              {rawToken ? (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: "8px", padding: "8px 12px", marginTop: "6px" }}>
                   <div style={{ fontSize: "12px", color: "#1E40AF" }}>
                     <span style={{ fontWeight: 600 }}>Raw Token: </span>
@@ -2152,7 +2365,16 @@ const Pets = () => {
                     Copy Token
                   </button>
                 </div>
-              )}
+              ) : tagMetadata?.token_prefix ? (
+                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "8px", padding: "8px 12px", marginTop: "6px", fontSize: "12px", color: "#475569" }}>
+                  <div>
+                    <strong>Token Prefix:</strong> <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{String(tagMetadata.token_prefix)}</span>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#64748B", marginTop: "2px" }}>
+                    🔒 Raw token is stored as SHA-256 hash on backend security contract and returned once at provisioning. Use <strong>Re-Issue Tag</strong> if a new plaintext raw token and QR code are required.
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -2276,94 +2498,22 @@ const Pets = () => {
               }}
             >
               {tagStatus === "ACTIVE" ? (
-                <>
-                  <div style={{ fontSize: "15px", fontWeight: 800, color: "#1E293B" }}>
-                    ℹ️ SAFETY TAG IS ACTIVE ON BACKEND
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "440px", lineHeight: 1.5 }}>
-                    Tag Status: <strong style={{ color: "#16A34A" }}>ACTIVE</strong>{" "}
-                    {tagMetadata?.token_prefix ? `(Prefix: ${String(tagMetadata.token_prefix)})` : ""}
-                    <br />
-                    To render and print the QR code for this active tag on this browser without re-issuing or changing the backend tag, enter the existing raw token below:
-                  </div>
-
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      const clean = manualTokenInput.trim();
-                      if (!clean) return;
-                      const prefix = String(tagMetadata?.token_prefix || "").trim();
-                      if (prefix && !clean.startsWith(prefix)) {
-                        addToast(`Token prefix mismatch! Expected token starting with "${prefix}".`, "error");
-                        return;
-                      }
-                      try {
-                        const qrUrl = await generateQrDataUrl(clean);
-                        const blob = await generateQrBlob(clean);
-                        setRawToken(clean);
-                        setQrImageUrl(qrUrl);
-                        setQrBlob(blob);
-                        addToast("Active Safety Tag QR loaded successfully!", "success");
-                      } catch {
-                        addToast("Failed to render QR for entered token.", "error");
-                      }
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <div
+                    style={{
+                      display: "inline-block",
+                      width: "28px",
+                      height: "28px",
+                      border: "3px solid #F3E8FF",
+                      borderTopColor: "#6D28D9",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
                     }}
-                    style={{ width: "100%", maxWidth: "420px", display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}
-                  >
-                    <input
-                      type="text"
-                      value={manualTokenInput}
-                      onChange={(e) => setManualTokenInput(e.target.value)}
-                      placeholder="Enter existing raw token (e.g. cVnzRiqR...)"
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid #CBD5E1",
-                        fontSize: "12px",
-                        fontFamily: "monospace",
-                        boxSizing: "border-box",
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        type="submit"
-                        disabled={!manualTokenInput.trim()}
-                        style={{
-                          flex: 1,
-                          padding: "10px",
-                          borderRadius: "8px",
-                          border: "none",
-                          background: manualTokenInput.trim() ? "#10B981" : "#94A3B8",
-                          color: "#FFFFFF",
-                          fontWeight: 700,
-                          fontSize: "13px",
-                          cursor: manualTokenInput.trim() ? "pointer" : "not-allowed",
-                        }}
-                      >
-                        Load Active QR Code
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsReProvisionConfirmOpen(true)}
-                        disabled={isProvisioning}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: "1px solid #CBD5E1",
-                          background: "#FFFFFF",
-                          color: "#6D28D9",
-                          fontWeight: 700,
-                          fontSize: "12px",
-                          cursor: isProvisioning ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        Re-Provision
-                      </button>
-                    </div>
-                  </form>
-                </>
+                  />
+                  <div style={{ marginTop: "10px", fontSize: "13px", color: "#475569", fontWeight: 600 }}>
+                    Generating QR code from active backend Safety Tag...
+                  </div>
+                </div>
               ) : (
                 <>
                   <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>
