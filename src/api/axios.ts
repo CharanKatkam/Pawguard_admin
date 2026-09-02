@@ -64,10 +64,36 @@ api.interceptors.request.use(
   }
 );
 
-// Response Interceptor: Global response handler (rejects errors to caller without wiping user session)
+let isRedirectingToLogin = false;
+
+// Response Interceptor: Global response handler for HTTP 401 session expiration
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      const requestUrl = typeof error.config?.url === "string" ? error.config.url : "";
+      const isAuthEndpoint =
+        requestUrl.includes("/auth/login") ||
+        requestUrl.includes("/auth/register") ||
+        requestUrl.includes("/auth/password/reset");
+
+      if (!isAuthEndpoint) {
+        clearAuthData();
+        notifyAuthChanged();
+
+        if (!isRedirectingToLogin) {
+          isRedirectingToLogin = true;
+          if (typeof window !== "undefined" && window.location.pathname !== "/") {
+            try {
+              sessionStorage.setItem("session_expired_message", "Your session has expired. Please sign in again.");
+            } catch {
+              // Ignore storage errors
+            }
+            window.location.href = "/?expired=true";
+          }
+        }
+      }
+    }
     return Promise.reject(error);
   }
 );

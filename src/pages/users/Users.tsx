@@ -15,6 +15,7 @@ import {
   FaKey,
   FaEdit,
   FaBan,
+  FaTrash,
   FaHome,
   FaStethoscope,
   FaHeart,
@@ -29,7 +30,7 @@ import userService, { type UserPayload, extractPermissionCodes } from "../../ser
 import authService from "../../services/auth/authService";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { notifyDataChanged } from "../../utils/dataSync";
-import { normalizeRole, isInternalRole, getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
+import { normalizeRole, getCurrentUserRole, getCurrentUser } from "../../utils/roleUtils";
 import { formatDateTime } from "../../utils/dateUtils";
 import { describePermission } from "../../utils/permissionsCatalog";
 
@@ -82,6 +83,47 @@ const getUserApprovalStatus = (user?: Partial<UserTableRow> | null): "pending" |
 };
 
 const formatDate = (isoString?: string): string => formatDateTime(isoString);
+
+const resolveUserId = (userObj?: Record<string, unknown> | UserPayload | UserTableRow | null): string => {
+  if (!userObj || typeof userObj !== "object") return "";
+
+  // 1. Prefer explicit user_id / userId / userUUID / uuid fields if present
+  const explicitUserId =
+    (userObj as any).user_id ||
+    (userObj as any).userId ||
+    (userObj as any).userUUID ||
+    (userObj as any).uuid;
+
+  if (explicitUserId) {
+    const str = String(explicitUserId).trim();
+    if (
+      str &&
+      str !== "-" &&
+      str !== "undefined" &&
+      str !== "null" &&
+      !str.includes("@") &&
+      !/^(VOL|FOST|ADOPT|APP|LOST|FOUND)-/i.test(str)
+    ) {
+      return str;
+    }
+  }
+
+  // 2. Check primary id field
+  const rawId = userObj.id || (userObj as any)._id;
+  if (!rawId) return "";
+  const strId = String(rawId).trim();
+  if (
+    strId === "" ||
+    strId === "-" ||
+    strId === "undefined" ||
+    strId === "null" ||
+    strId.includes("@") ||
+    /^(VOL|FOST|ADOPT|APP|LOST|FOUND)-/i.test(strId)
+  ) {
+    return "";
+  }
+  return strId;
+};
 
 const formatRole = (role: string): string => {
   if (!role) return "General Public";
@@ -147,12 +189,35 @@ const SHELTER_ROLE_FILTER_OPTIONS: Array<{ value: string; label: string; backend
 ];
 
 
+const INTERNAL_ADMIN_PORTAL_ROLES = [
+  "super_admin",
+  "rescue_centre_admin",
+  "rescue_coordinator",
+  "rescue_agent",
+  "veterinarian",
+  "shelter_manager",
+  "adoption_coordinator",
+  "foster_coordinator",
+  "volunteer_coordinator",
+  "inventory_manager",
+  "finance_user",
+];
+
 /**
- * Checks if any of the user's assigned roles are authorized for Admin Portal access.
+ * Checks if any of the user's assigned roles belong to one of the exact 11 internal Admin Portal roles.
  */
-const hasAdminPortalAccess = (roles: string[]): boolean => {
-  if (!roles || roles.length === 0) return false;
-  return roles.some((role) => isInternalRole(role));
+const hasAdminPortalAccess = (roles?: string[] | string | null): boolean => {
+  if (!roles) return false;
+  const rolesArr = Array.isArray(roles) ? roles : [roles];
+  return rolesArr.some((r) => {
+    const lower = String(r).toLowerCase().trim();
+    return INTERNAL_ADMIN_PORTAL_ROLES.some(
+      (intRole) =>
+        lower === intRole ||
+        lower === intRole.replace(/_/g, "-") ||
+        lower === intRole.replace(/_/g, " ")
+    );
+  });
 };
 
 interface ApiErrorShape {
@@ -574,7 +639,7 @@ const Users = () => {
           : (rawStatusStr === "rejected" || rawStatusStr === "declined" ? "rejected" : "pending");
 
       const fullObj: UserTableRow = {
-        id: String(userPayload.id || userRow.id),
+        id: resolveUserId(userPayload) || resolveUserId(userRow) || String(userRow.id || ""),
         name: String(userPayload.full_name || userPayload.name || userRow.name || "Not provided"),
         full_name: (userPayload.full_name as string) || (userPayload.name as string) || userRow.full_name || null,
         email: String(userPayload.email || userRow.email || ""),
@@ -850,7 +915,7 @@ const Users = () => {
           (user.updated_at && user.created_at && user.updated_at !== user.created_at ? user.updated_at : null);
 
         return {
-          id: user.id || "-",
+          id: resolveUserId(user as unknown as Record<string, unknown>) || user.id || "-",
           name: user.full_name || user.name || "Not provided",
           full_name: user.full_name || user.name || null,
           email: user.email || "Not provided",
@@ -989,16 +1054,22 @@ const Users = () => {
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
+    const targetUserId = resolveUserId(selectedUser);
+    if (!targetUserId) {
+      addToast("Cannot delete user account: Valid user UUID not found.", "error");
+      return;
+    }
     if (!isSuperAdmin && selectedUser.roles.includes("super_admin")) {
       addToast("Access Denied: Super Admin accounts cannot be deleted by non-Super Admins.", "error");
       return;
     }
     try {
       setIsSubmitting(true);
-      await userService.deleteUser(selectedUser.id);
-      addToast(`User ${selectedUser.name} deleted successfully!`, "success");
+      await userService.deleteUser(targetUserId);
+      addToast(`User ${selectedUser.name || "account"} deleted successfully!`, "success");
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
+      setSelectedUserProfile(null);
       fetchUsers();
       notifyDataChanged();
     } catch (err: unknown) {
@@ -1162,9 +1233,9 @@ const Users = () => {
 
     return [
       {
-        title: "All User Accounts",
+        title: "Total Users",
         value: loading ? "..." : `${users.length} Total Users`,
-        trend: "Master Platform Identity Directory",
+        trend: "Master Identity Directory",
         color: "#2563EB",
         icon: <FaUsers />,
         onClick: () => {
@@ -1177,9 +1248,9 @@ const Users = () => {
         selected: activeFilter === "all" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
       },
       {
-        title: "Internal Staff Accounts",
+        title: "Admin Portal Users",
         value: loading ? "..." : `${staffUsers.length} Staff`,
-        trend: "Internal Admin / System Accounts",
+        trend: "Authorized Internal Staff Roles",
         color: "#0891B2",
         icon: <FaUserShield />,
         onClick: () => {
@@ -1192,37 +1263,9 @@ const Users = () => {
         selected: activeFilter === "staff" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
       },
       {
-        title: "Active Users",
-        value: loading ? "..." : `${users.filter((u) => u.isActive).length} Active`,
-        trend: "Operational Access Enabled",
-        color: "#059669",
-        icon: <FaCheckCircle />,
-        onClick: () => {
-          setStatusFilter("active");
-          setSearchTerm("");
-          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        },
-        selected: statusFilter === "active",
-      },
-      {
-        title: "Super Admins",
-        value: loading ? "..." : `${staffUsers.filter((u) => u.roles.some((r) => normalizeRole(r) === "super_admin")).length} Admins`,
-        trend: "Full System Privileges",
-        color: "#7C3AED",
-        icon: <FaUserShield />,
-        onClick: () => {
-          setActiveFilter("staff");
-          setRoleFilter("super_admin");
-          setStatusFilter("all");
-          setSearchTerm("");
-          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        },
-        selected: activeFilter === "staff" && roleFilter === "super_admin",
-      },
-      {
-        title: "Public & Community Users",
+        title: "Public Users",
         value: loading ? "..." : `${publicUsers.length} Users`,
-        trend: "Public Service Accounts (Non-Staff)",
+        trend: "Community & External Accounts",
         color: "#64748B",
         icon: <FaUsers />,
         onClick: () => {
@@ -1233,6 +1276,19 @@ const Users = () => {
           document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
         },
         selected: activeFilter === "public" && roleFilter === "all" && statusFilter === "all" && !searchTerm,
+      },
+      {
+        title: "Inactive Users",
+        value: loading ? "..." : `${users.filter((u) => !u.isActive && !u.is_active).length} Inactive`,
+        trend: "Deactivated Accounts",
+        color: "#EF4444",
+        icon: <FaTimesCircle />,
+        onClick: () => {
+          setStatusFilter("inactive");
+          setSearchTerm("");
+          document.getElementById("users-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        },
+        selected: statusFilter === "inactive",
       },
     ];
   }, [users, staffUsers, publicUsers, loading, activeFilter, roleFilter, statusFilter, searchTerm, isRescueCentreAdmin, isShelterManager]);
@@ -2088,6 +2144,43 @@ const Users = () => {
                 >
                   <FaBan size={13} /> {(selectedUserProfile.is_active ?? selectedUserProfile.isActive) ? "Deactivate Account" : "Activate Account"}
                 </button>
+
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetRoles = selectedUserProfile.roles || (selectedUserProfile.role ? [selectedUserProfile.role] : []);
+                      const isTargetSuperAdmin = targetRoles.some((r: string) => String(r).toLowerCase().includes("super_admin"));
+                      if (isTargetSuperAdmin) {
+                        addToast("Access Denied: Only a Super Administrator can delete accounts, but Super Admin accounts cannot be deleted directly.", "error");
+                        return;
+                      }
+                      const targetUserId = resolveUserId(selectedUserProfile);
+                      if (!targetUserId) {
+                        addToast("Cannot delete user account: Valid user UUID not found.", "error");
+                        return;
+                      }
+                      setSelectedUser({ ...selectedUserProfile, id: targetUserId });
+                      setIsProfileModalOpen(false);
+                      setIsDeleteModalOpen(true);
+                    }}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: "8px",
+                      background: "#FEF2F2",
+                      color: "#DC2626",
+                      border: "1px solid #FCA5A5",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FaTrash size={13} /> Delete Account
+                  </button>
+                )}
 
                 {/* Dynamic Role-Specific Navigation Actions */}
                 {(() => {
