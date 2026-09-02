@@ -18,8 +18,11 @@ import {
   FaDownload,
   FaBoxes,
   FaUserCheck,
+  FaInfoCircle,
+  FaUser,
 } from "react-icons/fa";
 import donationsService, {
+  isCompletedDonationStatus,
   type DonationCreatePayload,
   type SponsorshipCreatePayload,
   type DonationCampaignCreatePayload,
@@ -121,11 +124,18 @@ const Finance = () => {
   const [is80GModalOpen, setIs80GModalOpen] = useState(false);
   const [isPoDisburseModalOpen, setIsPoDisburseModalOpen] = useState(false);
   const [isReimbursementModalOpen, setIsReimbursementModalOpen] = useState(false);
+  const [isDonationDetailsModalOpen, setIsDonationDetailsModalOpen] = useState(false);
 
   const [selectedDonation, setSelectedDonation] = useState<any | null>(null);
   const [selectedRequisition, setSelectedRequisition] = useState<any | null>(null);
   const [taxCertificateData, setTaxCertificateData] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleOpenDonationDetails = useCallback((donationRow: any) => {
+    if (!donationRow) return;
+    setSelectedDonation(donationRow);
+    setIsDonationDetailsModalOpen(true);
+  }, []);
 
   // Volunteer Reimbursement Form
   const [reimbursementForm, setReimbursementForm] = useState({
@@ -177,27 +187,102 @@ const Finance = () => {
     reason: "Duplicate contribution payment",
   });
 
+  // Summary Metrics State
+  const [summaryMetrics, setSummaryMetrics] = useState<{
+    totalRevenue: number | null;
+    successfulDonations: number | null;
+    activeCampaigns: number | null;
+    operatingExpenses: number | null;
+    periodLabel?: string | null;
+  } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+
+  const extractSummaryValues = (raw: any) => {
+    if (!raw) return null;
+    const obj = (raw.data ?? raw) as Record<string, unknown>;
+    if (!obj || typeof obj !== "object") return null;
+
+    const totalRevenue =
+      obj.total_revenue ??
+      obj.total_revenue_collected ??
+      obj.total_donations_amount ??
+      obj.total_amount ??
+      obj.revenue ??
+      obj.total_income ??
+      obj.total_funds_raised;
+
+    const successfulDonations =
+      obj.successful_donations ??
+      obj.successful_donations_count ??
+      obj.completed_donations ??
+      obj.total_donations ??
+      obj.donation_count;
+
+    const activeCampaigns =
+      obj.active_campaigns ??
+      obj.active_campaigns_count ??
+      obj.active_campaign_count ??
+      obj.campaigns_active;
+
+    const operatingExpenses =
+      obj.operating_expenses ??
+      obj.total_expenses ??
+      obj.total_expense_amount ??
+      obj.expenses_amount ??
+      obj.expenses;
+
+    return {
+      totalRevenue: typeof totalRevenue === "number" ? totalRevenue : totalRevenue !== undefined && totalRevenue !== null ? Number(totalRevenue) : null,
+      successfulDonations: typeof successfulDonations === "number" ? successfulDonations : successfulDonations !== undefined && successfulDonations !== null ? Number(successfulDonations) : null,
+      activeCampaigns: typeof activeCampaigns === "number" ? activeCampaigns : activeCampaigns !== undefined && activeCampaigns !== null ? Number(activeCampaigns) : null,
+      operatingExpenses: typeof operatingExpenses === "number" ? operatingExpenses : operatingExpenses !== undefined && operatingExpenses !== null ? Number(operatingExpenses) : null,
+      periodLabel: (obj.period_start && obj.period_end) ? `${obj.period_start} to ${obj.period_end}` : null,
+    };
+  };
+
   const fetchFinanceData = useCallback(async () => {
     try {
       setLoading(true);
+      setSummaryLoading(true);
       setError(null);
-      const [donRes, sponRes, campRes, expRes, reqRes] = await Promise.allSettled([
-        donationsService.getDonations(),
-        donationsService.getSponsorships(),
-        donationsService.getCampaigns(),
-        financeService.getExpenses(),
-        inventoryService.getRequisitions(),
-      ]);
 
-      setDonations(donRes.status === "fulfilled" ? (donRes.value?.data || donRes.value || []) : []);
-      setSponsorships(sponRes.status === "fulfilled" ? (sponRes.value?.data || sponRes.value || []) : []);
-      setCampaigns(campRes.status === "fulfilled" ? (campRes.value?.data || campRes.value || []) : []);
-      setExpenses(expRes.status === "fulfilled" ? (expRes.value?.data || expRes.value || []) : []);
+      const [donRes, sponRes, campRes, expRes, reqRes, summaryRes, donSummaryRes, statsRes, dashRes] =
+        await Promise.allSettled([
+          donationsService.getDonations(),
+          donationsService.getSponsorships(),
+          donationsService.getCampaigns(),
+          financeService.getExpenses(),
+          inventoryService.getRequisitions(),
+          financeService.getFinanceSummary().catch(() => null),
+          donationsService.getDonationSummary().catch(() => null),
+          financeService.getFinanceStats().catch(() => null),
+          financeService.getFinanceDashboard().catch(() => null),
+        ]);
+
+      setDonations(donRes.status === "fulfilled" ? donRes.value?.data || donRes.value || [] : []);
+      setSponsorships(sponRes.status === "fulfilled" ? sponRes.value?.data || sponRes.value || [] : []);
+      setCampaigns(campRes.status === "fulfilled" ? campRes.value?.data || campRes.value || [] : []);
+      setExpenses(expRes.status === "fulfilled" ? expRes.value?.data || expRes.value || [] : []);
       setRequisitions(reqRes.status === "fulfilled" ? (Array.isArray(reqRes.value) ? reqRes.value : reqRes.value?.data || []) : []);
+
+      // Unpack aggregate KPIs from authoritative backend response
+      const rawSummary =
+        (summaryRes.status === "fulfilled" && summaryRes.value) ||
+        (donSummaryRes.status === "fulfilled" && donSummaryRes.value) ||
+        (statsRes.status === "fulfilled" && statsRes.value) ||
+        (dashRes.status === "fulfilled" && dashRes.value);
+
+      if (rawSummary) {
+        const metrics = extractSummaryValues(rawSummary);
+        setSummaryMetrics(metrics);
+      } else {
+        setSummaryMetrics(null);
+      }
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to load financial records.");
     } finally {
       setLoading(false);
+      setSummaryLoading(false);
     }
   }, []);
 
@@ -246,17 +331,87 @@ const Finance = () => {
     return filteredDonations.slice(start, start + pageSize);
   }, [filteredDonations, page]);
 
-  // Derived metrics
-  const totalRevenue = donations.filter((d) => d.status === "success").reduce((sum, d) => sum + Number(d.amount || 0), 0);
-  const successCount = donations.filter((d) => d.status === "success").length;
-  const totalExpensesAmount = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const activeCampaignsCount = campaigns.filter((c) => c.status === "active").length;
+  // Resolved Aggregate KPIs Hierarchy
+  const resolvedTotalRevenue = useMemo(() => {
+    if (summaryMetrics?.totalRevenue !== null && summaryMetrics?.totalRevenue !== undefined) {
+      return summaryMetrics.totalRevenue;
+    }
+    if (donations.length > 0) {
+      return donations
+        .filter((d) => isCompletedDonationStatus(d.status))
+        .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+    }
+    return null;
+  }, [summaryMetrics, donations]);
+
+  const resolvedSuccessfulDonations = useMemo(() => {
+    if (summaryMetrics?.successfulDonations !== null && summaryMetrics?.successfulDonations !== undefined) {
+      return summaryMetrics.successfulDonations;
+    }
+    if (donations.length > 0) {
+      return donations.filter((d) => isCompletedDonationStatus(d.status)).length;
+    }
+    return null;
+  }, [summaryMetrics, donations]);
+
+  const resolvedActiveCampaigns = useMemo(() => {
+    if (summaryMetrics?.activeCampaigns !== null && summaryMetrics?.activeCampaigns !== undefined) {
+      return summaryMetrics.activeCampaigns;
+    }
+    return campaigns.filter((c) => String(c.status || "").toLowerCase() === "active").length;
+  }, [summaryMetrics, campaigns]);
+
+  const resolvedOperatingExpenses = useMemo(() => {
+    if (summaryMetrics?.operatingExpenses !== null && summaryMetrics?.operatingExpenses !== undefined) {
+      return summaryMetrics.operatingExpenses;
+    }
+    if (expenses.length > 0) {
+      return expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    }
+    return null;
+  }, [summaryMetrics, expenses]);
+
+  const formatKpiCurrency = (val: number | null | undefined): string => {
+    if (loading && summaryLoading) return "...";
+    if (val === null || val === undefined || isNaN(val)) return "Unavailable";
+    return `₹${val.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const formatKpiCount = (val: number | null | undefined): string => {
+    if (loading && summaryLoading) return "...";
+    if (val === null || val === undefined || isNaN(val)) return "Unavailable";
+    return `${val}`;
+  };
 
   const stats = [
-    { title: "Total Revenue Collected", value: `₹${totalRevenue.toFixed(2)}`, trend: "Received", color: "#10B981", icon: <FaDollarSign /> },
-    { title: "Successful Donations", value: `${successCount}`, trend: "Transactions", color: "#2563EB", icon: <FaHandHoldingUsd /> },
-    { title: "Active Campaigns", value: `${activeCampaignsCount}`, trend: "Fundraising", color: "#F59E0B", icon: <FaBullhorn /> },
-    { title: "Operating Expenses", value: `₹${totalExpensesAmount.toFixed(2)}`, trend: "Disbursements", color: "#6366F1", icon: <FaFileInvoiceDollar /> },
+    {
+      title: "Total Revenue Collected",
+      value: formatKpiCurrency(resolvedTotalRevenue),
+      trend: summaryMetrics?.periodLabel ? `Period: ${summaryMetrics.periodLabel}` : "Authoritative Aggregate",
+      color: "#10B981",
+      icon: <FaDollarSign />,
+    },
+    {
+      title: "Successful Donations",
+      value: formatKpiCount(resolvedSuccessfulDonations),
+      trend: "Verified Transactions",
+      color: "#2563EB",
+      icon: <FaHandHoldingUsd />,
+    },
+    {
+      title: "Active Campaigns",
+      value: formatKpiCount(resolvedActiveCampaigns),
+      trend: "Active Fundraising",
+      color: "#F59E0B",
+      icon: <FaBullhorn />,
+    },
+    {
+      title: "Operating Expenses",
+      value: formatKpiCurrency(resolvedOperatingExpenses),
+      trend: "Verified Ledger",
+      color: "#6366F1",
+      icon: <FaFileInvoiceDollar />,
+    },
   ];
 
   // Action handlers
@@ -472,14 +627,41 @@ const Finance = () => {
     {
       key: "id",
       title: "Transaction ID",
-      render: (_v, row) => <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{String(row.id || "").slice(0, 8)}</span>,
+      render: (_v, row) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenDonationDetails(row);
+          }}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#2563EB",
+            fontFamily: "monospace",
+            fontWeight: 700,
+            cursor: "pointer",
+            padding: 0,
+            textDecoration: "underline",
+          }}
+          title="Click to view complete donation details"
+        >
+          {String(row.id || "").slice(0, 8)}
+        </button>
+      ),
     },
     {
       key: "donorName",
       title: "Donor",
       render: (_v, row) => (
-        <div>
-          <strong>{row.donorName}</strong>
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenDonationDetails(row);
+          }}
+          style={{ cursor: "pointer" }}
+          title="Click to view complete donation details"
+        >
+          <strong style={{ color: "#0F172A" }}>{row.donorName}</strong>
           {row.donorEmail !== "—" && <div style={{ fontSize: "11px", color: "#64748B" }}>{row.donorEmail}</div>}
         </div>
       ),
@@ -666,22 +848,39 @@ const Finance = () => {
                 <option value="refunded">Refunded</option>
               </select>
             }
+            onRowClick={(row: any) => handleOpenDonationDetails(row)}
             renderRowActions={(row: any) => (
               <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
                 <button
-                  onClick={() => void handleGenerate80G(String(row.id))}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenDonationDetails(row);
+                  }}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#F8FAFC", color: "#334155", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+                >
+                  <FaInfoCircle /> Details
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleGenerate80G(String(row.id));
+                  }}
                   style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
                 >
                   <FaReceipt /> 80G Tax Cert
                 </button>
                 <button
-                  onClick={() => void handleReconcile(String(row.id))}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleReconcile(String(row.id));
+                  }}
                   style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
                 >
                   <FaCheckDouble /> Reconcile
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedDonation(row);
                     setRefundForm({ donation_id: String(row.id), reason: "Duplicate contribution payment" });
                     setIsRefundModalOpen(true);
@@ -713,7 +912,7 @@ const Finance = () => {
                 <div key={sp.id || idx} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <div style={{ fontWeight: 800, fontSize: "16px", color: "#0F172A" }}>
-                      Sponsor: {sp.sponsor_name || "Anonymous Sponsor"} &bull; Dog ID: {String(sp.dog_id || "").slice(0, 8)}
+                      Sponsor: {sp.sponsor_name || "Anonymous Sponsor"} &bull; Dog: {dogs.find(d => String(d.id || "").toLowerCase() === String(sp.dog_id || "").toLowerCase())?.label || sp.dog_name || (sp.dog_id ? `Dog (${String(sp.dog_id).slice(0, 8)})` : "Shelter Dog")}
                     </div>
                     <div style={{ fontSize: "12px", color: "#64748B", marginTop: "4px" }}>
                       Amount: ₹{Number(sp.amount || 0).toFixed(2)} &bull; Duration: {sp.duration_months || 12} Months
@@ -1079,6 +1278,164 @@ const Finance = () => {
             <button type="button" onClick={() => void handleDisbursePo(selectedRequisition)} disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 600 }}>{isSubmitting ? "Authorizing..." : "Confirm & Disburse Payment"}</button>
           </div>
         </div>
+      </Modal>
+
+      {/* Dedicated Donation Details Modal */}
+      <Modal
+        isOpen={isDonationDetailsModalOpen}
+        onClose={() => setIsDonationDetailsModalOpen(false)}
+        title={selectedDonation ? `Donation Details — #${String(selectedDonation.transactionId || selectedDonation.id || "").slice(0, 8)}` : "Donation Details"}
+      >
+        {selectedDonation && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+            {/* Amount Banner Header */}
+            <div
+              style={{
+                background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+                borderRadius: "12px",
+                padding: "20px",
+                color: "#FFFFFF",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", color: "#94A3B8", fontWeight: 600 }}>Total Contribution</div>
+                <div style={{ fontSize: "26px", fontWeight: 800, color: "#10B981", marginTop: "2px" }}>
+                  ₹{Number(selectedDonation.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {selectedDonation.currency || "INR"}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <StatusBadge status={selectedDonation.status} />
+                <div style={{ fontSize: "12px", color: "#94A3B8", marginTop: "6px" }}>
+                  {selectedDonation.paymentProvider || "Online Gateway"}
+                </div>
+              </div>
+            </div>
+
+            {/* Section 1: Transaction Information */}
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <FaDollarSign color="#10B981" /> Transaction Information
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+                <div>
+                  <span style={{ color: "#64748B" }}>Transaction ID:</span>{" "}
+                  <strong style={{ fontFamily: "monospace", color: "#0F172A" }}>{selectedDonation.transactionId || selectedDonation.id}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donation UUID:</span>{" "}
+                  <code style={{ fontSize: "12px", color: "#334155" }}>{selectedDonation.id}</code>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donation Type:</span>{" "}
+                  <strong style={{ textTransform: "capitalize", color: "#0F172A" }}>{selectedDonation.type}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Payment Method:</span>{" "}
+                  <strong style={{ color: "#0F172A" }}>{selectedDonation.paymentProvider}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donation Status:</span>{" "}
+                  <strong style={{ textTransform: "uppercase", color: selectedDonation.status === "success" ? "#047857" : "#B45309" }}>{selectedDonation.status}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Received Date:</span>{" "}
+                  <strong style={{ color: "#0F172A" }}>{selectedDonation.date ? formatDateTime(String(selectedDonation.date)) : "Not recorded"}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Donor Information */}
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <FaUser color="#2563EB" /> Donor Information
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donor Name:</span>{" "}
+                  <strong style={{ color: "#0F172A" }}>{selectedDonation.donorName}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donor Email:</span>{" "}
+                  <strong style={{ color: "#0F172A" }}>{selectedDonation.donorEmail}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donor Phone:</span>{" "}
+                  <strong style={{ color: "#0F172A" }}>{selectedDonation.donorPhone || "Not provided"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>Donor User ID:</span>{" "}
+                  <code style={{ fontSize: "12px", color: "#334155" }}>{selectedDonation.donorId || "N/A"}</code>
+                </div>
+                <div style={{ gridColumn: "span 2" }}>
+                  <span style={{ color: "#64748B" }}>Anonymity Status:</span>{" "}
+                  <strong style={{ color: selectedDonation.raw?.is_anonymous || selectedDonation.raw?.anonymous ? "#B45309" : "#047857" }}>
+                    {selectedDonation.raw?.is_anonymous || selectedDonation.raw?.anonymous ? "Anonymous Contribution (Public PII Masked)" : "Verified Registered Donor"}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Purpose & Receipts */}
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <FaReceipt color="#8B5CF6" /> Purpose &amp; Tax Receipt Metadata
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "13px" }}>
+                <div>
+                  <span style={{ color: "#64748B" }}>Contribution Notes / Purpose:</span>{" "}
+                  <span style={{ fontWeight: 600, color: "#0F172A" }}>{selectedDonation.notes || selectedDonation.raw?.purpose || "General Animal Welfare Support"}</span>
+                </div>
+                <div>
+                  <span style={{ color: "#64748B" }}>80G Receipt Key:</span>{" "}
+                  <code style={{ fontSize: "12px", color: "#334155" }}>{selectedDonation.receiptFileKey || selectedDonation.raw?.receipt_file_key || "Auto-Generated Upon Verification"}</code>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions Footer */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #E2E8F0" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => {
+                    setIsDonationDetailsModalOpen(false);
+                    void handleGenerate80G(String(selectedDonation.id));
+                  }}
+                  style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: "13px", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaReceipt /> 80G Tax Cert
+                </button>
+                <button
+                  onClick={() => {
+                    setIsDonationDetailsModalOpen(false);
+                    void handleReconcile(String(selectedDonation.id));
+                  }}
+                  style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #93C5FD", background: "#EFF6FF", color: "#1D4ED8", fontSize: "13px", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaCheckDouble /> Reconcile
+                </button>
+                <button
+                  onClick={() => {
+                    setIsDonationDetailsModalOpen(false);
+                    setRefundForm({ donation_id: String(selectedDonation.id), reason: "Duplicate contribution payment" });
+                    setIsRefundModalOpen(true);
+                  }}
+                  style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#DC2626", fontSize: "13px", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  <FaUndo /> Refund
+                </button>
+              </div>
+              <button
+                onClick={() => setIsDonationDetailsModalOpen(false)}
+                style={{ padding: "8px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#334155", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

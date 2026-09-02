@@ -131,18 +131,35 @@ const VetAppointments = () => {
 
       if (ownerIds.size > 0) {
         const newUsers = new Map<string, Row>();
-        await Promise.all(
-          Array.from(ownerIds).map(async (id) => {
-            try {
-              const summary = await userService.getUserSummary(id);
-              if (summary && (summary.full_name || summary.name || summary.email)) {
-                newUsers.set(id, summary);
-              }
-            } catch {
-              /* ignore summary fetch error */
-            }
-          })
-        );
+        // Deduplicate owner IDs against userMap state
+        const missingIds: string[] = [];
+        setUserMap((prevMap) => {
+          ownerIds.forEach((id) => {
+            if (!prevMap.has(id)) missingIds.push(id);
+          });
+          return prevMap;
+        });
+
+        if (missingIds.length > 0) {
+          // Batch user summary requests in chunks of 4 to prevent HTTP 429 rate limit errors
+          const chunkSize = 4;
+          for (let i = 0; i < missingIds.length; i += chunkSize) {
+            const chunk = missingIds.slice(i, i + chunkSize);
+            await Promise.all(
+              chunk.map(async (id) => {
+                try {
+                  const summary = await userService.getUserSummary(id);
+                  if (summary && (summary.full_name || summary.name || summary.email)) {
+                    newUsers.set(id, summary);
+                  }
+                } catch {
+                  /* ignore summary fetch error */
+                }
+              })
+            );
+          }
+        }
+
         if (newUsers.size > 0) {
           setUserMap((prev) => {
             const merged = new Map(prev);

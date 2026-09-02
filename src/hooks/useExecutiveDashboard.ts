@@ -147,6 +147,7 @@ export function useExecutiveDashboard() {
       volunteerService.getVolunteers().catch(() => []),
       donationsService.getDonations().catch(() => []),
       financeService.getFinanceSummary().catch(() => null),
+      donationsService.getDonationSummary().catch(() => null),
       dashboardService.getAuditLogs({ limit: 25 }).catch(() => dashboardService.getRecentActivities(25).catch(() => [])),
     ]);
 
@@ -163,6 +164,7 @@ export function useExecutiveDashboard() {
       volunteersRes,
       donationsRes,
       financeSummaryRes,
+      donSummaryRes,
       activitiesRes,
     ] = results;
 
@@ -175,7 +177,9 @@ export function useExecutiveDashboard() {
     const fostersList = unwrapList(fostersRes.status === "fulfilled" ? fostersRes.value : []);
     const volunteersList = unwrapList(volunteersRes.status === "fulfilled" ? volunteersRes.value : []);
     const donationsList = unwrapList(donationsRes.status === "fulfilled" ? donationsRes.value : []);
-    const financeSummaryObj = (financeSummaryRes.status === "fulfilled" ? financeSummaryRes.value : null) as AnyRecord | null;
+    const finSummaryVal = financeSummaryRes.status === "fulfilled" ? financeSummaryRes.value : null;
+    const donSummaryVal = donSummaryRes.status === "fulfilled" ? donSummaryRes.value : null;
+    const financeSummaryObj = (finSummaryVal || donSummaryVal || null) as AnyRecord | null;
 
     const activities = mergeActivities(
       unwrapList(activitiesRes.status === "fulfilled" ? activitiesRes.value : []).map(normalizeActivity).filter((a): a is ActivityEntry => a !== null),

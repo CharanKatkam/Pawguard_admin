@@ -1,5 +1,6 @@
 import api from "../api/axios";
 import { publishActionEvent } from "../utils/eventSystem";
+import { userService } from "./userService";
 
 export type DonationType = "one_time" | "recurring" | "sponsorship";
 export type DonationStatus = "pending" | "success" | "failed" | "refunded";
@@ -94,26 +95,52 @@ export const extractArray = (body: any): any[] => {
 };
 
 /** Normalize raw DonationResponse row to standard page format. */
-export const normalizeDonationRow = (d: any): any => ({
-  id: d.id || d._id || d.donation_id,
-  donorId: d.donor_id || d.user_id,
-  donorName: d.donor_name || d.user?.full_name || d.user_name || d.name || "Anonymous Donor",
-  donorEmail: d.donor_email || d.user?.email || d.email || "—",
-  donorPhone: d.donor_phone || d.phone || "—",
-  dogId: d.dog_id,
-  campaignId: d.campaign_id,
-  amount: Number(d.amount || d.total_amount || d.price || d.donation_amount || 0),
-  currency: d.currency || "INR",
-  type: d.donation_type || d.type || "one_time",
-  status: (String(d.status || "").toLowerCase() === "completed" ? "success" : String(d.status || "success").toLowerCase()) as DonationStatus,
-  transactionId: d.transaction_id || d.payment_id || d.tx_id,
-  notes: d.notes || d.purpose || d.description,
-  paymentProvider: d.payment_provider || d.payment_method || "Online Gateway",
-  receiptFileKey: d.receipt_file_key,
-  date: d.created_at || d.transaction_date || d.date || d.updated_at,
-  dog: d.dog,
-  raw: d,
-});
+export const normalizeDonationRow = (d: any): any => {
+  const isAnon = Boolean(d.is_anonymous || d.anonymous);
+  const rawStatus = String(d.status || d.payment_status || d.transaction_status || d.state || "").toLowerCase().trim();
+
+  let status: DonationStatus = "pending";
+  if (["success", "completed", "paid", "captured", "settled", "successful"].includes(rawStatus)) {
+    status = "success";
+  } else if (["failed", "rejected", "declined"].includes(rawStatus)) {
+    status = "failed";
+  } else if (["refunded", "refund"].includes(rawStatus)) {
+    status = "refunded";
+  } else {
+    const secondaryPayStatus = String(d.payment_status || d.transaction_status || "").toLowerCase().trim();
+    if (["success", "completed", "paid", "captured"].includes(secondaryPayStatus)) {
+      status = "success";
+    } else if (!rawStatus || rawStatus === "posted") {
+      status = "success";
+    } else {
+      status = "pending";
+    }
+  }
+
+  const explicitName = d.donor_name || d.donorName || d.user?.full_name || d.user?.name || d.donor?.full_name || d.donor?.name || d.name;
+  const initialName = isAnon ? "Anonymous Donor" : (explicitName || "Anonymous Donor");
+
+  return {
+    id: d.id || d._id || d.donation_id,
+    donorId: d.donor_id || d.user_id,
+    donorName: initialName,
+    donorEmail: d.donor_email || d.user?.email || d.email || "—",
+    donorPhone: d.donor_phone || d.phone || "—",
+    dogId: d.dog_id,
+    campaignId: d.campaign_id,
+    amount: Number(d.amount || d.total_amount || d.price || d.donation_amount || 0),
+    currency: d.currency || "INR",
+    type: d.donation_type || d.type || "one_time",
+    status,
+    transactionId: d.transaction_id || d.payment_id || d.tx_id || d.id,
+    notes: d.notes || d.purpose || d.description,
+    paymentProvider: d.payment_provider || d.payment_method || "Online Gateway",
+    receiptFileKey: d.receipt_file_key,
+    date: d.created_at || d.transaction_date || d.date || d.updated_at,
+    dog: d.dog,
+    raw: d,
+  };
+};
 
 export const donationsService = {
   // GET /admin/dashboard/donation-summary
@@ -128,7 +155,34 @@ export const donationsService = {
     const body = response.data;
     const raw = extractArray(body);
     const rows = raw.map(normalizeDonationRow);
-    return { ...body, data: rows, total: body?.meta?.total ?? body?.total ?? rows.length };
+
+    // Resolve donor names for rows with donor_id where name is unpopulated and not explicitly anonymous
+    const enrichedRows = await Promise.all(
+      rows.map(async (row) => {
+        if (
+          (!row.donorName || row.donorName === "Anonymous Donor") &&
+          row.donorId &&
+          !row.raw?.is_anonymous &&
+          !row.raw?.anonymous
+        ) {
+          try {
+            const userSummary = await userService.getUserSummary(row.donorId);
+            if (userSummary && (userSummary.full_name || userSummary.name)) {
+              return {
+                ...row,
+                donorName: String(userSummary.full_name || userSummary.name),
+                donorEmail: String(userSummary.email || row.donorEmail || "—"),
+              };
+            }
+          } catch {
+            // Keep default row if lookup fails
+          }
+        }
+        return row;
+      })
+    );
+
+    return { ...body, data: enrichedRows, total: body?.meta?.total ?? body?.total ?? enrichedRows.length };
   },
 
   // GET /donations/history - My donation history

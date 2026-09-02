@@ -99,8 +99,14 @@ export const userService = {
     }
     const promise = (async () => {
       try {
-        const response = await api.get(`/auth/users/${cleanId}/summary`);
-        const data = response.data;
+        let data: any = null;
+        try {
+          const res = await api.get(`/auth/users/${cleanId}/summary`);
+          data = res.data;
+        } catch {
+          const res = await api.get(`/admin/users/${cleanId}`);
+          data = res.data;
+        }
         return (data?.data || data) as Record<string, unknown>;
       } catch {
         return null;

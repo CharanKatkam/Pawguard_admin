@@ -134,8 +134,23 @@ const SuperAdminDashboard = () => {
     return Number.isFinite(n) ? n : 0;
   };
 
-  const summaryRevenue = financeSummary?.total_donations ?? financeSummary?.totalRevenue ?? financeSummary?.total_revenue ?? financeSummary?.total_income;
-  const summarySuccessfulDonations = financeSummary?.successful_donations ?? financeSummary?.successfulDonations;
+  const summaryRevenue =
+    financeSummary?.total_revenue ??
+    financeSummary?.total_revenue_collected ??
+    financeSummary?.total_donations_amount ??
+    financeSummary?.total_amount ??
+    financeSummary?.revenue ??
+    summary?.total_revenue ??
+    summary?.total_revenue_collected ??
+    summary?.total_donations_amount;
+
+  const summarySuccessfulDonations =
+    financeSummary?.successful_donations ??
+    financeSummary?.successful_donations_count ??
+    financeSummary?.completed_donations ??
+    financeSummary?.total_donations ??
+    summary?.successful_donations ??
+    summary?.total_donations;
 
   const transactionIncomeSum = finance
     .filter((t) => /income|donation|revenue/i.test(String(t.type || t.transaction_type || "").toLowerCase()))
@@ -152,8 +167,6 @@ const SuperAdminDashboard = () => {
     (transactionIncomeSum > 0 ? transactionIncomeSum : undefined) ??
     (donationIncomeSum > 0 ? donationIncomeSum : undefined) ??
     (rawDonationsSum > 0 ? rawDonationsSum : undefined) ??
-    summary.total_donations ??
-    summary.total_revenue ??
     0
   );
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import DataTable from "../../components/common/DataTable";
 import StatCard from "../../components/dashboard/StatCard";
 import Modal from "../../components/common/Modal";
@@ -323,6 +323,7 @@ const LocationMapPreview = ({
 
 // --- MAIN RESCUE MANAGEMENT COMPONENT ---
 const RescueManagement = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Navigation tab: 'cases' | 'agents' | 'vehicles'
@@ -842,6 +843,7 @@ const RescueManagement = () => {
     try {
       setIsSubmitting(true);
       await rescueService.updateRescueStatus(selectedCase.id, statusForm.status);
+      const newStatus = statusForm.status.toLowerCase();
       addToast(`Status updated to ${statusForm.status}!`, "success");
       setIsStatusUpdateOpen(false);
       fetchAllData();
@@ -850,6 +852,16 @@ const RescueManagement = () => {
       if (isCaseModalOpen) {
         const refreshed = await rescueService.getRescueCaseById(selectedCase.id);
         if (refreshed) setSelectedCase(formatCaseRow(refreshed?.data || refreshed));
+      }
+
+      // If rescue is completed/rescued/admitted, trigger workflow bridge to Register Rescued Dog
+      if (["completed", "rescued", "admitted"].includes(newStatus)) {
+        const caseId = selectedCase.id;
+        setTimeout(() => {
+          if (window.confirm(`Rescue mission completed! Would you like to register the rescued dog in the Dog Repository now?`)) {
+            navigate(`/pets?action=add&rescue_case_id=${encodeURIComponent(caseId)}`);
+          }
+        }, 300);
       }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string; message?: string } } };

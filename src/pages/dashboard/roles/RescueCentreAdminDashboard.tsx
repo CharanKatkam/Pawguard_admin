@@ -102,7 +102,9 @@ const mapRescueCallRowToDetail = (row: RescueCallRow): RescueRequestTableRow => 
   return {
     id: row.id,
     ticket_number: String(raw.ticket_number || row.ticket || ""),
-    reporter: String(raw.reporter_name || row.reporter || "Anonymous Reporter"),
+    reporter: (raw.is_anonymous || raw.anonymous)
+      ? "Anonymous Reporter"
+      : String(raw.reporter_name || row.reporter || "Unknown Reporter"),
     phone: String(raw.reporter_phone || raw.phone || "Not provided"),
     location: String(raw.location_address || raw.location || "Location not recorded"),
     condition: String(raw.physical_condition || "-"),
