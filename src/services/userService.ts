@@ -87,6 +87,29 @@ export const userService = {
     }
   },
 
+  // GET /auth/users/{user_id}/summary - lightweight user display summary safe for all roles
+  // In-memory cache to prevent 429 rate limit errors when resolving multiple appointments
+  _summaryCache: new Map<string, Promise<Record<string, unknown> | null>>(),
+
+  getUserSummary: function (userId: string): Promise<Record<string, unknown> | null> {
+    const cleanId = String(userId || "").trim().toLowerCase();
+    if (!cleanId) return Promise.resolve(null);
+    if (this._summaryCache.has(cleanId)) {
+      return this._summaryCache.get(cleanId)!;
+    }
+    const promise = (async () => {
+      try {
+        const response = await api.get(`/auth/users/${cleanId}/summary`);
+        const data = response.data;
+        return (data?.data || data) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })();
+    this._summaryCache.set(cleanId, promise);
+    return promise;
+  },
+
   createUser: async (data: UserPayload) => {
     const payload: Record<string, unknown> = {
       email: data.email.trim(),
