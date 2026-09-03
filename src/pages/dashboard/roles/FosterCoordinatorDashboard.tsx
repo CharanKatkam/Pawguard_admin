@@ -73,7 +73,7 @@ const FosterCoordinatorDashboard = () => {
 
       const [dashRes, profileRes] = await Promise.allSettled([
         dashboardService.getFosterDashboard(),
-        fosterService.getFosterProfiles(),
+        fosterService.getFosterProfiles({ page_size: 500 }),
       ]);
 
       let dashObj: any = null;
@@ -122,7 +122,7 @@ const FosterCoordinatorDashboard = () => {
       setVolLoading(true);
       let res: any;
       try {
-        res = await volunteerService.getVolunteers();
+        res = await volunteerService.getVolunteers({ page_size: 500 });
       } catch {
         res = [];
       }

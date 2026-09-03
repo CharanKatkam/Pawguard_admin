@@ -118,23 +118,32 @@ export const normalizeDonationRow = (d: any): any => {
   }
 
   const explicitName = d.donor_name || d.donorName || d.user?.full_name || d.user?.name || d.donor?.full_name || d.donor?.name || d.name;
-  const initialName = isAnon ? "Anonymous Donor" : (explicitName || "Anonymous Donor");
+  const initialName = isAnon
+    ? "Anonymous Donor"
+    : explicitName
+    ? explicitName
+    : (d.donor_id || d.user_id)
+    ? "Unknown User"
+    : "Anonymous Donor";
 
   return {
     id: d.id || d._id || d.donation_id,
-    donorId: d.donor_id || d.user_id,
+    donorId: d.donor_id || d.user_id || "",
     donorName: initialName,
-    donorEmail: d.donor_email || d.user?.email || d.email || "—",
-    donorPhone: d.donor_phone || d.phone || "—",
+    donorEmail: d.donor_email || d.user?.email || d.email || "Not available",
+    donorPhone: d.donor_phone || d.user?.phone || d.phone || d.user?.phone_number || "Not provided",
     dogId: d.dog_id,
     campaignId: d.campaign_id,
     amount: Number(d.amount || d.total_amount || d.price || d.donation_amount || 0),
     currency: d.currency || "INR",
     type: d.donation_type || d.type || "one_time",
     status,
+    rawStatus: d.status || rawStatus,
+    paymentStatus: d.payment_status || d.transaction_status || "completed",
     transactionId: d.transaction_id || d.payment_id || d.tx_id || d.id,
     notes: d.notes || d.purpose || d.description,
-    paymentProvider: d.payment_provider || d.payment_method || "Online Gateway",
+    paymentProvider: d.payment_provider || "Online Gateway",
+    paymentMethod: d.payment_method || d.method || "Not available",
     receiptFileKey: d.receipt_file_key,
     date: d.created_at || d.transaction_date || d.date || d.updated_at,
     dog: d.dog,
@@ -156,23 +165,31 @@ export const donationsService = {
     const raw = extractArray(body);
     const rows = raw.map(normalizeDonationRow);
 
-    // Resolve donor names for rows with donor_id where name is unpopulated and not explicitly anonymous
+    // Resolve donor names for rows with donor_id where name is unpopulated or "Unknown User" and not explicitly anonymous
     const enrichedRows = await Promise.all(
       rows.map(async (row) => {
         if (
-          (!row.donorName || row.donorName === "Anonymous Donor") &&
+          (!row.donorName || row.donorName === "Anonymous Donor" || row.donorName === "Unknown User") &&
           row.donorId &&
           !row.raw?.is_anonymous &&
           !row.raw?.anonymous
         ) {
           try {
             const userSummary = await userService.getUserSummary(row.donorId);
-            if (userSummary && (userSummary.full_name || userSummary.name)) {
-              return {
-                ...row,
-                donorName: String(userSummary.full_name || userSummary.name),
-                donorEmail: String(userSummary.email || row.donorEmail || "—"),
-              };
+            if (userSummary) {
+              const uObj = (userSummary.data || userSummary.user || userSummary) as Record<string, unknown>;
+              const fullName = uObj.full_name || uObj.name || (uObj.first_name ? `${uObj.first_name} ${uObj.last_name || ""}`.trim() : null);
+              if (fullName || uObj.email) {
+                const realName = String(fullName || uObj.email || "Registered User");
+                const realEmail = String(uObj.email || row.donorEmail || "Not available");
+                const realPhone = String(uObj.phone || uObj.phone_number || row.donorPhone || "Not provided");
+                return {
+                  ...row,
+                  donorName: realName,
+                  donorEmail: realEmail,
+                  donorPhone: realPhone,
+                };
+              }
             }
           } catch {
             // Keep default row if lookup fails
@@ -234,20 +251,29 @@ export const donationsService = {
   },
 
   // POST /donations/{donation_id}/reconcile
-  reconcileDonation: async (donationId: string, notes?: string) => {
-    const notesText = notes || "Reconciled by Finance User";
-    const response = await api.post(`/donations/${donationId}/reconcile`, {
-      reconciliation_notes: notesText,
-      notes: notesText,
-    });
-    await publishActionEvent({
-      module: "finance",
-      action: "update",
-      title: "Donation Reconciled",
-      message: `Donation ${donationId} reconciled to general ledger.`,
-      targetRoles: ["super_admin", "finance_user"],
-    });
-    return response.data?.data ?? response.data;
+  reconcileDonation: async (donationId: string) => {
+    const cleanId = String(donationId || "").trim();
+    try {
+      const response = await api.post(`/donations/${cleanId}/reconcile`);
+      await publishActionEvent({
+        module: "finance",
+        action: "update",
+        title: "Donation Reconciled",
+        message: `Donation ${cleanId} reconciled to general ledger.`,
+        targetRoles: ["super_admin", "finance_user"],
+      });
+      return response.data?.data ?? response.data;
+    } catch {
+      const response = await api.post("/finance/reconcile/donations", { donation_ids: [cleanId] });
+      await publishActionEvent({
+        module: "finance",
+        action: "update",
+        title: "Donation Reconciled",
+        message: `Donation ${cleanId} reconciled to general ledger.`,
+        targetRoles: ["super_admin", "finance_user"],
+      });
+      return response.data?.data ?? response.data;
+    }
   },
 
   // GET /donations/{donation_id}/receipt

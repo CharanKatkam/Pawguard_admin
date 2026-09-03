@@ -24,6 +24,7 @@ import {
   FaEdit,
 } from "react-icons/fa";
 import volunteerService from "../../../services/volunteerService";
+import dashboardService from "../../../services/dashboardService";
 import shelterService from "../../../services/shelterService";
 import notificationService from "../../../services/notificationService";
 import reportsService from "../../../services/reportsService";
@@ -575,11 +576,12 @@ const VolunteerCoordinatorDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [volRes, shiftRes, facRes, statRes] = await Promise.allSettled([
-        volunteerService.getVolunteers(),
-        volunteerService.getShifts(),
-        shelterService.getShelters(),
+      const [volRes, shiftRes, facRes, statRes, dashRes] = await Promise.allSettled([
+        volunteerService.getVolunteers({ page_size: 500 }),
+        volunteerService.getShifts({ page_size: 500 }),
+        shelterService.getShelters({ page_size: 50 }),
         volunteerService.getVolunteerStats(),
+        dashboardService.getVolunteerDashboard().catch(() => null),
       ]);
 
       const volList = volRes.status === "fulfilled"
@@ -591,7 +593,11 @@ const VolunteerCoordinatorDashboard = () => {
       const facList = facRes.status === "fulfilled"
         ? (Array.isArray(facRes.value) ? facRes.value : facRes.value?.data || [])
         : [];
-      const statObj = statRes.status === "fulfilled" ? statRes.value?.data || statRes.value || {} : {};
+      let statObj = statRes.status === "fulfilled" ? statRes.value?.data || statRes.value || {} : {};
+      if (dashRes.status === "fulfilled" && dashRes.value) {
+        const dashData = dashRes.value?.data || dashRes.value;
+        statObj = { ...statObj, ...dashData };
+      }
 
       setVolunteers(volList);
       setShifts(shiftList);

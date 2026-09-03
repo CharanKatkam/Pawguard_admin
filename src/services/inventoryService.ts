@@ -257,9 +257,22 @@ export const inventoryService = {
       action: "update",
       title: `Requisition ${status.toUpperCase()}`,
       message: `Requisition ${requisitionId} status set to ${status}.`,
-      targetRoles: ["super_admin", "inventory_manager", "finance_user"],
+      targetRoles: ["super_admin", "inventory_manager", "finance_user", "shelter_manager"],
     });
     return response.data;
+  },
+
+  // Dedicated workflow helper methods calling actual backend contract
+  approveRequisition: async (requisitionId: string) => {
+    return inventoryService.updateRequisitionStatus(requisitionId, "approved");
+  },
+
+  rejectRequisition: async (requisitionId: string) => {
+    return inventoryService.updateRequisitionStatus(requisitionId, "rejected");
+  },
+
+  receiveRequisition: async (requisitionId: string) => {
+    return inventoryService.updateRequisitionStatus(requisitionId, "received");
   },
 
   // POST /inventory/requisitions/bulk/status

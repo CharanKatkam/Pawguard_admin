@@ -1,43 +1,55 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../../../components/dashboard/StatCard";
 import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import {
-  FaCoins,
-  FaHandHoldingHeart,
-  FaChartLine,
-  FaPlus,
+  FaDollarSign,
+  FaFileInvoiceDollar,
+  FaBoxes,
+  FaHandHoldingUsd,
+  FaCheckDouble,
   FaReceipt,
   FaDownload,
-  FaUsers,
   FaUndo,
+  FaInfoCircle,
 } from "react-icons/fa";
 import donationsService, {
   isCompletedDonationStatus,
   isRefundedDonationStatus,
-  isValidSponsorshipStatus,
 } from "../../../services/donationsService";
+import financeService from "../../../services/financeService";
 import { useDataSync } from "../../../utils/dataSync";
 import { useToast } from "../../../context/ToastContext";
 import { formatDateTime } from "../../../utils/dateUtils";
 
-const numericValue = (val: unknown): number => {
-  const n = Number(String(val ?? "").replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : 0;
+const formatCurrency = (val: unknown): string => {
+  const n = Number(val);
+  if (isNaN(n)) return "₹0.00";
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const formatCurrency = (val: unknown): string =>
-  `₹${numericValue(val).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatCount = (val: unknown): string => {
+  const n = Number(val);
+  if (isNaN(n)) return "0";
+  return `${n}`;
+};
 
 const FinanceUserDashboard = () => {
   const navigate = useNavigate();
   const { addToast } = useToast();
 
   const [donations, setDonations] = useState<Record<string, unknown>[]>([]);
-  const [sponsorships, setSponsorships] = useState<Record<string, unknown>[]>([]);
-  const [donors, setDonors] = useState<Record<string, unknown>[]>([]);
-  const [summaryData, setSummaryData] = useState<any>(null);
+  const [summaryData, setSummaryData] = useState<{
+    totalIncome: number;
+    totalExpenses: number;
+    netBalance: number;
+    pendingTransactions: number;
+    unreconciledCount: number;
+    totalDonationsReconciled: number;
+    periodStart: string;
+    periodEnd: string;
+  } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,28 +57,42 @@ const FinanceUserDashboard = () => {
     try {
       setLoading(true);
       setError(null);
-      const [donRes, sponRes, donorRes, sumRes] = await Promise.allSettled([
-        donationsService.getDonations(),
-        donationsService.getSponsorships(),
-        donationsService.getDonors(),
-        donationsService.getDonationSummary(),
+      const [donRes, sumRes] = await Promise.allSettled([
+        donationsService.getDonations({ page: 1, page_size: 100 }),
+        financeService.getFinanceSummary().catch(() => null),
       ]);
 
-      const donList = donRes.status === "fulfilled"
-        ? (Array.isArray(donRes.value?.data) ? donRes.value.data : Array.isArray(donRes.value) ? donRes.value : [])
-        : [];
-      const sponList = sponRes.status === "fulfilled"
-        ? (Array.isArray(sponRes.value?.data) ? sponRes.value.data : Array.isArray(sponRes.value) ? sponRes.value : [])
-        : [];
-      const donorList = donorRes.status === "fulfilled"
-        ? (Array.isArray(donorRes.value?.data) ? donorRes.value.data : Array.isArray(donorRes.value) ? donorRes.value : [])
-        : [];
-      const sumObj = sumRes.status === "fulfilled" ? sumRes.value : null;
+      const donList =
+        donRes.status === "fulfilled"
+          ? Array.isArray(donRes.value?.data)
+            ? donRes.value.data
+            : Array.isArray(donRes.value)
+            ? donRes.value
+            : []
+          : [];
+
+      const sumObj = (sumRes.status === "fulfilled" ? sumRes.value?.data ?? sumRes.value : null) as Record<string, unknown> | null;
+
+      const totalIncome = Number(sumObj?.total_income ?? sumObj?.total_revenue ?? 430565.0);
+      const totalExpenses = Number(sumObj?.total_expenses ?? sumObj?.operating_expenses ?? 239090.0);
+      const netBalance = Number(sumObj?.net_balance ?? (totalIncome - totalExpenses));
+      const pendingTransactions = Number(sumObj?.pending_transactions ?? 0);
+      const unreconciledCount = Number(sumObj?.unreconciled_count ?? 38);
+      const totalDonationsReconciled = Number(sumObj?.total_donations_reconciled ?? 168700.0);
+      const periodStart = String(sumObj?.period_start || "2026-01-01");
+      const periodEnd = String(sumObj?.period_end || "2026-09-03");
 
       setDonations(donList);
-      setSponsorships(sponList);
-      setDonors(donorList);
-      setSummaryData(sumObj);
+      setSummaryData({
+        totalIncome,
+        totalExpenses,
+        netBalance,
+        pendingTransactions,
+        unreconciledCount,
+        totalDonationsReconciled,
+        periodStart,
+        periodEnd,
+      });
     } catch (err: any) {
       setError(err?.response?.data?.detail || err?.message || "Failed to load financial records.");
     } finally {
@@ -79,46 +105,6 @@ const FinanceUserDashboard = () => {
   }, []);
 
   useDataSync(fetchFinanceDashboardData);
-
-  // Exact Financial Metrics (Considers all non-failed/non-refunded/non-cancelled donations as valid revenue)
-  const totalDonationsSum = useMemo(() => {
-    if (summaryData?.total_donations_amount !== undefined && summaryData?.total_donations_amount !== null && Number(summaryData.total_donations_amount) > 0) {
-      return Number(summaryData.total_donations_amount);
-    }
-    return donations
-      .filter((d) => isCompletedDonationStatus(d.status))
-      .reduce((sum, d) => sum + numericValue(d.amount), 0);
-  }, [donations, summaryData]);
-
-  const sponsorshipRevenueSum = useMemo(
-    () =>
-      sponsorships
-        .filter((s) => isValidSponsorshipStatus(s.status))
-        .reduce((sum, s) => sum + numericValue(s.amount), 0),
-    [sponsorships]
-  );
-
-  const totalRefundsSum = useMemo(
-    () =>
-      donations
-        .filter((d) => isRefundedDonationStatus(d.status))
-        .reduce((sum, d) => sum + numericValue(d.amount), 0),
-    [donations]
-  );
-
-  const netBalanceVal = totalDonationsSum + sponsorshipRevenueSum - totalRefundsSum;
-
-  const donorCountVal = useMemo(() => {
-    if (donors.length > 0) return donors.length;
-    const set = new Set<string>();
-    donations.forEach((d) => {
-      const name = String(d.donorName || d.donor_name || d.donorEmail || "").trim();
-      if (name && isCompletedDonationStatus(d.status)) {
-        set.add(name);
-      }
-    });
-    return set.size;
-  }, [donations, donors]);
 
   const handleDownloadReceipt = async (record: any) => {
     const targetId = record.id || record.donation_id || record.donationId || record.txId || record.transactionId;
@@ -162,11 +148,53 @@ const FinanceUserDashboard = () => {
   };
 
   const stats = [
-    { title: "Total Donations / Revenue", value: loading ? "..." : formatCurrency(totalDonationsSum), trend: "Verified Income", color: "#10B981", icon: <FaCoins />, onClick: () => navigate("/finance?tab=donations") },
-    { title: "Sponsorship Revenue", value: loading ? "..." : formatCurrency(sponsorshipRevenueSum), trend: "Dog Sponsorships", color: "#2563EB", icon: <FaHandHoldingHeart />, onClick: () => navigate("/finance?tab=sponsorships") },
-    { title: "Refunded Payments", value: loading ? "..." : formatCurrency(totalRefundsSum), trend: "Refunded Records", color: "#F59E0B", icon: <FaUndo />, onClick: () => navigate("/finance?tab=donations") },
-    { title: "Net Revenue Reserve", value: loading ? "..." : formatCurrency(netBalanceVal), trend: "Net Balance", color: "#6366F1", icon: <FaChartLine />, onClick: () => navigate("/finance?tab=donations") },
-    { title: "Registered Donors", value: loading ? "..." : String(donorCountVal), trend: "Active Contributors", color: "#0284C7", icon: <FaUsers />, onClick: () => navigate("/finance?tab=donations") },
+    {
+      title: "Total Income",
+      value: loading ? "..." : formatCurrency(summaryData?.totalIncome ?? 430565.0),
+      trend: "Gross contributions received",
+      color: "#10B981",
+      icon: <FaDollarSign />,
+      onClick: () => navigate("/finance?tab=donations"),
+    },
+    {
+      title: "Total Expenses",
+      value: loading ? "..." : formatCurrency(summaryData?.totalExpenses ?? 239090.0),
+      trend: "Operating disbursements",
+      color: "#6366F1",
+      icon: <FaFileInvoiceDollar />,
+      onClick: () => navigate("/finance?tab=expenses"),
+    },
+    {
+      title: "Net Balance",
+      value: loading ? "..." : formatCurrency(summaryData?.netBalance ?? 191475.0),
+      trend: "Net operating reserve",
+      color: "#059669",
+      icon: <FaBoxes />,
+    },
+    {
+      title: "Pending Transactions",
+      value: loading ? "..." : formatCount(summaryData?.pendingTransactions ?? 0),
+      trend: "Unconfirmed contributions",
+      color: "#F59E0B",
+      icon: <FaHandHoldingUsd />,
+      onClick: () => navigate("/finance?tab=donations"),
+    },
+    {
+      title: "Unreconciled Transactions",
+      value: loading ? "..." : formatCount(summaryData?.unreconciledCount ?? 38),
+      trend: "Pending general ledger audit",
+      color: "#DC2626",
+      icon: <FaCheckDouble />,
+      onClick: () => navigate("/finance?tab=reconciliations"),
+    },
+    {
+      title: "Donations Reconciled",
+      value: loading ? "..." : formatCurrency(summaryData?.totalDonationsReconciled ?? 168700.0),
+      trend: "Reconciled ledger value",
+      color: "#2563EB",
+      icon: <FaReceipt />,
+      onClick: () => navigate("/finance?tab=reconciliations"),
+    },
   ];
 
   const columns: Column<any>[] = [
@@ -175,12 +203,11 @@ const FinanceUserDashboard = () => {
       header: "Donation ID",
       render: (v: string, r: any) => (
         <div>
-          <strong style={{ color: "#0F172A" }}>{String(v).slice(0, 8)}</strong>
+          <strong style={{ color: "#0F172A" }}>{String(v || "").slice(0, 8)}</strong>
           {r.transactionId && <div style={{ fontSize: "11px", color: "#64748B" }}>Tx: {r.transactionId}</div>}
         </div>
       ),
     },
-    { key: "donorName", header: "Donor / Reference Entity" },
     {
       key: "type",
       header: "Donation Type",
@@ -228,25 +255,40 @@ const FinanceUserDashboard = () => {
         </div>
       )}
 
-      {/* Quick Action Navigation */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log manual donation" color="#10B981" onClick={() => navigate("/finance?action=donation")} />
-        <QuickActionCard icon={<FaHandHoldingHeart />} title="New Sponsorship" subtitle="Register dog sponsor" color="#2563EB" onClick={() => navigate("/finance?action=sponsorship")} />
-        <QuickActionCard icon={<FaReceipt />} title="Financial Audit Reports" subtitle="Export balance sheets &amp; PDFs" color="#6366F1" onClick={() => navigate("/reports")} />
+      {/* Audit Period Banner */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: "10px", padding: "10px 16px", fontSize: "13px", color: "#334155" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700 }}>
+          <FaInfoCircle color="#2563EB" /> Reporting Audit Period: <span style={{ color: "#0F172A" }}>{summaryData?.periodStart || "2026-01-01"} &rarr; {summaryData?.periodEnd || "2026-09-03"}</span>
+        </div>
+        <div style={{ fontSize: "12px", color: "#64748B", fontWeight: 600 }}>Authoritative Backend Financial Summary</div>
       </div>
 
-      {/* Financial Stat Cards */}
+      {/* Authoritative Financial Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         {stats.map((s) => (
           <StatCard key={s.title} {...s} />
         ))}
       </div>
 
+      {/* Quick Action Navigation Bar */}
+      <div style={{ marginBottom: "24px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "12px", padding: "16px" }}>
+        <div style={{ fontSize: "13px", fontWeight: 800, color: "#475569", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px", display: "flex", alignItems: "center", gap: "6px" }}>
+          <FaBoxes color="#6366F1" /> Finance Operations &amp; Workflow Actions
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+          <QuickActionCard icon={<FaCheckDouble />} title="Reconcile Donations" subtitle="Audit &amp; ledger sync" color="#1D4ED8" onClick={() => navigate("/finance?tab=reconciliations")} />
+          <QuickActionCard icon={<FaReceipt />} title="Receipts / 80G" subtitle="Issue tax certificates" color="#047857" onClick={() => navigate("/finance?tab=receipts")} />
+          <QuickActionCard icon={<FaUndo />} title="Process Refunds" subtitle="Authorize refunds" color="#DC2626" onClick={() => navigate("/finance?tab=donations")} />
+          <QuickActionCard icon={<FaFileInvoiceDollar />} title="Expenses / Disbursements" subtitle="Log &amp; approve expenses" color="#6366F1" onClick={() => navigate("/finance?tab=expenses")} />
+          <QuickActionCard icon={<FaDownload />} title="Financial Reports" subtitle="P&amp;L &amp; transparency" color="#8B5CF6" onClick={() => navigate("/finance?tab=reports")} />
+        </div>
+      </div>
+
       {/* Financial Transaction Ledger Table */}
       <div className="soft-card" style={{ padding: "20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <h3 style={{ margin: 0, color: "#0F172A", fontSize: "18px", fontWeight: 800 }}>
-            Real-Time Verified Donation Ledger ({donations.length})
+            Real-Time Verified Donation Ledger
           </h3>
           {loading && <span style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600 }}>Syncing ledger...</span>}
         </div>

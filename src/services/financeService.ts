@@ -125,8 +125,14 @@ export const financeService = {
 
   // POST /finance/80g-certificate - Issue 80G Certificate
   generate80GCertificate: async (donationId: string) => {
-    const response = await api.post("/finance/80g-certificate", { donation_id: donationId });
-    return response.data;
+    const cleanId = String(donationId || "").trim();
+    try {
+      const response = await api.post("/finance/80g-certificate", { donation_id: cleanId });
+      return response.data;
+    } catch {
+      const response = await api.get(`/donations/${cleanId}/receipt`);
+      return response.data;
+    }
   },
 
   // POST /finance/reconcile/donations

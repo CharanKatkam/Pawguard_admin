@@ -193,6 +193,8 @@ const Pets = () => {
   const [dogs, setDogs] = useState<any[]>([]);
   const [dogPhotoMap, setDogPhotoMap] = useState<Record<string, string>>({});
   const [allDogs, setAllDogs] = useState<any[]>([]);
+  const [dogMasterCount, setDogMasterCount] = useState<number>(0);
+  const [companionPetCount, setCompanionPetCount] = useState<number>(0);
   const [globalTotalCount, setGlobalTotalCount] = useState<number | null>(null);
   const [loadingAll, setLoadingAll] = useState(true);
   const [rescueCases, setRescueCases] = useState<any[]>([]);
@@ -240,7 +242,6 @@ const Pets = () => {
   const [isDeactivateConfirmOpen, setIsDeactivateConfirmOpen] = useState(false);
   const [isReProvisionConfirmOpen, setIsReProvisionConfirmOpen] = useState(false);
   const [isRefreshingScanData, setIsRefreshingScanData] = useState(false);
-  const [manualTokenInput, setManualTokenInput] = useState("");
 
   // Manual Token Lookup modal state
   const [isTokenLookupModalOpen, setIsTokenLookupModalOpen] = useState(false);
@@ -466,6 +467,14 @@ const Pets = () => {
       const rawList = unwrapList(response);
       const formatted = rawList.map(formatDog);
       setAllDogs(formatted);
+
+      // Separate Dog Master profiles vs Companion Pets authoritatively
+      const masterList = formatted.filter((d: any) => !d.is_companion_pet);
+      const companionList = formatted.filter((d: any) => Boolean(d.is_companion_pet));
+
+      setDogMasterCount(masterList.length);
+      setCompanionPetCount(companionList.length);
+
       const totalMeta = response?.meta?.total ?? response?.data?.meta?.total ?? formatted.length;
       if (typeof totalMeta === "number" && totalMeta >= 0) {
         setGlobalTotalCount(totalMeta);
@@ -691,6 +700,19 @@ const Pets = () => {
     setIsDeleteModalOpen(true);
   };
 
+const extractTagData = (res: any) => {
+  if (!res) return null;
+  let cur = res;
+  if (cur.data && typeof cur.data === "object" && !Array.isArray(cur.data)) {
+    if (cur.data.data && typeof cur.data.data === "object" && !Array.isArray(cur.data.data)) {
+      cur = cur.data.data;
+    } else {
+      cur = cur.data;
+    }
+  }
+  return cur;
+};
+
   const openQrModal = async (dog: QrDogInfo) => {
     const id = dogId(dog);
     if (!id) {
@@ -703,19 +725,19 @@ const Pets = () => {
     setQrError(null);
     setTagMetadata(null);
     setRawToken(null);
-    setManualTokenInput("");
     setTagStatus("INACTIVE");
     setIsQrModalOpen(true);
 
     try {
       setQrLoading(true);
 
-      let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
+      let activeState = false;
+      let authoritativeScanUrl: string | null = null;
+      const isCompanion = Boolean((dog as any)?.is_companion_pet || (dog as any)?.companion_pet_id || (dog as any)?.owner_id);
 
       // Fetch authoritative metadata from GET /api/v1/dogs/{dog_id}/safety-tag or GET /api/v1/companion-pets/{pet_id}/safety-tag
       try {
         let metaRes: any = null;
-        const isCompanion = Boolean((dog as any)?.is_companion_pet || (dog as any)?.companion_pet_id || (dog as any)?.owner_id);
         if (isCompanion) {
           try {
             metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
@@ -730,11 +752,11 @@ const Pets = () => {
           }
         }
 
-        const metaData = metaRes?.data || metaRes;
+        const metaData = extractTagData(metaRes);
         if (metaData) {
           setTagMetadata(metaData);
-          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
-          if (!isActive) {
+          activeState = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
+          if (!activeState) {
             setTagStatus("INACTIVE");
             setRawToken(null);
             setQrImageUrl(null);
@@ -742,8 +764,15 @@ const Pets = () => {
             return;
           }
           setTagStatus("ACTIVE");
-          if (metaData.raw_token || metaData.token) {
-            savedToken = metaData.raw_token || metaData.token;
+
+          // Extract authoritative public_scan_url from backend metadata
+          const rawScanUrl = metaData.public_scan_url || metaData.public_scan_path;
+          if (rawScanUrl && typeof rawScanUrl === "string" && rawScanUrl.trim()) {
+            const cleanUrl = rawScanUrl.trim();
+            const publicWebBase = (import.meta.env.VITE_PUBLIC_FRONTEND_URL as string) || "https://pawguard-public-web.vercel.app";
+            authoritativeScanUrl = cleanUrl.startsWith("http")
+              ? cleanUrl
+              : `${publicWebBase.replace(/\/+$/, "")}${cleanUrl.startsWith("/") ? "" : "/"}${cleanUrl}`;
           }
         }
       } catch (metaErr: unknown) {
@@ -769,12 +798,35 @@ const Pets = () => {
         }
       }
 
-      if (savedToken) {
-        setRawToken(savedToken);
-        const qrUrl = await generateQrDataUrl(savedToken);
-        const blob = await generateQrBlob(savedToken);
+      if (authoritativeScanUrl) {
+        const qrUrl = await generateQrDataUrl(authoritativeScanUrl);
+        const blob = await generateQrBlob(authoritativeScanUrl);
         setQrImageUrl(qrUrl);
         setQrBlob(blob);
+      } else if (activeState && !isCompanion) {
+        try {
+          const qrBlobData = await petService.getDogQrImage(id);
+          const qrUrlData = URL.createObjectURL(qrBlobData);
+          setQrImageUrl(qrUrlData);
+          setQrBlob(qrBlobData);
+        } catch {
+          setRawToken(null);
+          setQrImageUrl(null);
+          setQrBlob(null);
+          setQrError("Unable to load Safety Tag QR code from backend service. Please click Retry Request below.");
+        }
+      } else if (activeState && isCompanion) {
+        // Fallback for companion pet active tag: use pet public-scan route
+        const publicWebBase = (import.meta.env.VITE_PUBLIC_FRONTEND_URL as string) || "https://pawguard-public-web.vercel.app";
+        const fallbackScanUrl = `${publicWebBase.replace(/\/+$/, "")}/api/v1/companion-pets/${id}/public-scan`;
+        const qrUrl = await generateQrDataUrl(fallbackScanUrl);
+        const blob = await generateQrBlob(fallbackScanUrl);
+        setQrImageUrl(qrUrl);
+        setQrBlob(blob);
+      } else {
+        setRawToken(null);
+        setQrImageUrl(null);
+        setQrBlob(null);
       }
     } catch (err: unknown) {
       let msg = "Failed to load Safety Tag metadata from backend service.";
@@ -833,12 +885,6 @@ const Pets = () => {
     }
   };
 
-  const handleCopyToken = () => {
-    if (!rawToken) return;
-    navigator.clipboard.writeText(rawToken);
-    addToast("Safety Tag token copied to clipboard!", "success");
-  };
-
   const handleProvisionTag = async (forceReissue = false) => {
     if (!qrDog) return;
     const id = dogId(qrDog);
@@ -868,6 +914,7 @@ const Pets = () => {
       }
 
       setRawToken(token);
+      setQrDog((prev: any) => (prev ? { ...prev, raw_token: token, token: token, safety_token: token } : prev));
       const qrDataUrl = await generateQrDataUrl(token);
       const blob = await generateQrBlob(token);
 
@@ -1110,13 +1157,44 @@ const Pets = () => {
 
   const stats = [
     {
-      title: "Total Registered Dogs",
-      value: isCardsLoading ? "..." : totalRegisteredCount,
-      trend: "Registered Dogs",
+      title: "Dog Master Registry",
+      value: isCardsLoading ? "..." : dogMasterCount,
+      trend: "Shelter & Rescue Intakes (GET /dogs)",
       color: "#2563EB",
       icon: <FaPaw />,
-      selected: !statusFilter && !adoptableOnly,
+      selected: registryTab === "master" && !statusFilter && !adoptableOnly,
       onClick: () => {
+        setRegistryTab("master");
+        setStatusFilter("");
+        setAdoptableOnly(false);
+        setPage(1);
+        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Companion Pet Registry",
+      value: isCardsLoading ? "..." : companionPetCount,
+      trend: "User Pets (GET /companion-pets)",
+      color: "#8B5CF6",
+      icon: <FaHeart />,
+      selected: registryTab === "companion" && !statusFilter && !adoptableOnly,
+      onClick: () => {
+        setRegistryTab("companion");
+        setStatusFilter("");
+        setAdoptableOnly(false);
+        setPage(1);
+        document.getElementById("dogs-table-card")?.scrollIntoView({ behavior: "smooth" });
+      },
+    },
+    {
+      title: "Total Combined Registry",
+      value: isCardsLoading ? "..." : totalRegisteredCount,
+      trend: "Combined Animals Count",
+      color: "#059669",
+      icon: <FaPaw />,
+      selected: registryTab === "all" && !statusFilter && !adoptableOnly,
+      onClick: () => {
+        setRegistryTab("all");
         setStatusFilter("");
         setAdoptableOnly(false);
         setPage(1);
@@ -2127,32 +2205,6 @@ const Pets = () => {
                   {Boolean(tagMetadata.token_prefix) && <span>Prefix: {String(tagMetadata.token_prefix)}</span>}
                 </div>
               )}
-
-              {rawToken && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: "8px", padding: "8px 12px", marginTop: "6px" }}>
-                  <div style={{ fontSize: "12px", color: "#1E40AF" }}>
-                    <span style={{ fontWeight: 600 }}>Raw Token: </span>
-                    <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{rawToken}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCopyToken}
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #93C5FD",
-                      background: "#FFFFFF",
-                      color: "#1D4ED8",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    Copy Token
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
@@ -2262,11 +2314,9 @@ const Pets = () => {
             <div
               style={{
                 background: "#F8FAFC",
-                border: "1px solid #CBD5E1",
-                color: "#334155",
-                padding: "24px 20px",
+                border: "1px solid #E2E8F0",
                 borderRadius: "12px",
-                fontSize: "13px",
+                padding: "20px",
                 textAlign: "center",
                 display: "flex",
                 flexDirection: "column",
@@ -2275,122 +2325,29 @@ const Pets = () => {
                 boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
               }}
             >
-              {tagStatus === "ACTIVE" ? (
-                <>
-                  <div style={{ fontSize: "15px", fontWeight: 800, color: "#1E293B" }}>
-                    ℹ️ SAFETY TAG IS ACTIVE ON BACKEND
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "440px", lineHeight: 1.5 }}>
-                    Tag Status: <strong style={{ color: "#16A34A" }}>ACTIVE</strong>{" "}
-                    {tagMetadata?.token_prefix ? `(Prefix: ${String(tagMetadata.token_prefix)})` : ""}
-                    <br />
-                    To render and print the QR code for this active tag on this browser without re-issuing or changing the backend tag, enter the existing raw token below:
-                  </div>
-
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      const clean = manualTokenInput.trim();
-                      if (!clean) return;
-                      const prefix = String(tagMetadata?.token_prefix || "").trim();
-                      if (prefix && !clean.startsWith(prefix)) {
-                        addToast(`Token prefix mismatch! Expected token starting with "${prefix}".`, "error");
-                        return;
-                      }
-                      try {
-                        const qrUrl = await generateQrDataUrl(clean);
-                        const blob = await generateQrBlob(clean);
-                        setRawToken(clean);
-                        setQrImageUrl(qrUrl);
-                        setQrBlob(blob);
-                        addToast("Active Safety Tag QR loaded successfully!", "success");
-                      } catch {
-                        addToast("Failed to render QR for entered token.", "error");
-                      }
-                    }}
-                    style={{ width: "100%", maxWidth: "420px", display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}
-                  >
-                    <input
-                      type="text"
-                      value={manualTokenInput}
-                      onChange={(e) => setManualTokenInput(e.target.value)}
-                      placeholder="Enter existing raw token (e.g. cVnzRiqR...)"
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid #CBD5E1",
-                        fontSize: "12px",
-                        fontFamily: "monospace",
-                        boxSizing: "border-box",
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        type="submit"
-                        disabled={!manualTokenInput.trim()}
-                        style={{
-                          flex: 1,
-                          padding: "10px",
-                          borderRadius: "8px",
-                          border: "none",
-                          background: manualTokenInput.trim() ? "#10B981" : "#94A3B8",
-                          color: "#FFFFFF",
-                          fontWeight: 700,
-                          fontSize: "13px",
-                          cursor: manualTokenInput.trim() ? "pointer" : "not-allowed",
-                        }}
-                      >
-                        Load Active QR Code
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsReProvisionConfirmOpen(true)}
-                        disabled={isProvisioning}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: "1px solid #CBD5E1",
-                          background: "#FFFFFF",
-                          color: "#6D28D9",
-                          fontWeight: 700,
-                          fontSize: "12px",
-                          cursor: isProvisioning ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        Re-Provision
-                      </button>
-                    </div>
-                  </form>
-                </>
-              ) : (
-                <>
-                  <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>
-                    This pet does not have an active Safety Tag yet.
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>
-                    Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleProvisionTag()}
-                    disabled={isProvisioning}
-                    style={{
-                      padding: "11px 24px",
-                      borderRadius: "8px",
-                      border: "none",
-                      background: "#6D28D9",
-                      color: "#FFFFFF",
-                      fontWeight: 700,
-                      fontSize: "13px",
-                      cursor: isProvisioning ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
-                  </button>
-                </>
-              )}
+              <div style={{ color: "#991B1B", fontWeight: 700, fontSize: "14px" }}>
+                This pet does not have an active Safety Tag yet.
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "400px", lineHeight: 1.5 }}>
+                Please provision a Safety Tag to generate an authoritative QR code and safety token for this pet.
+              </div>
+              <button
+                type="button"
+                onClick={() => handleProvisionTag()}
+                disabled={isProvisioning}
+                style={{
+                  padding: "11px 24px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#6D28D9",
+                  color: "#FFFFFF",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: isProvisioning ? "not-allowed" : "pointer",
+                }}
+              >
+                {isProvisioning ? "Provisioning..." : "Provision Safety Tag"}
+              </button>
             </div>
           )}
 

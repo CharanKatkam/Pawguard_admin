@@ -155,6 +155,18 @@ const RescueCentreAdminDashboard = () => {
   const [selectedIntake, setSelectedIntake] = useState<DogIntakeRow | null>(null);
   const [isIntakeModalOpen, setIsIntakeModalOpen] = useState(false);
 
+  // Rescued Animal Intake Registration State
+  const [isRegisterIntakeModalOpen, setIsRegisterIntakeModalOpen] = useState(false);
+  const [isSubmittingIntake, setIsSubmittingIntake] = useState(false);
+  const [registerIntakeForm, setRegisterIntakeForm] = useState({
+    name: "",
+    breed: "Mixed Breed",
+    gender: "male",
+    shelter_id: "",
+    rescue_case_id: "",
+    notes: "Newly arrived rescued animal intake.",
+  });
+
   // Complaints & Escalations State
   const [grievanceTickets, setGrievanceTickets] = useState<any[]>([]);
   const [selectedGrievance, setSelectedGrievance] = useState<any | null>(null);
@@ -275,6 +287,44 @@ const RescueCentreAdminDashboard = () => {
     }
   };
 
+  const handleRegisterIntakeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!registerIntakeForm.name.trim()) {
+      addToast("Please provide the animal / dog name for intake registration.", "error");
+      return;
+    }
+
+    try {
+      setIsSubmittingIntake(true);
+      const targetShelterId = registerIntakeForm.shelter_id || currentRescueCentreId || "";
+      await dogService.createDog({
+        name: registerIntakeForm.name.trim(),
+        breed: registerIntakeForm.breed || "Mixed Breed",
+        gender: registerIntakeForm.gender || "male",
+        status: "rescued",
+        is_adoptable: false,
+        shelter_id: targetShelterId || undefined,
+        description: registerIntakeForm.notes,
+        medical_status: "Pending Check",
+      });
+      addToast(`Rescued animal '${registerIntakeForm.name.trim()}' intake logged successfully!`, "success");
+      setIsRegisterIntakeModalOpen(false);
+      setRegisterIntakeForm({
+        name: "",
+        breed: "Mixed Breed",
+        gender: "male",
+        shelter_id: "",
+        rescue_case_id: "",
+        notes: "Newly arrived rescued animal intake.",
+      });
+      fetchDashboardData();
+    } catch (err: any) {
+      addToast(err?.response?.data?.detail || err?.message || "Failed to register animal intake.", "error");
+    } finally {
+      setIsSubmittingIntake(false);
+    }
+  };
+
   // Lifecycle Data States
   const [rescueCalls, setRescueCalls] = useState<RescueCallRow[]>([]);
   const [dogIntakes, setDogIntakes] = useState<DogIntakeRow[]>([]);
@@ -313,7 +363,7 @@ const RescueCentreAdminDashboard = () => {
         grievanceRes,
       ] = await Promise.allSettled([
         dashboardService.getRescueCentreDashboard(),
-        rescueService.getRescueCases({ page: 1, page_size: 50, ...scopeParams }),
+        rescueService.getRescueCases({ page_size: 500, ...scopeParams }),
         dogService.getAllDogs(scopeParams),
         shelterService.getShelters(scopeParams),
         adoptionService.getAdoptions(),
@@ -597,25 +647,46 @@ const RescueCentreAdminDashboard = () => {
               Complete operational monitoring: rescue cases, agent dispatch, medical intake, shelter capacity, adoption/foster workflow & inventory alerts.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={fetchDashboardData}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "9px 16px",
-              borderRadius: "10px",
-              border: "1px solid rgba(255, 255, 255, 0.2)",
-              background: "rgba(255, 255, 255, 0.1)",
-              color: "#FFF",
-              fontSize: "13px",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            <FaSync /> Refresh
-          </button>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => setIsRegisterIntakeModalOpen(true)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: "none",
+                background: "#10B981",
+                color: "#FFF",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <FaPaw /> + Log Animal Intake
+            </button>
+            <button
+              type="button"
+              onClick={fetchDashboardData}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "9px 16px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 255, 255, 0.2)",
+                background: "rgba(255, 255, 255, 0.1)",
+                color: "#FFF",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <FaSync /> Refresh
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1713,6 +1784,88 @@ const RescueCentreAdminDashboard = () => {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
             <button type="button" onClick={() => setIsCentreConfigOpen(false)} style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "12.5px" }}>Cancel</button>
             <button type="submit" style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" }}>Save Config</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Rescued Animal Intake Registration Modal */}
+      <Modal
+        isOpen={isRegisterIntakeModalOpen}
+        onClose={() => setIsRegisterIntakeModalOpen(false)}
+        title="Register Rescued Animal Arrival & Shelter Intake"
+      >
+        <form onSubmit={handleRegisterIntakeSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Animal / Dog Name *
+            </label>
+            <input
+              type="text"
+              value={registerIntakeForm.name}
+              onChange={(e) => setRegisterIntakeForm({ ...registerIntakeForm, name: e.target.value })}
+              placeholder="e.g. Buddy (or Rescue Tag Name)"
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              required
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Breed / Description
+              </label>
+              <input
+                type="text"
+                value={registerIntakeForm.breed}
+                onChange={(e) => setRegisterIntakeForm({ ...registerIntakeForm, breed: e.target.value })}
+                placeholder="e.g. Mixed Breed / Indie"
+                style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Gender
+              </label>
+              <select
+                value={registerIntakeForm.gender}
+                onChange={(e) => setRegisterIntakeForm({ ...registerIntakeForm, gender: e.target.value })}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px" }}
+              >
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Intake Notes & Physical Condition
+            </label>
+            <textarea
+              rows={3}
+              value={registerIntakeForm.notes}
+              onChange={(e) => setRegisterIntakeForm({ ...registerIntakeForm, notes: e.target.value })}
+              placeholder="Initial physical assessment notes upon arrival..."
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #CBD5E1", fontSize: "13px", resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+            <button
+              type="button"
+              onClick={() => setIsRegisterIntakeModalOpen(false)}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "12.5px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmittingIntake}
+              style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" }}
+            >
+              {isSubmittingIntake ? "Registering..." : "Submit Animal Intake"}
+            </button>
           </div>
         </form>
       </Modal>

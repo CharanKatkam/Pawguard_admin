@@ -303,7 +303,7 @@ const VehicleManagement = () => {
       setLoading(true);
       setError(null);
 
-      const queryParams: Record<string, unknown> = {};
+      const queryParams: Record<string, unknown> = { page_size: 500 };
       if (isRescueCentreAdmin && currentRescueCentreId) {
         queryParams.rescue_centre_id = currentRescueCentreId;
       }

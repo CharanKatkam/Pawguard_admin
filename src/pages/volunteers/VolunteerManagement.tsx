@@ -113,7 +113,7 @@ const VolunteerManagement = () => {
     try {
       setVolLoading(true);
       setVolError(null);
-      const params: Record<string, unknown> = {};
+      const params: Record<string, unknown> = { page_size: 500 };
       if (statusFilter) params.status = statusFilter;
 
       let res: any;
@@ -152,7 +152,7 @@ const VolunteerManagement = () => {
     try {
       setShiftLoading(true);
       setShiftError(null);
-      const response = await volunteerService.getShifts();
+      const response = await volunteerService.getShifts({ page_size: 500 });
       const list = Array.isArray(response)
         ? response
         : Array.isArray(response?.data)

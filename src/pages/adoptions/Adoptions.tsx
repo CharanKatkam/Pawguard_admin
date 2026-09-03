@@ -23,7 +23,6 @@ import adoptionService, {
   type AdoptionScoreCreatePayload,
 } from "../../services/adoptionService";
 import petService from "../../services/petService";
-import { generateQrDataUrl } from "../../utils/qrGenerator";
 import { notifyDataChanged } from "../../utils/dataSync";
 import { formatDateTime } from "../../utils/dateUtils";
 
@@ -195,7 +194,6 @@ const Adoptions = () => {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
-  const [rawToken, setRawToken] = useState<string | null>(null);
 
   // Selection state
   const [selectedAdoption, setSelectedAdoption] = useState<Record<string, unknown> | null>(null);
@@ -561,15 +559,13 @@ const Adoptions = () => {
     if (!id) return;
 
     setQrImageUrl(null);
-    setRawToken(null);
     setIsQrModalOpen(true);
 
     try {
       setQrLoading(true);
-      const token = `PAWGUARD-TAG-${id.slice(0, 8).toUpperCase()}`;
-      setRawToken(token);
-      const qrUrl = await generateQrDataUrl(token);
-      setQrImageUrl(qrUrl);
+      const qrBlobData = await petService.getDogQrImage(id);
+      const qrUrlData = URL.createObjectURL(qrBlobData);
+      setQrImageUrl(qrUrlData);
     } catch {
       // Quiet fail for QR generation
     } finally {
@@ -1389,7 +1385,6 @@ const Adoptions = () => {
           ) : qrImageUrl ? (
             <div>
               <img src={qrImageUrl} alt="Safety Tag QR" style={{ width: "200px", height: "200px", borderRadius: "8px", margin: "0 auto 16px" }} />
-              <div style={{ fontSize: "12px", fontFamily: "monospace", color: "#64748B" }}>Token: {rawToken}</div>
             </div>
           ) : (
             <div>Could not generate QR code.</div>
