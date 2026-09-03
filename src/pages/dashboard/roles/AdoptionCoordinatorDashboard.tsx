@@ -5,6 +5,7 @@ import DataTable, { type Column } from "../../../components/common/DataTable";
 import QuickActionCard from "../../../components/dashboard/QuickActionCard";
 import { FaHeart, FaClipboardCheck, FaUserCheck, FaFileContract } from "react-icons/fa";
 import adoptionService from "../../../services/adoptionService";
+import dashboardService from "../../../services/dashboardService";
 import { petService } from "../../../services/petService";
 import { useDataSync } from "../../../utils/dataSync";
 
@@ -70,6 +71,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 const AdoptionCoordinatorDashboard = () => {
   const navigate = useNavigate();
   const [adoptions, setAdoptions] = useState<any[]>([]);
+  const [adoptionSummary, setAdoptionSummary] = useState<any | null>(null);
   const [adoptableDogsCount, setAdoptableDogsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,10 +82,16 @@ const AdoptionCoordinatorDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [adoptionsRes, dogsRes] = await Promise.allSettled([
-        adoptionService.getAdoptions(),
+      const [adoptionsRes, dogsRes, dashRes] = await Promise.allSettled([
+        adoptionService.getAdoptions({ page_size: 500 }),
         petService.getAllDogs(),
+        dashboardService.getAdoptionDashboard().catch(() => null),
       ]);
+
+      if (dashRes.status === "fulfilled" && dashRes.value) {
+        const dData = dashRes.value?.data ?? dashRes.value;
+        setAdoptionSummary(dData);
+      }
 
       if (adoptionsRes.status === "fulfilled") {
         const body = adoptionsRes.value;
@@ -121,9 +129,10 @@ const AdoptionCoordinatorDashboard = () => {
 
   useDataSync(fetchDashboard);
 
-  const completedCount = adoptions.filter((a) => ["completed", "approved"].includes(String(a.status).toLowerCase())).length;
-  const pendingCount = adoptions.filter((a) => ["submitted", "vetting", "screening", "interview", "home_check"].includes(String(a.status).toLowerCase())).length;
-  const homeVisitsCount = adoptions.filter((a) => a.home_inspection_scheduled_at || String(a.status).toLowerCase() === "home_check").length;
+  const completedCount = adoptionSummary?.completed_adoptions ?? adoptionSummary?.approved_adoptions ?? adoptions.filter((a) => ["completed", "approved"].includes(String(a.status).toLowerCase())).length;
+  const pendingCount = adoptionSummary?.pending_review ?? adoptionSummary?.pending_applications ?? adoptions.filter((a) => ["submitted", "vetting", "screening", "interview", "home_check"].includes(String(a.status).toLowerCase())).length;
+  const homeVisitsCount = adoptionSummary?.home_visits_scheduled ?? adoptions.filter((a) => a.home_inspection_scheduled_at || String(a.status).toLowerCase() === "home_check").length;
+  const adoptableCountFinal = adoptionSummary?.adoptable_dogs_count ?? adoptableDogsCount;
 
   const handleCardClick = (filter: CardFilter) => {
     setCardFilter((prev) => (prev === filter ? "all" : filter));
@@ -185,7 +194,7 @@ const AdoptionCoordinatorDashboard = () => {
     },
     {
       title: "Adoptable Dogs",
-      value: loading ? "..." : String(adoptableDogsCount),
+      value: loading ? "..." : String(adoptableCountFinal),
       trend: cardFilter === "adoptable_dogs" ? "★ ACTIVE FILTER" : "Ready",
       color: cardFilter === "adoptable_dogs" ? "#1E3A8A" : "#1E3A8A",
       icon: <FaFileContract />,

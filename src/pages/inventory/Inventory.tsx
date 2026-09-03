@@ -342,7 +342,15 @@ const Inventory = () => {
   const handleRequisitionStatus = async (reqId: string, status: RequisitionStatus) => {
     try {
       setIsSubmitting(true);
-      await inventoryService.updateRequisitionStatus(reqId, status);
+      if (status === "approved") {
+        await inventoryService.approveRequisition(reqId);
+      } else if (status === "rejected") {
+        await inventoryService.rejectRequisition(reqId);
+      } else if (status === "received") {
+        await inventoryService.receiveRequisition(reqId);
+      } else {
+        await inventoryService.updateRequisitionStatus(reqId, status);
+      }
 
       if (status === "received") {
         const targetReq = requisitions.find((r) => String(r.id) === String(reqId));
@@ -351,16 +359,24 @@ const Inventory = () => {
             item_id: targetReq.item_id,
             movement_type: "check_in",
             quantity: Number(targetReq.quantity),
-            notes: `Received fulfilled requisition PO #${String(reqId).slice(0, 8)}`,
+            notes: `Stock restocked from fulfilled requisition PO #${String(reqId).slice(0, 8)}`,
           }).catch(() => null);
         }
       }
 
-      addToast(`Requisition ${status.toUpperCase()} & Stock Updated!`, "success");
-      fetchInventoryData();
+      addToast(`Requisition status set to ${status.toUpperCase()} successfully!`, "success");
+      await fetchInventoryData();
       notifyDataChanged();
     } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to update requisition status.", "error");
+      const errMsg =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.detail ||
+        (err?.response?.status === 404
+          ? "Requisition not found in backend database."
+          : err?.response?.status === 403
+          ? "Permission denied. You do not have authorization to update requisitions."
+          : err?.message || "Failed to update requisition status.");
+      addToast(errMsg, "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -745,23 +761,100 @@ const Inventory = () => {
           {requisitions.length === 0 ? (
             <div style={{ textAlign: "center", padding: "20px", color: "#64748B" }}>No requisitions logged yet.</div>
           ) : (
-            requisitions.map((req) => (
-              <div key={req.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: "14px", color: "#0F172A" }}>Requisition: {String(req.id).slice(0, 8)} &bull; Quantity: {req.quantity}</div>
-                  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>Issued: {formatDateTime(req.created_at)}</div>
+            requisitions.map((req) => {
+              const matchedItem = inventory.find((inv) => String(inv.id) === String(req.item_id));
+              const itemName = matchedItem?.itemName || "Inventory Item";
+              const unit = matchedItem?.unit || "units";
+              const supplier = matchedItem?.supplier || "—";
+              const status = String(req.status || "pending").toLowerCase();
+
+              const getBadgeStyle = () => {
+                switch (status) {
+                  case "approved":
+                    return { bg: "#ECFDF5", color: "#047857" };
+                  case "received":
+                    return { bg: "#EFF6FF", color: "#1D4ED8" };
+                  case "rejected":
+                    return { bg: "#FEE2E2", color: "#B91C1C" };
+                  default:
+                    return { bg: "#FEF3C7", color: "#B45309" };
+                }
+              };
+              const badge = getBadgeStyle();
+
+              return (
+                <div key={req.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontWeight: 800, fontSize: "15px", color: "#0F172A" }}>{itemName}</span>
+                      <span style={{ fontSize: "12px", fontWeight: 700, color: "#475569", background: "#E2E8F0", padding: "2px 8px", borderRadius: "4px" }}>
+                        Qty: {req.quantity} {unit}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "6px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <div>
+                        <strong>PO Reference:</strong> PO-{String(req.id).slice(0, 8)}{" "}
+                        <span style={{ fontFamily: "monospace", fontSize: "11px", color: "#94A3B8" }} title={`UUID: ${req.id}`}>
+                          ({req.id})
+                        </span>
+                      </div>
+                      <div>
+                        <strong>Supplier:</strong> {supplier} &bull; <strong>Requester ID:</strong> {String(req.requester_id || "—").slice(0, 8)}
+                      </div>
+                      <div>
+                        <strong>Issued:</strong> {formatDateTime(req.created_at)}
+                        {req.updated_at && req.updated_at !== req.created_at && (
+                          <span> &bull; <strong>Updated:</strong> {formatDateTime(req.updated_at)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", padding: "4px 10px", borderRadius: "6px", background: badge.bg, color: badge.color }}>
+                      {status}
+                    </span>
+                    <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+                      {status === "pending" && (
+                        <>
+                          <button
+                            onClick={() => void handleRequisitionStatus(req.id, "approved")}
+                            disabled={isSubmitting}
+                            style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#10B981", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => void handleRequisitionStatus(req.id, "rejected")}
+                            disabled={isSubmitting}
+                            style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#EF4444", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      {status === "approved" && (
+                        <>
+                          <button
+                            onClick={() => void handleRequisitionStatus(req.id, "received")}
+                            disabled={isSubmitting}
+                            style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                          >
+                            Mark Received
+                          </button>
+                          <button
+                            onClick={() => void handleRequisitionStatus(req.id, "rejected")}
+                            disabled={isSubmitting}
+                            style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#EF4444", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <span style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", padding: "4px 8px", borderRadius: "6px", background: req.status === "approved" ? "#ECFDF5" : "#FEF3C7", color: req.status === "approved" ? "#047857" : "#B45309" }}>{req.status}</span>
-                  {req.status === "pending" && (
-                    <button onClick={() => void handleRequisitionStatus(req.id, "approved")} style={{ padding: "4px 8px", borderRadius: "4px", border: "none", background: "#10B981", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>Approve</button>
-                  )}
-                  {req.status === "approved" && (
-                    <button onClick={() => void handleRequisitionStatus(req.id, "received")} style={{ padding: "4px 8px", borderRadius: "4px", border: "none", background: "#2563EB", color: "#FFF", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>Mark Received</button>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </Modal>

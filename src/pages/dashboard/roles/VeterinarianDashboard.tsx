@@ -24,6 +24,7 @@ import vetService from "../../../services/vetService";
 import medicalService from "../../../services/medicalService";
 import petService from "../../../services/petService";
 import userService from "../../../services/userService";
+import dashboardService from "../../../services/dashboardService";
 import storageService from "../../../services/storageService";
 import { useDataSync, notifyDataChanged } from "../../../utils/dataSync";
 import api from "../../../api/axios";
@@ -89,6 +90,7 @@ const VeterinarianDashboard = () => {
   const [medicalRecords, setMedicalRecords] = useState<Row[]>([]);
   const [dogs, setDogs] = useState<Row[]>([]);
   const [clinics, setClinics] = useState<Row[]>([]);
+  const [vetSummary, setVetSummary] = useState<Row | null>(null);
   const [selectedPublicAppt, setSelectedPublicAppt] = useState<Row | null>(null);
 
   // Filters
@@ -272,22 +274,25 @@ const VeterinarianDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [apptsRes, recordsRes, dogsRes, clinicsRes] = await Promise.all([
-        vetService.getAppointments({ page_size: 50 }).catch(() => ({ data: [] })),
+      const [apptsRes, recordsRes, dogsRes, clinicsRes, dashSummaryRes] = await Promise.all([
+        vetService.getAppointments({ page_size: 500 }).catch(() => ({ data: [] })),
         medicalService.getMedicalRecords().catch(() => ({ data: [] })),
         petService.getAllDogs().catch(() => ({ data: [] })),
         vetService.getClinics({ page_size: 100 }).catch(() => ({ data: [] })),
+        dashboardService.getVeterinarianDashboard().catch(() => null),
       ]);
 
       const apptList = Array.isArray(apptsRes?.data) ? apptsRes.data : [];
       const recordList = Array.isArray(recordsRes?.data) ? recordsRes.data : [];
       const dogList = Array.isArray(dogsRes?.data) ? dogsRes.data : [];
       const clinicList = Array.isArray(clinicsRes?.data) ? clinicsRes.data : [];
+      const summaryObj = (dashSummaryRes?.data ?? dashSummaryRes) as Row | null;
 
       setAppointments(apptList);
       setMedicalRecords(recordList);
       setDogs(dogList);
       setClinics(clinicList);
+      setVetSummary(summaryObj);
 
       const cMap = new Map<string, Row>();
       clinicList.forEach((c: Row) => {
@@ -549,6 +554,22 @@ const VeterinarianDashboard = () => {
     }
   };
 
+  const handleCompleteAppointment = async (row: Row) => {
+    const id = str(pick(row, "id", "appointment_id"));
+    if (!id) return;
+    try {
+      setConfirmingId(id);
+      await vetService.completeAppointment(id, "Completed by attending veterinarian.");
+      addToast("Appointment completed.", "success");
+      fetchDashboardData();
+      notifyDataChanged();
+    } catch (err: any) {
+      addToast(err?.response?.data?.message || "Failed to complete appointment.", "error");
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
   const handleCancel = async () => {
     if (!cancelTarget) return;
     const id = str(pick(cancelTarget, "id", "appointment_id"));
@@ -761,22 +782,41 @@ const VeterinarianDashboard = () => {
     return matchesStatus && matchesSearch;
   });
 
-  const confirmedCount = appointments.filter((a) => str(pick(a, "status")).toLowerCase() === "confirmed").length;
-  const pendingCount = appointments.filter((a) => {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const apptsTodayList = appointments.filter((a) => {
+    const dStr = str(pick(a, "starts_at", "date", "appointment_date", "created_at")).split("T")[0];
+    return dStr === todayStr;
+  });
+  const todayApptsCount = vetSummary?.today_appointments ?? (apptsTodayList.length > 0 ? apptsTodayList.length : appointments.length);
+
+  const pendingTodayCount = (apptsTodayList.length > 0 ? apptsTodayList : appointments).filter((a) => {
     const s = str(pick(a, "status")).toLowerCase();
     return s === "requested" || s === "pending";
   }).length;
-  const icuCount = medicalRecords.filter((r) => {
-    const st = str(r.status || r.diagnosis || r.treatment).toLowerCase();
-    return st.includes("critical") || st.includes("post-op") || st.includes("surgery");
+
+  const confirmedTodayCount = (apptsTodayList.length > 0 ? apptsTodayList : appointments).filter((a) => {
+    const s = str(pick(a, "status")).toLowerCase();
+    return s === "confirmed";
   }).length;
-  const vaccineCount = medicalRecords.filter((r) => str(r.entityType || r.categoryName || r.type).toLowerCase().includes("vaccin")).length;
+
+  const criticalCasesCount = vetSummary?.critical_cases ?? medicalRecords.filter((r) => {
+    const st = str(r.status || r.diagnosis || r.treatment).toLowerCase();
+    return st.includes("critical") || st.includes("emergency") || st.includes("post-op") || st.includes("icu");
+  }).length;
+
+  const loggedVaccinesCount = vetSummary?.total_vaccinations ?? medicalRecords.filter((r) =>
+    str(r.entityType || r.categoryName || r.type).toLowerCase().includes("vaccin")
+  ).length;
+
+  const clearedDogsCount = vetSummary?.cleared_dogs ?? dogs.filter((d) =>
+    Boolean(d.is_fit_for_adoption || d.is_adoptable || str(d.medical_status).toLowerCase().includes("clear"))
+  ).length;
 
   const stats = [
     {
       title: "Appointments Today",
-      value: loading ? "..." : String(appointments.length),
-      trend: `${pendingCount} Pending / ${confirmedCount} Confirmed`,
+      value: loading ? "..." : String(todayApptsCount),
+      trend: `${pendingTodayCount} Pending / ${confirmedTodayCount} Confirmed`,
       color: "#1E3A8A",
       icon: <FaCalendarAlt />,
       onClick: () => {
@@ -786,9 +826,9 @@ const VeterinarianDashboard = () => {
       },
     },
     {
-      title: "Active ICU Patients",
-      value: loading ? "..." : String(icuCount),
-      trend: "High Priority Watch",
+      title: "Critical Medical Cases",
+      value: loading ? "..." : String(criticalCasesCount),
+      trend: "High Priority Medical Watch",
       color: "#DC2626",
       icon: <FaExclamationCircle />,
       onClick: () => {
@@ -798,16 +838,16 @@ const VeterinarianDashboard = () => {
     },
     {
       title: "Vaccinations Logged",
-      value: loading ? "..." : String(vaccineCount),
+      value: loading ? "..." : String(loggedVaccinesCount),
       trend: "Immunization Suite",
       color: "#F59E0B",
       icon: <FaSyringe />,
       onClick: () => navigate("/medical-reminders"),
     },
     {
-      title: "Cleared & Healthy",
-      value: loading ? "..." : String(medicalRecords.length),
-      trend: "Medical History Files",
+      title: "Medically Cleared Dogs",
+      value: loading ? "..." : String(clearedDogsCount),
+      trend: "Ready for Adoption",
       color: "#16A34A",
       icon: <FaFileMedical />,
       onClick: () => navigate("/medical-records"),
@@ -1207,6 +1247,17 @@ const VeterinarianDashboard = () => {
                       style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #16A34A", background: "#ECFDF5", color: "#15803D", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
                       <FaCheck /> Confirm
+                    </button>
+                  )}
+
+                  {status === "confirmed" && (
+                    <button
+                      type="button"
+                      onClick={() => handleCompleteAppointment(row)}
+                      disabled={confirmingId === id}
+                      style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #3B82F6", background: "#EFF6FF", color: "#1D4ED8", fontSize: "12px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <FaCheckCircle /> Complete
                     </button>
                   )}
 

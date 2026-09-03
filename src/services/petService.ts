@@ -313,37 +313,27 @@ export const petService = {
   },
 
   /**
-   * @deprecated Legacy backend QR image endpoint. PawGuard now uses client-side QR generation
-   * encoding the authoritative raw_token returned from POST /dogs/{dog_id}/safety-tag.
+   * Fetch staff-only QR image blob for an active Dog Master profile.
+   * Calls GET /api/v1/dogs/{dog_id}/qr-image
    */
   getDogQrImage: async (dogId: string): Promise<Blob> => {
     const cleanId = String(dogId || "").trim();
     if (!cleanId) throw new Error("Dog ID is required.");
-    const frontendBaseUrl =
-      (import.meta.env.VITE_FRONTEND_BASE_URL as string) ||
-      (typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://pawguard-admin.vercel.app");
 
     const token = getAccessToken();
-    const reqHeaders: Record<string, string> = {
-      "X-Frontend-Base-Url": frontendBaseUrl,
-      "X-Frontend-Url": frontendBaseUrl,
-    };
+    const reqHeaders: Record<string, string> = {};
     if (token) {
       reqHeaders["Authorization"] = `Bearer ${token}`;
     }
 
     const response = await api.get(`/dogs/${cleanId}/qr-image`, {
-      params: {
-        frontend_url: frontendBaseUrl,
-        frontend_base_url: frontendBaseUrl,
-      },
       headers: reqHeaders,
       responseType: "blob",
     });
-    if (!(response.data instanceof Blob)) {
-      throw new Error("QR endpoint did not return a valid image.");
+    if (response.data instanceof Blob) {
+      return response.data;
     }
-    return response.data;
+    throw new Error("QR endpoint did not return a valid image blob.");
   },
 
   // GET /dogs/{dog_id}/safety-tag - authenticated Safety Tag metadata for Dog Master record

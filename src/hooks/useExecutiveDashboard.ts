@@ -11,6 +11,8 @@ import { fosterService } from "../services/fosterService";
 import { volunteerService } from "../services/volunteerService";
 import { financeService } from "../services/financeService";
 import donationsService from "../services/donationsService";
+import inventoryService from "../services/inventoryService";
+import medicalService from "../services/medicalService";
 import { firstDefined, unwrapList } from "../utils/chartUtils";
 import type { ActivityEntry, AnyRecord, DashboardSummary } from "../types/dashboard";
 import { getRoleTitle } from "../utils/roleUtils";
@@ -44,7 +46,10 @@ const unwrapObject = (value: unknown): DashboardSummary => {
   return obj as unknown as DashboardSummary;
 };
 
-const normalizeActivity = (raw: AnyRecord): ActivityEntry | null => {
+const isUuid = (str: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+
+const normalizeActivity = (raw: AnyRecord, usersMap?: Map<string, string>): ActivityEntry | null => {
   const eventStr = String(
     firstDefined(raw.event_type, raw.action, raw.title, raw.activity, raw.event, raw.description, raw.message) ?? ""
   ).trim();
@@ -52,15 +57,21 @@ const normalizeActivity = (raw: AnyRecord): ActivityEntry | null => {
 
   const timeRaw = firstDefined(raw.created_at, raw.time, raw.timestamp, raw.date);
 
-  const actorName = firstDefined(
-    raw.full_name,
-    raw.user_name,
-    raw.email,
-    raw.username,
-    raw.user,
-    raw.actor,
-    raw.performed_by
-  );
+  let actorName = String(
+    firstDefined(
+      raw.full_name,
+      raw.user_name,
+      raw.email,
+      raw.username,
+      raw.user,
+      raw.actor,
+      raw.performed_by
+    ) ?? ""
+  ).trim();
+
+  if (actorName && isUuid(actorName) && usersMap && usersMap.has(actorName.toLowerCase())) {
+    actorName = usersMap.get(actorName.toLowerCase())!;
+  }
 
   const roleRaw = firstDefined(
     raw.role,
@@ -69,7 +80,7 @@ const normalizeActivity = (raw: AnyRecord): ActivityEntry | null => {
 
   const roleTitleStr = roleRaw ? getRoleTitle(String(roleRaw)) : "";
   const actorStr = actorName
-    ? roleTitleStr && roleTitleStr !== "Unknown Role"
+    ? roleTitleStr && roleTitleStr !== "Unknown Role" && !actorName.includes("•")
       ? `${actorName} • ${roleTitleStr}`
       : String(actorName)
     : "System";
@@ -149,6 +160,9 @@ export function useExecutiveDashboard() {
       financeService.getFinanceSummary().catch(() => null),
       donationsService.getDonationSummary().catch(() => null),
       dashboardService.getAuditLogs({ limit: 25 }).catch(() => dashboardService.getRecentActivities(25).catch(() => [])),
+      inventoryService.getInventory({ page_size: 500 }).catch(() => []),
+      medicalService.getMedicalRecords().catch(() => []),
+      financeService.getExpenses().catch(() => []),
     ]);
 
     if (requestId !== requestIdRef.current) return;
@@ -166,6 +180,9 @@ export function useExecutiveDashboard() {
       financeSummaryRes,
       donSummaryRes,
       activitiesRes,
+      inventoryRes,
+      medicalRes,
+      financeExpensesRes,
     ] = results;
 
     const summaryObj = unwrapObject(summaryRes.status === "fulfilled" ? summaryRes.value : {});
@@ -177,14 +194,33 @@ export function useExecutiveDashboard() {
     const fostersList = unwrapList(fostersRes.status === "fulfilled" ? fostersRes.value : []);
     const volunteersList = unwrapList(volunteersRes.status === "fulfilled" ? volunteersRes.value : []);
     const donationsList = unwrapList(donationsRes.status === "fulfilled" ? donationsRes.value : []);
+    const inventoryVal = inventoryRes.status === "fulfilled" ? inventoryRes.value : [];
+    const inventoryList = unwrapList(inventoryVal?.data ?? inventoryVal);
+    const medicalList = unwrapList(medicalRes.status === "fulfilled" ? medicalRes.value : []);
+    const financeVal = financeExpensesRes.status === "fulfilled" ? financeExpensesRes.value : [];
+    const financeList = unwrapList(financeVal?.data ?? financeVal);
+
     const finSummaryVal = financeSummaryRes.status === "fulfilled" ? financeSummaryRes.value : null;
     const donSummaryVal = donSummaryRes.status === "fulfilled" ? donSummaryRes.value : null;
-    const financeSummaryObj = (finSummaryVal || donSummaryVal || null) as AnyRecord | null;
+    const rawFinObj = (finSummaryVal || donSummaryVal || null) as AnyRecord | null;
+    const financeSummaryObj = (rawFinObj?.data ?? rawFinObj ?? null) as AnyRecord | null;
+
+    // Create a map for resolving user UUIDs to full names
+    const usersMap = new Map<string, string>();
+    usersList.forEach((u) => {
+      if (u && typeof u === "object") {
+        const id = String(u.id ?? u.user_id ?? "").trim().toLowerCase();
+        const name = String(u.full_name ?? u.name ?? u.email ?? "").trim();
+        if (id && name) usersMap.set(id, name);
+      }
+    });
 
     const activities = mergeActivities(
-      unwrapList(activitiesRes.status === "fulfilled" ? activitiesRes.value : []).map(normalizeActivity).filter((a): a is ActivityEntry => a !== null),
+      unwrapList(activitiesRes.status === "fulfilled" ? activitiesRes.value : [])
+        .map((act) => normalizeActivity(act, usersMap))
+        .filter((a): a is ActivityEntry => a !== null),
       getActivityStream()
-        .map((item) => normalizeActivity(item as unknown as AnyRecord))
+        .map((item) => normalizeActivity(item as unknown as AnyRecord, usersMap))
         .filter((a): a is ActivityEntry => a !== null)
     );
 
@@ -203,9 +239,9 @@ export function useExecutiveDashboard() {
       adoptions: adoptionsList,
       fosters: fostersList,
       volunteers: volunteersList,
-      inventory: [],
-      medical: [],
-      finance: [],
+      inventory: inventoryList,
+      medical: medicalList,
+      finance: financeList,
       donations: donationsList,
       financeSummary: financeSummaryObj || summaryObj,
       activities,

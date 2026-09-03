@@ -36,7 +36,14 @@ const ShelterOccupancyTable = ({ shelters, dogs = [], loading }: ShelterOccupanc
       })
       .map((s): ShelterOccupancyRow => {
         const id = String(s.id ?? s.facility_id ?? s.name);
-        const name = String(s.name || s.facility_name || "Shelter Facility");
+        let rawName = String(s.name || s.facility_name || s.shelter_name || s.title || "").trim();
+        if (!rawName || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawName)) {
+          const fallbackName = String(s.facility_name || s.shelter_name || s.address || s.location || "").trim();
+          rawName = fallbackName && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fallbackName)
+            ? fallbackName
+            : "Main Shelter Facility";
+        }
+        const name = rawName;
         const capacity = Math.max(0, Number(s.total_capacity ?? s.capacity ?? s.max_capacity ?? 0));
 
         // Count real active dogs assigned to this shelter if not provided explicitly by backend

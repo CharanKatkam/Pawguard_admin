@@ -142,8 +142,8 @@ const RescueCoordinatorDashboard = () => {
 
       const [dashRes, allRes, assignedRes, gpsRes] = await Promise.allSettled([
         dashboardService.getRescueDashboard(),
-        rescueService.getRescueCases(),
-        rescueService.getRescueCases({ assigned_to_me: true }),
+        rescueService.getRescueCases({ page_size: 500 }),
+        rescueService.getRescueCases({ page_size: 500, assigned_to_me: true }),
         rescueService.getAgentLocations(),
       ]);
 

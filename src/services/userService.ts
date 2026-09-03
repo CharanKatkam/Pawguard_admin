@@ -107,7 +107,8 @@ export const userService = {
           const res = await api.get(`/admin/users/${cleanId}`);
           data = res.data;
         }
-        return (data?.data || data) as Record<string, unknown>;
+        const inner = data?.data || data;
+        return (inner?.user || inner) as Record<string, unknown>;
       } catch {
         return null;
       }

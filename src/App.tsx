@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/auth/Login";
 import ResetPassword from "./pages/auth/ResetPassword";
@@ -98,6 +98,7 @@ function App() {
 
             <Route element={<ProtectedRoute allowedRoles={["rescue_coordinator", "super_admin"]} />}>
               <Route path="/dashboard/rescue-coordinator" element={<RescueCoordinatorDashboard />} />
+              <Route path="/dashboard/rescue" element={<Navigate to="/dashboard/rescue-coordinator" replace />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={["rescue_agent", "super_admin"]} />}>
@@ -110,14 +111,17 @@ function App() {
 
             <Route element={<ProtectedRoute allowedRoles={["shelter_manager", "super_admin"]} />}>
               <Route path="/dashboard/shelter-manager" element={<ShelterManagerDashboard />} />
+              <Route path="/dashboard/shelter-admin" element={<Navigate to="/dashboard/shelter-manager" replace />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={["adoption_coordinator", "super_admin"]} />}>
               <Route path="/dashboard/adoption-coordinator" element={<AdoptionCoordinatorDashboard />} />
+              <Route path="/dashboard/adoption" element={<Navigate to="/dashboard/adoption-coordinator" replace />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={["foster_coordinator", "super_admin"]} />}>
               <Route path="/dashboard/foster-coordinator" element={<FosterCoordinatorDashboard />} />
+              <Route path="/dashboard/foster" element={<Navigate to="/dashboard/foster-coordinator" replace />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={["volunteer_coordinator", "super_admin"]} />}>

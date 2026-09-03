@@ -18,8 +18,6 @@ import {
   FaPrint,
   FaSync,
   FaPlus,
-  FaCopy,
-  FaExternalLinkAlt,
   FaExchangeAlt,
   FaExclamationTriangle,
   FaCheckCircle,
@@ -428,7 +426,6 @@ const ShelterManagerDashboard = () => {
   const [qrError, setQrError] = useState<string | null>(null);
   const [tagStatus, setTagStatus] = useState<string>("INACTIVE");
   const [tagMetadata, setTagMetadata] = useState<Record<string, unknown> | null>(null);
-  const [rawToken, setRawToken] = useState<string | null>(null);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [manualTokenInput, setManualTokenInput] = useState("");
   const [isDeactivating, setIsDeactivating] = useState(false);
@@ -545,11 +542,12 @@ const ShelterManagerDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [facilitiesRes, dogsRes, rescueCasesRes, transfersRes] = await Promise.allSettled([
+      const [facilitiesRes, dogsRes, rescueCasesRes, transfersRes, dashSummaryRes] = await Promise.allSettled([
         shelterService.getShelters({ page: 1, page_size: 50 }),
         petService.getAllDogs(),
         rescueService.getRescueCases({ page: 1, page_size: 50 }),
         shelterService.getTransfers({ page: 1, page_size: 50 }),
+        shelterService.getShelterDashboard().catch(() => null),
       ]);
 
       const currentUser = getCurrentUser();
@@ -561,6 +559,7 @@ const ShelterManagerDashboard = () => {
       let dogList = dogsRes.status === "fulfilled" ? unwrapList(dogsRes.value).map(formatDog) : [];
       const rescueCases = rescueCasesRes.status === "fulfilled" ? unwrapList(rescueCasesRes.value) : [];
       const rawTransfers = transfersRes.status === "fulfilled" ? unwrapList(transfersRes.value) : [];
+      const dashSummary = dashSummaryRes.status === "fulfilled" && dashSummaryRes.value ? (dashSummaryRes.value?.data ?? dashSummaryRes.value) : null;
 
       if (dogsRes.status === "rejected") {
         const errDetail = (dogsRes.reason as any)?.response?.data?.detail || (dogsRes.reason as any)?.response?.data?.message || "Failed to load dogs data.";
@@ -628,12 +627,12 @@ const ShelterManagerDashboard = () => {
       const adoptableDogs = dogList.filter((d: any) => d.is_adoptable).length;
 
       setDashboardData({
-        total_facilities: facList.length,
-        total_dogs: dogList.length,
-        adoptable_dogs: adoptableDogs,
-        in_shelter_dogs: inShelterDogs,
-        total_capacity: totalCapacity,
-        total_kennels: 0,
+        total_facilities: dashSummary?.total_facilities ?? facList.length,
+        total_dogs: dashSummary?.total_dogs ?? dogList.length,
+        adoptable_dogs: dashSummary?.adoptable_dogs ?? adoptableDogs,
+        in_shelter_dogs: dashSummary?.in_shelter_dogs ?? dashSummary?.current_occupancy ?? inShelterDogs,
+        total_capacity: dashSummary?.total_capacity ?? totalCapacity,
+        total_kennels: dashSummary?.total_kennels ?? 0,
       });
 
       // Load kennels
@@ -901,32 +900,53 @@ const ShelterManagerDashboard = () => {
     if (!id) return;
     setQrDog(dog);
     setQrBlob(null);
+    setQrDog(dog);
+    setQrBlob(null);
     setQrImageUrl(null);
     setQrError(null);
     setTagMetadata(null);
-    setRawToken(null);
     setManualTokenInput("");
     setTagStatus("INACTIVE");
     setIsQrModalOpen(true);
 
     try {
       setQrLoading(true);
-      let savedToken: string | null = (dog as any)?.raw_token || (dog as any)?.token || (dog as any)?.safety_token || null;
+      let activeState = false;
+      let authoritativeScanUrl: string | null = null;
+      const isCompanion = Boolean((dog as any)?.is_companion_pet || (dog as any)?.companion_pet_id || (dog as any)?.owner_id);
 
       try {
-        const metaRes = await petService.getSafetyTagMetadata(id);
+        let metaRes: any = null;
+        if (isCompanion) {
+          try {
+            metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
+          } catch {
+            metaRes = await petService.getSafetyTagMetadata(id);
+          }
+        } else {
+          try {
+            metaRes = await petService.getSafetyTagMetadata(id);
+          } catch {
+            metaRes = await petService.getCompanionPetSafetyTagMetadata(id);
+          }
+        }
+
         const metaData = metaRes?.data || metaRes;
         if (metaData) {
           setTagMetadata(metaData);
-          const isActive = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
-          if (isActive) {
+          activeState = metaData.is_active === true || String(metaData.status || "").toUpperCase() === "ACTIVE";
+          if (activeState) {
             setTagStatus("ACTIVE");
-            if (metaData.raw_token) {
-              savedToken = metaData.raw_token;
+            const rawScanUrl = metaData.public_scan_url || metaData.public_scan_path;
+            if (rawScanUrl && typeof rawScanUrl === "string" && rawScanUrl.trim()) {
+              const cleanUrl = rawScanUrl.trim();
+              const publicWebBase = (import.meta.env.VITE_PUBLIC_FRONTEND_URL as string) || "https://pawguard-public-web.vercel.app";
+              authoritativeScanUrl = cleanUrl.startsWith("http")
+                ? cleanUrl
+                : `${publicWebBase.replace(/\/+$/, "")}${cleanUrl.startsWith("/") ? "" : "/"}${cleanUrl}`;
             }
           } else {
             setTagStatus("INACTIVE");
-            setRawToken(null);
             setQrImageUrl(null);
             setQrBlob(null);
             return;
@@ -940,7 +960,6 @@ const ShelterManagerDashboard = () => {
         if (status === 404 || (apiMsg && apiMsg.toLowerCase().includes("not found"))) {
           setTagStatus("INACTIVE");
           setTagMetadata(null);
-          setRawToken(null);
           setQrImageUrl(null);
           setQrBlob(null);
           return;
@@ -955,10 +974,29 @@ const ShelterManagerDashboard = () => {
         }
       }
 
-      if (savedToken) {
-        setRawToken(savedToken);
-        const qrUrl = await generateQrDataUrl(savedToken);
-        const blob = await generateQrBlob(savedToken);
+      if (authoritativeScanUrl) {
+        const qrUrl = await generateQrDataUrl(authoritativeScanUrl);
+        const blob = await generateQrBlob(authoritativeScanUrl);
+        setQrImageUrl(qrUrl);
+        setQrBlob(blob);
+        setTagStatus("ACTIVE");
+      } else if (activeState && !isCompanion) {
+        try {
+          const qrBlobData = await petService.getDogQrImage(id);
+          const qrUrlData = URL.createObjectURL(qrBlobData);
+          setQrImageUrl(qrUrlData);
+          setQrBlob(qrBlobData);
+          setTagStatus("ACTIVE");
+        } catch {
+          setQrImageUrl(null);
+          setQrBlob(null);
+          setQrError("Unable to load Safety Tag QR code from backend service. Please click Retry Request below.");
+        }
+      } else if (activeState && isCompanion) {
+        const publicWebBase = (import.meta.env.VITE_PUBLIC_FRONTEND_URL as string) || "https://pawguard-public-web.vercel.app";
+        const fallbackScanUrl = `${publicWebBase.replace(/\/+$/, "")}/api/v1/companion-pets/${id}/public-scan`;
+        const qrUrl = await generateQrDataUrl(fallbackScanUrl);
+        const blob = await generateQrBlob(fallbackScanUrl);
         setQrImageUrl(qrUrl);
         setQrBlob(blob);
         setTagStatus("ACTIVE");
@@ -975,7 +1013,6 @@ const ShelterManagerDashboard = () => {
     setQrDog(null);
     setQrImageUrl(null);
     setQrBlob(null);
-    setRawToken(null);
   };
 
   const handleProvisionTag = async (forceReissue = false) => {
@@ -986,26 +1023,25 @@ const ShelterManagerDashboard = () => {
     try {
       const res = await petService.provisionSafetyTag(id, forceReissue);
       const data = res?.data || res || {};
-      const token = data.raw_token || data.token || data.rawToken;
+      const scanUrl = data.public_scan_url || `/api/v1/dogs/${id}/public-scan`;
+      const publicWebBase = (import.meta.env.VITE_PUBLIC_FRONTEND_URL as string) || "https://pawguard-public-web.vercel.app";
+      const fullUrl = scanUrl.startsWith("http") ? scanUrl : `${publicWebBase.replace(/\/+$/, "")}${scanUrl.startsWith("/") ? "" : "/"}${scanUrl}`;
 
-      if (!token) throw new Error("Backend did not return raw_token.");
-
-      setRawToken(token);
-      const qrDataUrl = await generateQrDataUrl(token);
-      const blob = await generateQrBlob(token);
+      const qrDataUrl = await generateQrDataUrl(fullUrl);
+      const blob = await generateQrBlob(fullUrl);
 
       setQrImageUrl(qrDataUrl);
       setQrBlob(blob);
       setTagStatus("ACTIVE");
       setTagMetadata({
-        token_prefix: data.token_prefix || String(token).slice(0, 8),
+        token_prefix: data.token_prefix || String(fullUrl).slice(-8),
         status: "ACTIVE",
         created_at: new Date().toISOString(),
         scans_count: 0,
       });
 
       setIsReProvisionConfirmOpen(false);
-      addToast("Safety Tag provisioned! QR generated directly from raw_token.", "success");
+      addToast("Safety Tag provisioned!", "success");
       fetchDashboard();
       notifyDataChanged();
     } catch (err: any) {
@@ -1044,7 +1080,6 @@ const ShelterManagerDashboard = () => {
       await petService.revokeSafetyTag(id);
       addToast(`Safety Tag deactivated for pet ${qrDog.name}.`, "success");
       setTagStatus("INACTIVE");
-      setRawToken(null);
       setQrImageUrl(null);
       setQrBlob(null);
       setIsDeactivateConfirmOpen(false);
@@ -1055,12 +1090,6 @@ const ShelterManagerDashboard = () => {
     } finally {
       setIsDeactivating(false);
     }
-  };
-
-  const handleCopyToken = () => {
-    if (!rawToken) return;
-    void navigator.clipboard.writeText(rawToken);
-    addToast("Safety Token copied to clipboard!", "info");
   };
 
   const handleDownloadQr = () => {
@@ -2360,20 +2389,6 @@ const ShelterManagerDashboard = () => {
                 </button>
               </div>
 
-              {rawToken && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFF", border: "1px solid #CBD5E1", borderRadius: "6px", padding: "6px 10px", marginTop: "4px" }}>
-                  <span style={{ fontSize: "12px", fontFamily: "monospace", color: "#1E3A8A", fontWeight: 700 }}>
-                    Token: {rawToken}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyToken}
-                    style={{ padding: "4px 8px", borderRadius: "4px", border: "none", background: "#F3E8FF", color: "#1E3A8A", fontSize: "11px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                  >
-                    <FaCopy /> Copy Token
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
@@ -2411,7 +2426,6 @@ const ShelterManagerDashboard = () => {
                       try {
                         const qrUrl = await generateQrDataUrl(clean);
                         const blob = await generateQrBlob(clean);
-                        setRawToken(clean);
                         setQrImageUrl(qrUrl);
                         setQrBlob(blob);
                         addToast("Active Safety Tag QR loaded successfully!", "success");
@@ -2498,9 +2512,6 @@ const ShelterManagerDashboard = () => {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", width: "100%" }}>
                   <button type="button" onClick={handleDownloadQr} style={{ padding: "11px", borderRadius: "8px", border: "none", background: "#1E3A8A", color: "#FFF", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}><FaDownload /> Download QR</button>
                   <button type="button" onClick={handlePrintQr} style={{ padding: "11px", borderRadius: "8px", border: "1px solid #C4B5FD", background: "#FFF", color: "#1E3A8A", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}><FaPrint /> Print Safety Tag</button>
-                  {rawToken && (
-                    <button type="button" onClick={() => window.open(`/scan-pet?token=${rawToken}`, "_blank")} style={{ padding: "11px", borderRadius: "8px", border: "1px solid #1E3A8A", background: "#EFF6FF", color: "#1E3A8A", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}><FaExternalLinkAlt /> Public Scan</button>
-                  )}
                   <button type="button" onClick={() => setIsDeactivateConfirmOpen(true)} style={{ padding: "11px", borderRadius: "8px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#991B1B", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Deactivate Tag</button>
                 </div>
               ) : (
