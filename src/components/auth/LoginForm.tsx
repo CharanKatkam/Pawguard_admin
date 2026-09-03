@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -23,6 +23,27 @@ const LoginForm = () => {
   const [mfaCode, setMfaCode] = useState("");
 
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let msg: string | null = null;
+    try {
+      msg = sessionStorage.getItem("session_expired_message");
+      if (msg) {
+        sessionStorage.removeItem("session_expired_message");
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    if (!msg && typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("expired") === "true") {
+        msg = "Your session has expired. Please sign in again.";
+      }
+    }
+    if (msg) {
+      setErrorMsg(msg);
+    }
+  }, []);
 
   const resolveUserObject = (payload: unknown): any => {
     if (!payload || typeof payload !== "object") return null;

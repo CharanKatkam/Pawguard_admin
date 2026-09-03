@@ -265,7 +265,7 @@ const VolunteerDashboard = () => {
       render: (v: string, r: any) => (
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || r.title || "Shelter Support"}</div>
-          <div style={{ fontSize: "11px", color: "#64748B" }}>Facility: {r.shelter_facility_id ? String(r.shelter_facility_id).slice(0, 8) : "Central Shelter"}</div>
+          <div style={{ fontSize: "11px", color: "#64748B" }}>Facility: {r.facility_name || r.shelter_name || r.facility?.name || (r.shelter_facility_id ? `Facility (${String(r.shelter_facility_id).slice(0, 8)})` : "Central Shelter")}</div>
           {(r.notes || r.message || r.instructions) && (
             <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", fontStyle: "italic" }}>
               Details: {r.notes || r.message || r.instructions}

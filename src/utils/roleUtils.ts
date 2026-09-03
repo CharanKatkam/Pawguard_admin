@@ -562,11 +562,8 @@ export const getMenusForRole = (role?: string | UserRole | null): RoleMenuItem[]
         { name: "Medical Suite", path: "/medical-records", iconType: "medical" },
         { name: "Vet Directory & Appointments", path: "/vet-directory", iconType: "medical" },
         { name: "Vaccination & Medication Reminders", path: "/medical-reminders", iconType: "medical" },
-
-
         { name: "Dog Profiles", path: "/pets", iconType: "pets" },
         { name: "Vaccines & Certs", path: "/certificates", iconType: "certificates" },
-        { name: "Medical Reports", path: "/reports", iconType: "reports" },
       ];
 
     case "shelter_manager":

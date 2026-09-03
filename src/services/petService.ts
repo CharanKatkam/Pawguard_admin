@@ -121,66 +121,92 @@ export const petService = {
     return dogData;
   },
 
+  // In-memory cache to prevent 429 rate limits from repeated paginated scans
+  _allDogsPromise: null as Promise<any> | null,
+  _lastFetchTime: 0,
+
   // GET /dogs & /companion-pets — fetch complete dataset across all pages for Admin KPI/table view
-  getAllDogs: async (params?: Record<string, unknown>) => {
-    const pageSize = 50;
-    const collected: any[] = [];
-    try {
-      const firstRes = await api.get("/dogs", { params: { ...params, page: 1, page_size: pageSize } });
-      const firstBody = firstRes.data;
-      const firstList = Array.isArray(firstBody?.data) ? firstBody.data : Array.isArray(firstBody) ? firstBody : [];
-      collected.push(...firstList);
+  getAllDogs: function (params?: Record<string, unknown>) {
+    const now = Date.now();
+    if (this._allDogsPromise && now - this._lastFetchTime < 30000 && !params) {
+      return this._allDogsPromise;
+    }
 
-      const totalRecords = firstBody?.meta?.total ?? firstBody?.data?.meta?.total ?? collected.length;
-      const actualPageSize = firstBody?.meta?.page_size ?? (firstList.length > 0 ? firstList.length : pageSize);
-      const totalPages = firstBody?.meta?.total_pages ?? Math.ceil(totalRecords / Math.max(1, actualPageSize));
+    this._lastFetchTime = now;
+    const promise = (async () => {
+      const pageSize = 50;
+      const collected: any[] = [];
+      try {
+        const firstRes = await api.get("/dogs", { params: { ...params, page: 1, page_size: pageSize } });
+        const firstBody = firstRes.data;
+        const firstList = Array.isArray(firstBody?.data) ? firstBody.data : Array.isArray(firstBody) ? firstBody : [];
+        collected.push(...firstList);
 
-      for (let p = 2; p <= totalPages; p++) {
+        const totalRecords = firstBody?.meta?.total ?? firstBody?.data?.meta?.total ?? collected.length;
+        const actualPageSize = firstBody?.meta?.page_size ?? (firstList.length > 0 ? firstList.length : pageSize);
+        const totalPages = firstBody?.meta?.total_pages ?? Math.ceil(totalRecords / Math.max(1, actualPageSize));
+
+        for (let p = 2; p <= totalPages; p++) {
+          try {
+            const pageRes = await api.get("/dogs", { params: { ...params, page: p, page_size: pageSize } });
+            const pageBody = pageRes.data;
+            const pageList = Array.isArray(pageBody?.data) ? pageBody.data : Array.isArray(pageBody) ? pageBody : [];
+            collected.push(...pageList);
+          } catch (pErr) {
+            console.warn(`Failed to fetch page ${p} of dogs:`, pErr);
+          }
+        }
+
+        // Merge ALL pages of CompanionPets dataset into global dogs list if accessible
         try {
-          const pageRes = await api.get("/dogs", { params: { ...params, page: p, page_size: pageSize } });
-          const pageBody = pageRes.data;
-          const pageList = Array.isArray(pageBody?.data) ? pageBody.data : Array.isArray(pageBody) ? pageBody : [];
-          collected.push(...pageList);
-        } catch (pErr) {
-          console.warn(`Failed to fetch page ${p} of dogs:`, pErr);
-        }
-      }
+          const compFirst = await api.get("/companion-pets", { params: { page: 1, page_size: pageSize } });
+          const compBody = compFirst.data;
+          const compList = Array.isArray(compBody?.data) ? compBody.data : Array.isArray(compBody) ? compBody : [];
+          const compTotalPages = compBody?.meta?.total_pages ?? Math.ceil((compBody?.meta?.total ?? compList.length) / pageSize);
 
-      // Merge CompanionPets dataset into global dogs list if accessible
-      try {
-        const compRes = await api.get("/companion-pets", { params: { page: 1, page_size: pageSize } });
-        const compBody = compRes.data;
-        const compList = Array.isArray(compBody?.data) ? compBody.data : Array.isArray(compBody) ? compBody : [];
-        if (compList.length > 0) {
-          const existingIds = new Set(collected.map((d: any) => d.id || d.dog_id));
-          const normalizedCompanions = compList
-            .filter((cp: any) => !existingIds.has(cp.id) && !existingIds.has(cp.original_dog_id))
-            .map((cp: any) => ({
-              ...cp,
-              is_companion_pet: true,
-              is_adoptable: cp.is_adoptable === true,
-              status: cp.status || "companion",
-            }));
-          collected.push(...normalizedCompanions);
-        }
-      } catch {
-        /* ignore companion pets fetch failure */
-      }
+          const allCompPets: any[] = [...compList];
+          for (let cpPage = 2; cpPage <= compTotalPages; cpPage++) {
+            try {
+              const pageRes = await api.get("/companion-pets", { params: { page: cpPage, page_size: pageSize } });
+              const pageBody = pageRes.data;
+              const pageList = Array.isArray(pageBody?.data) ? pageBody.data : Array.isArray(pageBody) ? pageBody : [];
+              allCompPets.push(...pageList);
+            } catch {
+              /* ignore single page error */
+            }
+          }
 
-      return {
-        success: true,
-        data: collected,
-        meta: { total: collected.length },
-      };
-    } catch (err) {
-      console.warn("Failed to fetch all dogs in getAllDogs:", err);
-      try {
-        const fallbackRes = await api.get("/dogs", { params });
-        return fallbackRes.data;
-      } catch {
+          if (allCompPets.length > 0) {
+            const existingIds = new Set(collected.map((d: any) => d.id || d.dog_id));
+            const normalizedCompanions = allCompPets
+              .filter((cp: any) => !existingIds.has(cp.id) && !existingIds.has(cp.original_dog_id))
+              .map((cp: any) => ({
+                ...cp,
+                is_companion_pet: true,
+                is_adoptable: cp.is_adoptable === true,
+                status: cp.status || "companion",
+              }));
+            collected.push(...normalizedCompanions);
+          }
+        } catch {
+          /* ignore companion pets fetch failure */
+        }
+
+        return {
+          success: true,
+          data: collected,
+          meta: { total: collected.length },
+        };
+      } catch (err) {
+        console.error("petService.getAllDogs Error:", err);
         return { success: false, data: [], meta: { total: 0 } };
       }
+    })();
+
+    if (!params) {
+      this._allDogsPromise = promise;
     }
+    return promise;
   },
 
   getPetById: async (dogId: string) => {

@@ -9,6 +9,7 @@ interface ModalProps {
   maxWidth?: string;
   size?: "sm" | "md" | "lg" | "xl" | "full";
   footer?: React.ReactNode;
+  zIndex?: number;
 }
 
 const SIZE_MAP = {
@@ -27,6 +28,7 @@ export const Modal: React.FC<ModalProps> = ({
   maxWidth,
   size = "lg",
   footer,
+  zIndex = 1000,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -66,7 +68,7 @@ export const Modal: React.FC<ModalProps> = ({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex,
         padding: "16px",
       }}
       onClick={(e) => {

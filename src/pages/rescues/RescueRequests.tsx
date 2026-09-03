@@ -190,12 +190,40 @@ const RescueRequests = () => {
         ? response.data
         : [];
 
+      // Collect reporter and assigned agent user UUIDs for resolution
+      const userIdsToResolve = new Set<string>();
+      list.forEach((item: Record<string, unknown>) => {
+        const dispatchObj = (item.dispatch as Record<string, unknown>) || null;
+        const repId = String(item.reporter_id || item.reported_by_id || item.user_id || "").trim();
+        const agtId = String(item.assigned_agent_id || item.agent_id || dispatchObj?.assigned_driver_id || dispatchObj?.agent_id || "").trim();
+        const isAnon = Boolean(item.is_anonymous || item.anonymous);
+        if (repId && !isAnon) userIdsToResolve.add(repId.toLowerCase());
+        if (agtId) userIdsToResolve.add(agtId.toLowerCase());
+      });
+
+      const userMap = new Map<string, string>();
+      if (userIdsToResolve.size > 0) {
+        await Promise.all(
+          Array.from(userIdsToResolve).map(async (uid) => {
+            try {
+              const summary = await userService.getUserSummary(uid);
+              if (summary && (summary.full_name || summary.name)) {
+                userMap.set(uid, String(summary.full_name || summary.name));
+              }
+            } catch {
+              /* ignore summary error */
+            }
+          })
+        );
+      }
+
       let formatted: RescueRequestTableRow[] = list.map((item: Record<string, unknown>) => {
         const dispatchObj = (item.dispatch as Record<string, unknown>) || null;
         const assignedAgentId = String(item.assigned_agent_id || item.agent_id || dispatchObj?.assigned_driver_id || dispatchObj?.agent_id || item.assigned_agent || "");
-        const assignedAgentName = String(item.assigned_agent_name || item.assigned_agent || dispatchObj?.assigned_driver_name || dispatchObj?.agent_name || (assignedAgentId ? `Agent (${assignedAgentId})` : ""));
+        const resolvedAgentName = assignedAgentId ? userMap.get(assignedAgentId.toLowerCase()) : "";
+        const assignedAgentName = String(item.assigned_agent_name || item.assigned_agent || dispatchObj?.assigned_driver_name || dispatchObj?.agent_name || resolvedAgentName || (assignedAgentId ? `Agent (${assignedAgentId.slice(0, 8)})` : ""));
         const assignedVehicleId = String(item.assigned_vehicle_id || dispatchObj?.assigned_vehicle_id || dispatchObj?.vehicle_id || "");
-        const assignedVehicleNumber = String(item.assigned_vehicle_number || item.assigned_vehicle || dispatchObj?.assigned_vehicle_number || dispatchObj?.vehicle_number || (assignedVehicleId ? `Vehicle (${assignedVehicleId})` : ""));
+        const assignedVehicleNumber = String(item.assigned_vehicle_number || item.assigned_vehicle || dispatchObj?.assigned_vehicle_number || dispatchObj?.vehicle_number || (assignedVehicleId ? `Vehicle (${assignedVehicleId.slice(0, 8)})` : ""));
 
         const rawStatus = String(item.status || "reported").toLowerCase();
         const hasAssignment = !!(item.coordinator_id || assignedAgentId || dispatchObj);
@@ -203,10 +231,17 @@ const RescueRequests = () => {
 
         const stage = dispatchStage({ status: displayStatus, dispatch: dispatchObj });
 
+        const isAnon = Boolean(item.is_anonymous || item.anonymous);
+        const reporterId = String(item.reporter_id || item.reported_by_id || item.user_id || "").trim();
+        const resolvedReporterName = reporterId ? userMap.get(reporterId.toLowerCase()) : "";
+        const reporterDisplayName = isAnon
+          ? "Anonymous Reporter"
+          : String(item.reporter_name || item.reporter || resolvedReporterName || "Unknown Reporter");
+
         return {
           id: String(item.id || item.request_id || ""),
           ticket_number: String(item.ticket_number || ""),
-          reporter: String(item.reporter_name || item.reporter || "Anonymous Reporter"),
+          reporter: reporterDisplayName,
           phone: String(item.reporter_phone || item.phone || "Not provided"),
           location: String(item.location_address || item.location || "Location not recorded"),
           condition: String(item.physical_condition || "-"),

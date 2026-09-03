@@ -1014,7 +1014,7 @@ const VolunteerManagement = () => {
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{v || row.title || "Shelter Assistance"}</div>
           <div style={{ fontSize: "11px", color: "#64748B" }}>
-            Facility: {row.shelter_facility_id ? String(row.shelter_facility_id).slice(0, 8) : "Central Shelter"}
+            Facility: {row.facility_name || row.shelter_name || row.facility?.name || (row.shelter_facility_id ? `Facility (${String(row.shelter_facility_id).slice(0, 8)})` : "Central Shelter")}
           </div>
         </div>
       ),

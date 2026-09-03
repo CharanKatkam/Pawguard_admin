@@ -19,6 +19,7 @@ import {
   FaExclamationTriangle,
 } from "react-icons/fa";
 import adoptionService, {
+  notifyApplicant,
   type AdoptionScoreCreatePayload,
 } from "../../services/adoptionService";
 import petService from "../../services/petService";
@@ -42,7 +43,12 @@ const menuItemStyle: React.CSSProperties = {
 };
 
 const extractErrorMessage = (err: any, fallback: string): string => {
-  const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message;
+  const detail =
+    err?.response?.data?.error?.message ||
+    err?.response?.data?.error ||
+    err?.response?.data?.detail ||
+    err?.response?.data?.message ||
+    err?.message;
   if (!detail) return fallback;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
@@ -195,7 +201,6 @@ const Adoptions = () => {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
-  const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
@@ -357,20 +362,19 @@ const Adoptions = () => {
         ? `Home Inspection: ${scheduleForm.notes.trim()}`
         : "Home Inspection Scheduled";
 
-      // 1. Transition application status from interview -> home_check via backend status API
-      await adoptionService.updateAdoptionStatus(
-        appId,
-        "home_check",
-        selectedAdoption.adopter_id as string | undefined,
-        selectedAdoption.petName as string | undefined
-      );
-
-      // 2. Update scheduled date/time and inspection notes on backend record
+      // Update status, scheduled date/time, and inspection notes in a single atomic API call
       await adoptionService.updateAdoptionDetails(appId, {
         status: "home_check",
         home_inspection_scheduled_at: combinedDateTime,
         home_inspection_notes: notes,
       });
+
+      // Send notification to applicant if adopter_id exists
+      await notifyApplicant(
+        selectedAdoption.adopter_id as string | undefined,
+        "Home Inspection Visit Scheduled",
+        `Your home verification visit for ${selectedAdoption.petName || "rescue dog"} has been scheduled.`
+      );
 
       addToast("Home verification visit scheduled successfully!", "success");
       setIsScheduleModalOpen(false);
@@ -491,7 +495,32 @@ const Adoptions = () => {
     try {
       setIsSubmitting(true);
       await adoptionService.updateAdoptionStatus(appId, newStatus);
-      addToast(`Adoption application successfully transitioned to ${newStatus.toUpperCase().replace("_", " ")}!`, "success");
+
+      // If application is approved, update dog master profile and automatically provision Companion Pet profile
+      if (newStatus === "approved") {
+        const dogIdToUpdate = String(targetApp?.dog_id || targetApp?.petId || selectedAdoption?.dog_id || selectedAdoption?.petId || "");
+        if (dogIdToUpdate) {
+          await petService.updatePet(dogIdToUpdate, {
+            status: "adopted",
+            is_adoptable: false,
+            adoption_status: "Approved",
+          }).catch(() => null);
+        }
+
+        // Automatically provision Companion Pet record & safety tag in backend upon approval
+        try {
+          const compRes = await adoptionService.createCompanionPetFromAdoption(appId);
+          const compData = compRes?.data || compRes || {};
+          const compPetId = compData.id || compData.pet_id || compData.companion_pet_id;
+          if (compPetId) {
+            await petService.provisionCompanionPetSafetyTag(String(compPetId)).catch(() => null);
+          }
+        } catch {
+          // Ignore if companion pet already exists or backend handles creation automatically
+        }
+      }
+
+      addToast(`Adoption application approved and completed successfully!`, "success");
       await fetchAdoptions();
       notifyDataChanged();
       setSelectedAdoption((prev) => {
@@ -512,55 +541,6 @@ const Adoptions = () => {
     }
   };
 
-  const handleCompleteAdoption = async () => {
-    if (!selectedAdoption?.id) return;
-    const petId = String(selectedAdoption.dog_id || selectedAdoption.petId || "");
-    try {
-      setIsSubmitting(true);
-      // 1. Update status to completed
-      await adoptionService.updateAdoptionStatus(String(selectedAdoption.id), "completed");
-      // 2. Create Companion Pet
-      const compRes = await adoptionService.createCompanionPetFromAdoption(String(selectedAdoption.id));
-      const compData = compRes?.data || compRes || {};
-      const compPetId = compData.id || compData.pet_id || compData.companion_pet_id;
-
-      // 3. Provision Companion Pet Safety Tag if companion pet ID returned
-      let tagProvisioned = false;
-      if (compPetId) {
-        try {
-          await petService.provisionCompanionPetSafetyTag(String(compPetId));
-          tagProvisioned = true;
-        } catch {
-          tagProvisioned = false;
-        }
-      }
-
-      // 4. Update Dog Master Profile status to adopted
-      if (petId) {
-        await petService.updatePet(petId, {
-          status: "adopted",
-          is_adoptable: false,
-          adoption_status: "Adopted",
-        }).catch(() => null);
-      }
-
-      if (tagProvisioned) {
-        addToast("Adoption completed! Registered as Companion Pet with Safety Tag provisioned.", "success");
-      } else if (compPetId) {
-        addToast("⚠️ Adoption completed & Companion Pet registered, but Safety Tag auto-provisioning is pending.", "info");
-      } else {
-        addToast("Adoption completed successfully!", "success");
-      }
-      setIsCompleteModalOpen(false);
-      fetchAdoptions();
-      notifyDataChanged();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to finalize companion pet adoption.", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleDelete = async () => {
     if (!selectedAdoption?.id) return;
     try {
@@ -572,34 +552,6 @@ const Adoptions = () => {
       notifyDataChanged();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || "Failed to delete record.", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDogMatchChange = async (newDogId: string) => {
-    if (!selectedAdoption?.id || !newDogId) return;
-    try {
-      setIsSubmitting(true);
-      await adoptionService.updateAdoptionDetails(String(selectedAdoption.id), {
-        dog_id: newDogId,
-      });
-      const matchedDog = dogs.find((d) => String(d.id) === newDogId);
-      setSelectedAdoption((prev) =>
-        prev
-          ? {
-              ...prev,
-              dog_id: newDogId,
-              petId: newDogId,
-              petName: matchedDog?.name || prev.petName,
-              petBreed: matchedDog?.breed || prev.petBreed,
-            }
-          : prev
-      );
-      addToast(`Adoption match updated: Application linked to dog ${matchedDog?.name || newDogId}.`, "success");
-      fetchAdoptions();
-    } catch (err: any) {
-      addToast(err?.response?.data?.detail || "Failed to re-match dog identity.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -704,7 +656,7 @@ const Adoptions = () => {
           <QuickActionCard icon={<FaStar />} title="Score Candidates" subtitle="Evaluate match" color="#F59E0B" onClick={() => setActiveTab("scoring")} />
         </Can>
         <Can permission="approve_adoptions">
-          <QuickActionCard icon={<FaCheckDouble />} title="Finalize Companion Pet" subtitle="Complete legal process" color="#6366F1" onClick={() => setActiveTab("completed")} />
+          <QuickActionCard icon={<FaCheckDouble />} title="Completed Roster" subtitle="View finalized adoptions" color="#6366F1" onClick={() => setActiveTab("completed")} />
         </Can>
       </div>
 
@@ -980,21 +932,6 @@ const Adoptions = () => {
                           </>
                         )}
 
-                        {statusStr === "approved" && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveMenuId(null);
-                              setSelectedAdoption(row);
-                              setIsCompleteModalOpen(true);
-                            }}
-                            style={menuItemStyle}
-                          >
-                            <FaCheckDouble style={{ marginRight: "8px", color: "#6366F1" }} /> Finalize
-                          </button>
-                        )}
-
                         {statusStr !== "approved" && statusStr !== "completed" && statusStr !== "rejected" && (
                           <button
                             type="button"
@@ -1143,105 +1080,8 @@ const Adoptions = () => {
         </form>
       </Modal>
 
-      {/* Schedule Home Visit Modal */}
-      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Visit (Home Verification)">
-        <form onSubmit={handleScheduleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
-            Schedule a home visit (home verification / inspection) for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
-          </p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Date *</label>
-              <input type="date" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Time *</label>
-              <input type="time" required value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} style={inputStyle} />
-            </div>
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Session Notes (Optional)</label>
-            <textarea placeholder="e.g. Verify yard fencing, family interaction, or landlord approval..." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}>{isSubmitting ? "Scheduling..." : "Confirm Schedule"}</button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Score Candidate Modal */}
-      <Modal isOpen={isScoreModalOpen} onClose={() => setIsScoreModalOpen(false)} title="Score Candidate Evaluation">
-        <form onSubmit={handleScoreSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
-            Log evaluation scores (1 to 5) for candidate <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Home Environment (1-5)</label>
-              <input type="number" min="1" max="5" required value={scoreForm.home_environment_score} onChange={(e) => setScoreForm({ ...scoreForm, home_environment_score: Number(e.target.value) })} style={inputStyle} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Pet Care Knowledge (1-5)</label>
-              <input type="number" min="1" max="5" required value={scoreForm.pet_care_knowledge_score} onChange={(e) => setScoreForm({ ...scoreForm, pet_care_knowledge_score: Number(e.target.value) })} style={inputStyle} />
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Financial Readiness (1-5)</label>
-              <input type="number" min="1" max="5" required value={scoreForm.financial_readiness_score} onChange={(e) => setScoreForm({ ...scoreForm, financial_readiness_score: Number(e.target.value) })} style={inputStyle} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Lifestyle Match (1-5)</label>
-              <input type="number" min="1" max="5" required value={scoreForm.lifestyle_compatibility_score} onChange={(e) => setScoreForm({ ...scoreForm, lifestyle_compatibility_score: Number(e.target.value) })} style={inputStyle} />
-            </div>
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Recommendation</label>
-            <input type="text" placeholder="e.g. Recommended for placement after visit" value={scoreForm.recommendation} onChange={(e) => setScoreForm({ ...scoreForm, recommendation: e.target.value })} style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Evaluation Notes</label>
-            <textarea placeholder="Additional evaluator observations (optional)..." value={scoreForm.notes || ""} onChange={(e) => setScoreForm({ ...scoreForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setIsScoreModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}>{isSubmitting ? "Saving..." : "Save Scores"}</button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Complete Adoption Modal */}
-      <Modal isOpen={isCompleteModalOpen} onClose={() => setIsCompleteModalOpen(false)} title="Finalize Companion Pet Adoption">
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0 }}>
-            Finalize adoption application <strong>{selectedAdoption?.id ? String(selectedAdoption.id).slice(0, 8) : ""}</strong>? This will create a permanent Companion Pet profile for <strong>{String(selectedAdoption?.applicantName || "Adopter")}</strong> and update the dog's status to <strong>ADOPTED</strong>.
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <button type="button" onClick={() => setIsCompleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="button" disabled={isSubmitting} onClick={handleCompleteAdoption} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600 }}>
-              {isSubmitting ? "Finalizing..." : "Confirm & Create Companion Pet"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Delete Modal */}
-      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Application Record">
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ color: "#334155", margin: 0 }}>
-            Are you sure you want to soft delete adoption application <strong>{selectedAdoption?.id ? String(selectedAdoption.id).slice(0, 8) : ""}</strong>?
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
-            <button type="button" disabled={isSubmitting} onClick={handleDelete} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600 }}>Delete</button>
-          </div>
-        </div>
-      </Modal>
-
       {/* Details Inspect Modal */}
-      <Modal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} title={`Adoption Application Review — ${selectedAdoption?.applicantName || "Applicant"}`} maxWidth="720px">
+      <Modal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} title={`Adoption Application Review — ${selectedAdoption?.applicantName || "Applicant"}`} maxWidth="720px" zIndex={1000}>
         {selectedAdoption && (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1292,37 +1132,13 @@ const Adoptions = () => {
               </div>
 
               <div style={{ background: "#FFF", padding: "12px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-                {["submitted", "screening", "vetting"].includes(String(selectedAdoption.status || "").toLowerCase()) ? (
-                  <>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Rescue Dog Identity &amp; Match</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
-                      {String(selectedAdoption.petName)} ({String(selectedAdoption.petBreed || "Canine")})
-                    </div>
-                    <div style={{ marginTop: "6px" }}>
-                      <label style={{ fontSize: "11px", color: "#64748B", fontWeight: 600, display: "block", marginBottom: "2px" }}>Re-match / Select Dog:</label>
-                      <select
-                        value={String(selectedAdoption.dog_id || selectedAdoption.petId || "")}
-                        onChange={(e) => void handleDogMatchChange(e.target.value)}
-                        style={{ ...inputStyle, padding: "4px 8px", fontSize: "12px" }}
-                      >
-                        <option value="">Select candidate dog...</option>
-                        {dogs.map((d) => (
-                          <option key={d.id} value={d.id}>{d.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Selected Dog</div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
-                      {String(selectedAdoption.petName)} &bull; {String(selectedAdoption.petBreed || "Canine")}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-                      Dog ID: <span style={{ fontFamily: "monospace" }}>{String(selectedAdoption.dog_id || selectedAdoption.petId || "—").slice(0, 8).toUpperCase()}</span>
-                    </div>
-                  </>
-                )}
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", textTransform: "uppercase", marginBottom: "4px" }}>Selected Dog</div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
+                  {String(selectedAdoption.petName || "Rescue Dog")} &bull; {String(selectedAdoption.petBreed || "Canine")}
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                  Dog ID: <span style={{ fontFamily: "monospace" }}>{String(selectedAdoption.dog_id || selectedAdoption.petId || "—").slice(0, 8).toUpperCase()}</span>
+                </div>
               </div>
             </div>
 
@@ -1463,22 +1279,7 @@ const Adoptions = () => {
                       </button>
                     </Can>
                   )}
-                  {currentStatus === "approved" && (
-                    <Can permission={["approve_adoptions", "manage_adoptions"]}>
-                      <button
-                        type="button"
-                        disabled={isSubmitting}
-                        onClick={() => {
-                          setIsDetailsModalOpen(false);
-                          setIsCompleteModalOpen(true);
-                        }}
-                        style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#6366F1", color: "#FFF", fontWeight: 600, cursor: "pointer" }}
-                      >
-                        Finalize Adoption &amp; Create Companion Pet
-                      </button>
-                    </Can>
-                  )}
-                  {currentStatus !== "approved" && (
+                  {currentStatus !== "approved" && currentStatus !== "completed" && (
                     <Can permission={["edit_adoptions", "manage_adoptions", "approve_adoptions"]}>
                       <button
                         type="button"
@@ -1497,8 +1298,104 @@ const Adoptions = () => {
         )}
       </Modal>
 
+      {/* Schedule Home Visit Modal */}
+      <Modal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} title="Schedule Home Visit (Home Verification)" zIndex={1100}>
+        <form onSubmit={handleScheduleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
+            Schedule a home visit (home verification / inspection) for applicant <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Date *</label>
+              <input type="date" required value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Preferred Time *</label>
+              <input type="time" required value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Session Notes (Optional)</label>
+            <textarea placeholder="e.g. Verify yard fencing, family interaction, or landlord approval..." value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsScheduleModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{
+                padding: "10px 18px",
+                borderRadius: "8px",
+                border: "none",
+                background: isSubmitting ? "#94A3B8" : "#2563EB",
+                color: "#FFF",
+                fontWeight: 600,
+                cursor: isSubmitting ? "not-allowed" : "pointer",
+              }}
+            >
+              {isSubmitting ? "Scheduling..." : "Confirm Schedule"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Score Candidate Modal */}
+      <Modal isOpen={isScoreModalOpen} onClose={() => setIsScoreModalOpen(false)} title="Score Candidate Evaluation" zIndex={1100}>
+        <form onSubmit={handleScoreSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ fontSize: "13px", color: "#64748B", margin: 0 }}>
+            Log evaluation scores (1 to 5) for candidate <strong>{String(selectedAdoption?.applicantName || "Applicant")}</strong>.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Home Environment (1-5)</label>
+              <input type="number" min="1" max="5" required value={scoreForm.home_environment_score} onChange={(e) => setScoreForm({ ...scoreForm, home_environment_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Pet Care Knowledge (1-5)</label>
+              <input type="number" min="1" max="5" required value={scoreForm.pet_care_knowledge_score} onChange={(e) => setScoreForm({ ...scoreForm, pet_care_knowledge_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Financial Readiness (1-5)</label>
+              <input type="number" min="1" max="5" required value={scoreForm.financial_readiness_score} onChange={(e) => setScoreForm({ ...scoreForm, financial_readiness_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Lifestyle Match (1-5)</label>
+              <input type="number" min="1" max="5" required value={scoreForm.lifestyle_compatibility_score} onChange={(e) => setScoreForm({ ...scoreForm, lifestyle_compatibility_score: Number(e.target.value) })} style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Recommendation</label>
+            <input type="text" placeholder="e.g. Recommended for placement after visit" value={scoreForm.recommendation} onChange={(e) => setScoreForm({ ...scoreForm, recommendation: e.target.value })} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Evaluation Notes</label>
+            <textarea placeholder="Additional evaluator observations (optional)..." value={scoreForm.notes || ""} onChange={(e) => setScoreForm({ ...scoreForm, notes: e.target.value })} style={{ ...inputStyle, minHeight: "60px" }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <button type="button" onClick={() => setIsScoreModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9", color: "#334155", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={isSubmitting} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 600, cursor: "pointer" }}>{isSubmitting ? "Saving..." : "Save Scores"}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Modal */}
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Application Record" zIndex={1100}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ color: "#334155", margin: 0 }}>
+            Are you sure you want to soft delete adoption application <strong>{selectedAdoption?.id ? String(selectedAdoption.id).slice(0, 8) : ""}</strong>?
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button type="button" onClick={() => setIsDeleteModalOpen(false)} style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #CBD5E1", background: "#F1F5F9" }}>Cancel</button>
+            <button type="button" disabled={isSubmitting} onClick={handleDelete} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", background: "#EF4444", color: "#FFF", fontWeight: 600 }}>Delete</button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Safety Tag QR Modal */}
-      <Modal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} title="Safety Tag QR Code">
+      <Modal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} title="Safety Tag QR Code" zIndex={1100}>
         <div style={{ textAlign: "center", padding: "16px" }}>
           {qrLoading ? (
             <div>Generating Safety Tag QR Code...</div>
