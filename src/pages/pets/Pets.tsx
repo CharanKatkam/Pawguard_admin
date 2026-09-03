@@ -1291,7 +1291,7 @@ const Pets = () => {
       title: "Total Registered Dogs",
       value: isCardsLoading ? "..." : totalRegisteredCount,
       trend: "Registered Dogs",
-      color: "#2563EB",
+      color: "#1E3A8A",
       icon: <FaPaw />,
       selected: registryTab === "all" && !statusFilter && !adoptableOnly,
       onClick: () => {
@@ -1306,7 +1306,7 @@ const Pets = () => {
       title: "Companion Dogs",
       value: isCardsLoading ? "..." : companionCount,
       trend: "Citizen & Owner Registered",
-      color: "#6D28D9",
+      color: "#1E3A8A",
       icon: <FaDog />,
       selected: registryTab === "companion" && !statusFilter && !adoptableOnly,
       onClick: () => {
@@ -1321,7 +1321,7 @@ const Pets = () => {
       title: "Adoptable Dogs",
       value: isCardsLoading ? "..." : adoptableCount,
       trend: "Ready for Adoption",
-      color: "#10B981",
+      color: "#15803D",
       icon: <FaHeart />,
       selected: adoptableOnly,
       onClick: () => {

@@ -427,7 +427,7 @@ const RescueCentreAdminDashboard = () => {
       title: "Total Rescue Requests",
       value: loading ? "..." : String(statsData.totalCalls),
       trend: `${statsData.pendingCalls} Pending Triage`,
-      color: "#2563EB",
+      color: "#1E3A8A",
       icon: <FaAmbulance />,
       onClick: () => navigate("/rescue-requests"),
     },
@@ -435,7 +435,7 @@ const RescueCentreAdminDashboard = () => {
       title: "Active Dispatches",
       value: loading ? "..." : String(statsData.activeDispatches),
       trend: "Units En-Route / On-Site",
-      color: "#10B981",
+      color: "#16A34A",
       icon: <FaUsers />,
       onClick: () => navigate("/rescue-dispatch"),
     },
@@ -443,7 +443,7 @@ const RescueCentreAdminDashboard = () => {
       title: "Shelter Intakes",
       value: loading ? "..." : String(dogIntakes.length),
       trend: `${statsData.medicallyClearedCount} Medically Cleared`,
-      color: "#6366F1",
+      color: "#1E3A8A",
       icon: <FaPaw />,
       onClick: () => setActiveTab("intake"),
     },
@@ -489,7 +489,7 @@ const RescueCentreAdminDashboard = () => {
       key: "intake_status",
       header: "Intake Status",
       render: (v: string) => (
-        <span style={badgeStyle("#EFF6FF", "#1D4ED8")}>
+        <span style={badgeStyle("#EFF6FF", "#1E3A8A")}>
           {String(v || "rescued").toUpperCase()}
         </span>
       ),
@@ -498,7 +498,7 @@ const RescueCentreAdminDashboard = () => {
       key: "care_status",
       header: "Current Care Status",
       render: (v: string) => (
-        <span style={badgeStyle("#ECFDF5", "#047857")}>
+        <span style={badgeStyle("#ECFDF5", "#15803D")}>
           {String(v || "Pending Check").toUpperCase()}
         </span>
       ),
@@ -556,13 +556,13 @@ const RescueCentreAdminDashboard = () => {
 
       {/* Quick Action Navigation Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-        <QuickActionCard icon={<FaAmbulance />} title="Rescue Requests" subtitle="Incidents & Triage" color="#2563EB" onClick={() => navigate("/rescue-requests")} />
-        <QuickActionCard icon={<FaUsers />} title="Dispatch Unit" subtitle="Agent Fleet" color="#10B981" onClick={() => navigate("/rescue-dispatch")} />
-        <QuickActionCard icon={<FaPaw />} title="Dog Management" subtitle="Dog Master Profiles" color="#6366F1" onClick={() => navigate("/pets")} />
-        <QuickActionCard icon={<FaHome />} title="Shelter Facilities" subtitle="Kennel Capacity" color="#8B5CF6" onClick={() => navigate("/shelters")} />
-        <QuickActionCard icon={<FaPaw />} title="Shelter Dogs" subtitle="Post-Rescue Handover" color="#059669" onClick={() => navigate("/shelter-dogs")} />
-        <QuickActionCard icon={<FaStethoscope />} title="Medical Suite" subtitle="Medical Records" color="#EC4899" onClick={() => navigate("/medical-records")} />
-        <QuickActionCard icon={<FaChartBar />} title="Reports & Analytics" subtitle="Operational Insights" color="#3B82F6" onClick={() => navigate("/reports")} />
+        <QuickActionCard icon={<FaAmbulance />} title="Rescue Requests" subtitle="Incidents & Triage" color="#1E3A8A" onClick={() => navigate("/rescue-requests")} />
+        <QuickActionCard icon={<FaUsers />} title="Dispatch Unit" subtitle="Agent Fleet" color="#16A34A" onClick={() => navigate("/rescue-dispatch")} />
+        <QuickActionCard icon={<FaPaw />} title="Dog Management" subtitle="Dog Master Profiles" color="#1E3A8A" onClick={() => navigate("/pets")} />
+        <QuickActionCard icon={<FaHome />} title="Shelter Facilities" subtitle="Kennel Capacity" color="#1E3A8A" onClick={() => navigate("/shelters")} />
+        <QuickActionCard icon={<FaPaw />} title="Shelter Dogs" subtitle="Post-Rescue Handover" color="#15803D" onClick={() => navigate("/shelter-dogs")} />
+        <QuickActionCard icon={<FaStethoscope />} title="Medical Suite" subtitle="Medical Records" color="#1E3A8A" onClick={() => navigate("/medical-records")} />
+        <QuickActionCard icon={<FaChartBar />} title="Reports & Analytics" subtitle="Operational Insights" color="#1E3A8A" onClick={() => navigate("/reports")} />
       </div>
 
       {/* Operational Headline Stats */}
@@ -583,9 +583,9 @@ const RescueCentreAdminDashboard = () => {
               style={{
                 padding: "9px 16px",
                 borderRadius: "10px",
-                border: activeTab === "rescues" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                border: activeTab === "rescues" ? "2px solid #1E3A8A" : "1px solid #CBD5E1",
                 background: activeTab === "rescues" ? "#EFF6FF" : "#FFFFFF",
-                color: activeTab === "rescues" ? "#1D4ED8" : "#475569",
+                color: activeTab === "rescues" ? "#1E3A8A" : "#475569",
                 fontWeight: 700,
                 fontSize: "13px",
                 cursor: "pointer",
@@ -603,9 +603,9 @@ const RescueCentreAdminDashboard = () => {
               style={{
                 padding: "9px 16px",
                 borderRadius: "10px",
-                border: activeTab === "intake" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                border: activeTab === "intake" ? "2px solid #1E3A8A" : "1px solid #CBD5E1",
                 background: activeTab === "intake" ? "#EFF6FF" : "#FFFFFF",
-                color: activeTab === "intake" ? "#1D4ED8" : "#475569",
+                color: activeTab === "intake" ? "#1E3A8A" : "#475569",
                 fontWeight: 700,
                 fontSize: "13px",
                 cursor: "pointer",
@@ -623,9 +623,9 @@ const RescueCentreAdminDashboard = () => {
               style={{
                 padding: "9px 16px",
                 borderRadius: "10px",
-                border: activeTab === "agents" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                border: activeTab === "agents" ? "2px solid #1E3A8A" : "1px solid #CBD5E1",
                 background: activeTab === "agents" ? "#EFF6FF" : "#FFFFFF",
-                color: activeTab === "agents" ? "#1D4ED8" : "#475569",
+                color: activeTab === "agents" ? "#1E3A8A" : "#475569",
                 fontWeight: 700,
                 fontSize: "13px",
                 cursor: "pointer",
@@ -643,9 +643,9 @@ const RescueCentreAdminDashboard = () => {
               style={{
                 padding: "9px 16px",
                 borderRadius: "10px",
-                border: activeTab === "vehicles" ? "2px solid #2563EB" : "1px solid #CBD5E1",
+                border: activeTab === "vehicles" ? "2px solid #1E3A8A" : "1px solid #CBD5E1",
                 background: activeTab === "vehicles" ? "#EFF6FF" : "#FFFFFF",
-                color: activeTab === "vehicles" ? "#1D4ED8" : "#475569",
+                color: activeTab === "vehicles" ? "#1E3A8A" : "#475569",
                 fontWeight: 700,
                 fontSize: "13px",
                 cursor: "pointer",
@@ -700,9 +700,9 @@ const RescueCentreAdminDashboard = () => {
                   style={{
                     padding: "6px 12px",
                     borderRadius: "6px",
-                    border: "1px solid #2563EB",
+                    border: "1px solid #1E3A8A",
                     background: "#EFF6FF",
-                    color: "#1D4ED8",
+                    color: "#1E3A8A",
                     fontSize: "12px",
                     fontWeight: 700,
                     cursor: "pointer",
@@ -740,9 +740,9 @@ const RescueCentreAdminDashboard = () => {
                 style={{
                   padding: "6px 12px",
                   borderRadius: "6px",
-                  border: "1px solid #10B981",
+                  border: "1px solid #16A34A",
                   background: "#ECFDF5",
-                  color: "#047857",
+                  color: "#15803D",
                   fontSize: "12px",
                   fontWeight: 700,
                   cursor: "pointer",
@@ -787,7 +787,7 @@ const RescueCentreAdminDashboard = () => {
                 render: (_val: boolean, r: any) => {
                   const isActive = r.is_active !== false;
                   return (
-                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: isActive ? "#ECFDF5" : "#FEF2F2", color: isActive ? "#047857" : "#DC2626" }}>
+                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: isActive ? "#ECFDF5" : "#FEF2F2", color: isActive ? "#15803D" : "#DC2626" }}>
                       {isActive ? "ACTIVE AGENT" : "INACTIVE"}
                     </span>
                   );
@@ -812,9 +812,9 @@ const RescueCentreAdminDashboard = () => {
                 style={{
                   padding: "6px 12px",
                   borderRadius: "6px",
-                  border: "1px solid #2563EB",
+                  border: "1px solid #1E3A8A",
                   background: "#EFF6FF",
-                  color: "#1D4ED8",
+                  color: "#1E3A8A",
                   fontSize: "12px",
                   fontWeight: 700,
                   cursor: "pointer",
@@ -843,7 +843,7 @@ const RescueCentreAdminDashboard = () => {
                   const lower = String(val || "").toLowerCase();
                   const isReady = lower.includes("ready") || lower === "available" || lower === "active";
                   return (
-                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: isReady ? "#ECFDF5" : lower.includes("dispatch") || lower.includes("maintenance") ? "#EFF6FF" : "#FEF2F2", color: isReady ? "#047857" : lower.includes("dispatch") || lower.includes("maintenance") ? "#1D4ED8" : "#DC2626" }}>
+                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: isReady ? "#ECFDF5" : lower.includes("dispatch") || lower.includes("maintenance") ? "#EFF6FF" : "#FEF2F2", color: isReady ? "#15803D" : lower.includes("dispatch") || lower.includes("maintenance") ? "#1E3A8A" : "#DC2626" }}>
                       {val || "Active"}
                     </span>
                   );
@@ -890,9 +890,9 @@ const RescueCentreAdminDashboard = () => {
                 style={{
                   padding: "6px 12px",
                   borderRadius: "6px",
-                  border: "1px solid #2563EB",
+                  border: "1px solid #1E3A8A",
                   background: "#EFF6FF",
-                  color: "#1D4ED8",
+                  color: "#1E3A8A",
                   fontSize: "12px",
                   fontWeight: 700,
                   cursor: "pointer",
@@ -932,7 +932,7 @@ const RescueCentreAdminDashboard = () => {
                 render: (val: string) => {
                   const s = String(val || "open").toLowerCase();
                   return (
-                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: s === "resolved" ? "#ECFDF5" : s === "escalated" ? "#FEF2F2" : "#EFF6FF", color: s === "resolved" ? "#047857" : s === "escalated" ? "#DC2626" : "#1D4ED8" }}>
+                    <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: s === "resolved" ? "#ECFDF5" : s === "escalated" ? "#FEF2F2" : "#EFF6FF", color: s === "resolved" ? "#15803D" : s === "escalated" ? "#DC2626" : "#1E3A8A" }}>
                       {s.toUpperCase()}
                     </span>
                   );
@@ -1073,14 +1073,14 @@ const RescueCentreAdminDashboard = () => {
             {/* Dispatch & Team Info */}
             {Boolean(selectedCase.dispatch || selectedCase.assigned_vehicle_number || selectedCase.assigned_agent_name) && (
               <div style={{ background: "#F5F3FF", padding: "14px 16px", borderRadius: "10px", border: "1px solid #DDD6FE" }}>
-                <strong style={{ color: "#7C3AED", fontSize: "14px", display: "block", marginBottom: "8px" }}>
+                <strong style={{ color: "#1E3A8A", fontSize: "14px", display: "block", marginBottom: "8px" }}>
                   <FaTruck size={14} style={{ marginRight: "6px" }} /> Dispatch &amp; Field Team Info
                 </strong>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", fontSize: "13px" }}>
-                  <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Assigned Agent:</span> <strong>{selectedCase.assigned_agent_name || selectedCase.assigned_agent_id || "Unassigned"}</strong></div>
-                  <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Assigned Vehicle:</span> <strong>{selectedCase.assigned_vehicle_number || selectedCase.assigned_vehicle_id || "Unassigned"}</strong></div>
+                  <div><span style={{ color: "#1E3A8A", fontWeight: 600 }}>Assigned Agent:</span> <strong>{selectedCase.assigned_agent_name || selectedCase.assigned_agent_id || "Unassigned"}</strong></div>
+                  <div><span style={{ color: "#1E3A8A", fontWeight: 600 }}>Assigned Vehicle:</span> <strong>{selectedCase.assigned_vehicle_number || selectedCase.assigned_vehicle_id || "Unassigned"}</strong></div>
                   {Boolean((selectedCase.dispatch as any)?.dispatched_at) && (
-                    <div><span style={{ color: "#6B21A8", fontWeight: 600 }}>Dispatched At:</span> <strong>{formatDateTime(String((selectedCase.dispatch as any)?.dispatched_at))}</strong></div>
+                    <div><span style={{ color: "#1E3A8A", fontWeight: 600 }}>Dispatched At:</span> <strong>{formatDateTime(String((selectedCase.dispatch as any)?.dispatched_at))}</strong></div>
                   )}
                 </div>
               </div>
@@ -1092,7 +1092,7 @@ const RescueCentreAdminDashboard = () => {
                 <strong style={{ display: "block", marginBottom: "6px", fontSize: "13px" }}>Photos / Media Evidence:</strong>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                   {selectedCase.media_urls.map((u: string, i: number) => (
-                    <a key={i} href={u} target="_blank" rel="noreferrer" style={{ padding: "6px 12px", background: "#EFF6FF", color: "#2563EB", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "12px", fontWeight: 700, textDecoration: "none" }}>
+                    <a key={i} href={u} target="_blank" rel="noreferrer" style={{ padding: "6px 12px", background: "#EFF6FF", color: "#1E3A8A", borderRadius: "6px", border: "1px solid #BFDBFE", fontSize: "12px", fontWeight: 700, textDecoration: "none" }}>
                       Photo Evidence {i + 1} ↗
                     </a>
                   ))}
@@ -1152,7 +1152,7 @@ const RescueCentreAdminDashboard = () => {
               </div>
               <div>
                 <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Status</span>
-                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: selectedAgent.is_active !== false ? "#ECFDF5" : "#FEF2F2", color: selectedAgent.is_active !== false ? "#047857" : "#DC2626", display: "inline-block" }}>
+                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: selectedAgent.is_active !== false ? "#ECFDF5" : "#FEF2F2", color: selectedAgent.is_active !== false ? "#15803D" : "#DC2626", display: "inline-block" }}>
                   {selectedAgent.is_active !== false ? "ACTIVE AGENT" : "INACTIVE"}
                 </span>
               </div>
@@ -1218,7 +1218,7 @@ const RescueCentreAdminDashboard = () => {
               </div>
               <div>
                 <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Operational Status</span>
-                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: "#ECFDF5", color: "#047857", display: "inline-block" }}>
+                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: "#ECFDF5", color: "#15803D", display: "inline-block" }}>
                   {getSafeVal(selectedVehicle.status, "Active")}
                 </span>
               </div>
@@ -1312,13 +1312,13 @@ const RescueCentreAdminDashboard = () => {
               </div>
               <div>
                 <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Intake Status</span>
-                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: "#EFF6FF", color: "#1D4ED8", display: "inline-block", textTransform: "uppercase" }}>
+                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: "#EFF6FF", color: "#1E3A8A", display: "inline-block", textTransform: "uppercase" }}>
                   {selectedIntake.intake_status}
                 </span>
               </div>
               <div>
                 <span style={{ color: "#64748B", fontSize: "12px", display: "block", fontWeight: 600 }}>Current Care Status</span>
-                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: "#ECFDF5", color: "#047857", display: "inline-block", textTransform: "uppercase" }}>
+                <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700, background: "#ECFDF5", color: "#15803D", display: "inline-block", textTransform: "uppercase" }}>
                   {selectedIntake.care_status}
                 </span>
               </div>
@@ -1367,7 +1367,7 @@ const RescueCentreAdminDashboard = () => {
                 <div><span style={{ color: "#64748B", display: "block" }}>Issue / Title</span><strong>{selectedGrievance.title || "Operational Complaint"}</strong></div>
                 <div><span style={{ color: "#64748B", display: "block" }}>Reporter</span><strong>{selectedGrievance.reporter_name || "Public Feedback"}</strong></div>
                 <div><span style={{ color: "#64748B", display: "block" }}>Priority</span><strong style={{ textTransform: "uppercase", color: "#DC2626" }}>{selectedGrievance.priority || "Medium"}</strong></div>
-                <div><span style={{ color: "#64748B", display: "block" }}>Status</span><strong style={{ textTransform: "uppercase", color: "#2563EB" }}>{selectedGrievance.status || "Open"}</strong></div>
+                <div><span style={{ color: "#64748B", display: "block" }}>Status</span><strong style={{ textTransform: "uppercase", color: "#1E3A8A" }}>{selectedGrievance.status || "Open"}</strong></div>
               </div>
               {selectedGrievance.description && (
                 <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #E2E8F0", fontSize: "13px", color: "#334155" }}>
@@ -1381,14 +1381,14 @@ const RescueCentreAdminDashboard = () => {
               <button
                 type="button"
                 onClick={() => handleUpdateGrievanceStatusSubmit("in_progress")}
-                style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #2563EB", background: "#EFF6FF", color: "#1D4ED8", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #1E3A8A", background: "#EFF6FF", color: "#1E3A8A", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
               >
                 Mark In Progress
               </button>
               <button
                 type="button"
                 onClick={() => handleUpdateGrievanceStatusSubmit("resolved")}
-                style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #16A34A", background: "#ECFDF5", color: "#047857", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: "1px solid #16A34A", background: "#ECFDF5", color: "#15803D", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
               >
                 Mark Resolved
               </button>
@@ -1458,7 +1458,7 @@ const RescueCentreAdminDashboard = () => {
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
             <button type="button" onClick={() => setIsCentreConfigOpen(false)} style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #CBD5E1", background: "#FFF", fontSize: "12.5px" }}>Cancel</button>
-            <button type="submit" style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#2563EB", color: "#FFF", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" }}>Save Config</button>
+            <button type="submit" style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#1E3A8A", color: "#FFF", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" }}>Save Config</button>
           </div>
         </form>
       </Modal>

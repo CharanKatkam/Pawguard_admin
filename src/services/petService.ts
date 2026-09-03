@@ -476,9 +476,9 @@ export const petService = {
           err?.response?.data?.message ||
           err?.message;
         if (status === 404) {
-          throw new Error(`Dog Safety Tag token "${clean}" was not found in the PawGuard database.`);
+          throw new Error(`Dog Safety Tag token "${clean}" was not found in the PawGuard database.`, { cause: err });
         }
-        throw new Error(apiMsg || `Failed to resolve Dog Safety Tag token "${clean}".`);
+        throw new Error(apiMsg || `Failed to resolve Dog Safety Tag token "${clean}".`, { cause: err });
       }
     }
 
@@ -507,9 +507,9 @@ export const petService = {
           err?.response?.data?.message ||
           err?.message;
         if (status === 404) {
-          throw new Error(`Companion Pet Safety Tag token "${clean}" was not found in the PawGuard database.`);
+          throw new Error(`Companion Pet Safety Tag token "${clean}" was not found in the PawGuard database.`, { cause: err });
         }
-        throw new Error(apiMsg || `Failed to scan Companion Pet Safety Tag token "${clean}".`);
+        throw new Error(apiMsg || `Failed to scan Companion Pet Safety Tag token "${clean}".`, { cause: err });
       }
     }
 
@@ -539,7 +539,7 @@ export const petService = {
           dogErr?.response?.data?.detail ||
           dogErr?.response?.data?.message ||
           dogErr?.message;
-        throw new Error(apiMsg || `Failed to resolve Safety Tag token "${clean}".`);
+        throw new Error(apiMsg || `Failed to resolve Safety Tag token "${clean}".`, { cause: dogErr });
       }
     }
 
@@ -567,7 +567,7 @@ export const petService = {
         compErr?.response?.data?.detail ||
         compErr?.response?.data?.message ||
         compErr?.message;
-      throw new Error(apiMsg || `Safety Tag token "${clean}" could not be verified or is invalid.`);
+      throw new Error(apiMsg || `Safety Tag token "${clean}" could not be verified or is invalid.`, { cause: compErr });
     }
 
     throw new Error(`Safety Tag token "${clean}" could not be verified or is invalid.`);

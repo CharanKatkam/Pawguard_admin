@@ -305,7 +305,7 @@ const Reports = () => {
           setFosterProfiles(rawFosters);
 
           const activeProfiles = rawFosters.filter((f: any) => Number(f.active_count || 0) > 0);
-          let placementList: any[] = [];
+          const placementList: any[] = [];
           if (activeProfiles.length > 0) {
             const pResults = await Promise.allSettled(
               activeProfiles.map((f: any) => fosterService.getProfilePlacements(f.id))

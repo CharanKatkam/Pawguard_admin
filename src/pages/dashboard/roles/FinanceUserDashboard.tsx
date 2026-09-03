@@ -162,11 +162,11 @@ const FinanceUserDashboard = () => {
   };
 
   const stats = [
-    { title: "Total Donations / Revenue", value: loading ? "..." : formatCurrency(totalDonationsSum), trend: "Verified Income", color: "#10B981", icon: <FaCoins />, onClick: () => navigate("/finance?tab=donations") },
-    { title: "Sponsorship Revenue", value: loading ? "..." : formatCurrency(sponsorshipRevenueSum), trend: "Dog Sponsorships", color: "#2563EB", icon: <FaHandHoldingHeart />, onClick: () => navigate("/finance?tab=sponsorships") },
+    { title: "Total Donations / Revenue", value: loading ? "..." : formatCurrency(totalDonationsSum), trend: "Verified Income", color: "#16A34A", icon: <FaCoins />, onClick: () => navigate("/finance?tab=donations") },
+    { title: "Sponsorship Revenue", value: loading ? "..." : formatCurrency(sponsorshipRevenueSum), trend: "Dog Sponsorships", color: "#1E3A8A", icon: <FaHandHoldingHeart />, onClick: () => navigate("/finance?tab=sponsorships") },
     { title: "Refunded Payments", value: loading ? "..." : formatCurrency(totalRefundsSum), trend: "Refunded Records", color: "#F59E0B", icon: <FaUndo />, onClick: () => navigate("/finance?tab=donations") },
-    { title: "Net Revenue Reserve", value: loading ? "..." : formatCurrency(netBalanceVal), trend: "Net Balance", color: "#6366F1", icon: <FaChartLine />, onClick: () => navigate("/finance?tab=donations") },
-    { title: "Registered Donors", value: loading ? "..." : String(donorCountVal), trend: "Active Contributors", color: "#0284C7", icon: <FaUsers />, onClick: () => navigate("/finance?tab=donations") },
+    { title: "Net Revenue Reserve", value: loading ? "..." : formatCurrency(netBalanceVal), trend: "Net Balance", color: "#1E3A8A", icon: <FaChartLine />, onClick: () => navigate("/finance?tab=donations") },
+    { title: "Registered Donors", value: loading ? "..." : String(donorCountVal), trend: "Active Contributors", color: "#1E3A8A", icon: <FaUsers />, onClick: () => navigate("/finance?tab=donations") },
   ];
 
   const columns: Column<any>[] = [
@@ -184,12 +184,12 @@ const FinanceUserDashboard = () => {
     {
       key: "type",
       header: "Donation Type",
-      render: (v: string) => <span style={{ fontWeight: 700, color: "#2563EB", textTransform: "capitalize" }}>{v || "one_time"}</span>,
+      render: (v: string) => <span style={{ fontWeight: 700, color: "#1E3A8A", textTransform: "capitalize" }}>{v || "one_time"}</span>,
     },
     {
       key: "amount",
       header: "Amount (₹)",
-      render: (v: unknown) => <strong style={{ color: "#047857" }}>{formatCurrency(v)}</strong>,
+      render: (v: unknown) => <strong style={{ color: "#15803D" }}>{formatCurrency(v)}</strong>,
     },
     {
       key: "date",
@@ -201,7 +201,7 @@ const FinanceUserDashboard = () => {
       header: "Status",
       render: (v: string) => {
         const s = String(v || "completed").toLowerCase();
-        const color = isCompletedDonationStatus(s) ? "#047857" : isRefundedDonationStatus(s) ? "#7C3AED" : s === "pending" ? "#D97706" : "#DC2626";
+        const color = isCompletedDonationStatus(s) ? "#15803D" : isRefundedDonationStatus(s) ? "#1E3A8A" : s === "pending" ? "#D97706" : "#DC2626";
         const bg = isCompletedDonationStatus(s) ? "#ECFDF5" : isRefundedDonationStatus(s) ? "#F3E8FF" : s === "pending" ? "#FEF3C7" : "#FEE2E2";
         return (
           <span style={{ fontSize: "11px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: bg, color, textTransform: "uppercase" }}>
@@ -230,9 +230,9 @@ const FinanceUserDashboard = () => {
 
       {/* Quick Action Navigation */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "24px" }}>
-        <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log manual donation" color="#10B981" onClick={() => navigate("/finance?action=donation")} />
-        <QuickActionCard icon={<FaHandHoldingHeart />} title="New Sponsorship" subtitle="Register dog sponsor" color="#2563EB" onClick={() => navigate("/finance?action=sponsorship")} />
-        <QuickActionCard icon={<FaReceipt />} title="Financial Audit Reports" subtitle="Export balance sheets &amp; PDFs" color="#6366F1" onClick={() => navigate("/reports")} />
+        <QuickActionCard icon={<FaPlus />} title="Record Donation" subtitle="Log manual donation" color="#16A34A" onClick={() => navigate("/finance?action=donation")} />
+        <QuickActionCard icon={<FaHandHoldingHeart />} title="New Sponsorship" subtitle="Register dog sponsor" color="#1E3A8A" onClick={() => navigate("/finance?action=sponsorship")} />
+        <QuickActionCard icon={<FaReceipt />} title="Financial Audit Reports" subtitle="Export balance sheets &amp; PDFs" color="#1E3A8A" onClick={() => navigate("/reports")} />
       </div>
 
       {/* Financial Stat Cards */}
@@ -248,7 +248,7 @@ const FinanceUserDashboard = () => {
           <h3 style={{ margin: 0, color: "#0F172A", fontSize: "18px", fontWeight: 800 }}>
             Real-Time Verified Donation Ledger ({donations.length})
           </h3>
-          {loading && <span style={{ fontSize: "12px", color: "#2563EB", fontWeight: 600 }}>Syncing ledger...</span>}
+          {loading && <span style={{ fontSize: "12px", color: "#1E3A8A", fontWeight: 600 }}>Syncing ledger...</span>}
         </div>
 
         <DataTable
@@ -265,7 +265,7 @@ const FinanceUserDashboard = () => {
                 borderRadius: "6px",
                 border: "1px solid #CBD5E1",
                 background: "#FFFFFF",
-                color: "#2563EB",
+                color: "#1E3A8A",
                 fontSize: "12px",
                 fontWeight: 700,
                 cursor: "pointer",

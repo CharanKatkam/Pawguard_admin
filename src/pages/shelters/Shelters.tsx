@@ -796,7 +796,7 @@ export const Shelters = () => {
               onClick={() => setIsRegisterModalOpen(true)}
               style={{
                 padding: "8px 14px",
-                background: "#2563EB",
+                background: "#1E3A8A",
                 color: "#FFFFFF",
                 border: "none",
                 borderRadius: "6px",
@@ -966,7 +966,7 @@ export const Shelters = () => {
           <div style={{ fontSize: "11px", fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.03em" }}>
             Occupied Kennels
           </div>
-          <div style={{ fontSize: "22px", fontWeight: 700, color: "#2563EB", marginTop: "4px" }}>
+          <div style={{ fontSize: "22px", fontWeight: 700, color: "#1E3A8A", marginTop: "4px" }}>
             {computedStats.occupiedCount}
           </div>
         </div>
